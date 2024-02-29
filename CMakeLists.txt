@@ -28,7 +28,7 @@ target_include_directories(cascadio PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/OCCT/include/opencascade>)
 
 # Set path to executable directories
-target_link_directories(cascadio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/OCCT/include/opencascade>)/OCCT/lin64/gcc/lib")
+target_link_directories(cascadio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/OCCT/lin64/gcc/lib")
 
 # Add source files to compile to the project
 # set(SOURCE_FILES src/main.cpp)

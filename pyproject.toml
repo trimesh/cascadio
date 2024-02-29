@@ -16,8 +16,3 @@ test = ["pytest>=6.0"]
 [project.scripts]
 something = "other:callme"
 
-[project.gui-scripts]
-guithing = "a.b:c"
-
-[project.entry-points."one.two"]
-three = "four"
