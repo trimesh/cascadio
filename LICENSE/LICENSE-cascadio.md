@@ -1,4 +1,7 @@
-MIT License
+- These bindings (`cascadio`) are released under the MIT license.
+- OpenCASCADE is released under the LGPL (`LICENSE-opencascade.md`). 
+
+The MIT License (MIT)
 
 Copyright (c) 2024 Michael Dawson-Haggerty
 
