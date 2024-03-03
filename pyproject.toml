@@ -19,9 +19,9 @@ before-all = [
 'yum install -y freetype-devel fontconfig-devel',
 'cd upstream/OCCT',
 'git clean -xdf',
-'cmake -D USE_RAPIDJSON:BOOL="ON" -D 3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include/rapidjson" .',
+'cmake -D CMAKE_BUILD_TYPE="Release" -D USE_RAPIDJSON:BOOL="ON" -D 3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include/rapidjson" .',
 'make -j8'
 ]
 
 # point auditwheel at the OCCT libraries
-repair-wheel-command = "LD_LIBRARY_PATH=/project/OCCT/lin64/gcc/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
