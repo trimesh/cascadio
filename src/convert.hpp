@@ -11,10 +11,8 @@
 #include <RWGltf_CafWriter.hxx>
 
 /// @name Defines
-/// @{
 const Standard_Real DefaultLinDeflection = 0.1;
 const Standard_Real DefaultAngDeflection = 0.5;
-/// @}
 
 /// @name BRepMesh_IncrementalMesh parameters
 /// https://www.opencascade.com/doc/occt-7.1.0/overview/html/occt_user_guides__modeling_algos.html#occt_modalg_11_2
@@ -26,15 +24,6 @@ static Standard_Real g_theAngDeflection = DefaultAngDeflection;
 /// @name Other parameters
 /// @{
 static int g_verbose_level = 0;
-/// @}
-
-/// @name Command line arguments
-/// @{
-static const char *kHelp = "-h";
-static const char *kHelpLong = "--help";
-static const char *kLinearDeflection = "--linear";
-static const char *kAngularDeflection = "--angular";
-static const char *kVerbose = "-v";
 /// @}
 
 /// @name Error messages

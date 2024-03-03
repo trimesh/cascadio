@@ -1,0 +1,43 @@
+name: Build And Release Wheels
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.16.5
+        with:
+          output-dir: wheelhouse
+
+      - uses: actions/upload-artifact@v2
+        with:
+          path: ./wheelhouse/*.whl
+
+  upload_all:
+    name: Upload To PyPi
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/setup-python@v4
+    - uses: actions/download-artifact@v2
+      with:
+        name: artifact
+        path: dist
+    - uses: pypa/gh-action-pypi-publish@v1.4.2
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_TOKEN }}

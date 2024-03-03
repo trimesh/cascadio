@@ -1,0 +1,2 @@
+- These bindings (`cascadio`) are released under the MIT license.
+- OpenCASCADE is released under the LGPL (`LICENSE-opencascade.md`).
