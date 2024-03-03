@@ -17,8 +17,8 @@ const Standard_Real DefaultAngDeflection = 0.5;
 /// @name BRepMesh_IncrementalMesh parameters
 /// https://www.opencascade.com/doc/occt-7.1.0/overview/html/occt_user_guides__modeling_algos.html#occt_modalg_11_2
 /// @{
-static Standard_Real g_theLinDeflection = DefaultLinDeflection;
-static Standard_Real g_theAngDeflection = DefaultAngDeflection;
+// static Standard_Real g_theLinDeflection = DefaultLinDeflection;
+// static Standard_Real g_theAngDeflection = DefaultAngDeflection;
 /// @}
 
 /// @name Other parameters
@@ -33,7 +33,8 @@ static const char *errorInvalidOutExtension =
 /// @}
 
 /// Transcode STEP to glTF
-static int step_to_glb(char *in, char *out) {
+static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
+                       Standard_Real tol_angle) {
   Standard_Boolean gltfIsBinary = Standard_False;
 
   // glTF format depends on output file extension
@@ -61,6 +62,12 @@ static int step_to_glb(char *in, char *out) {
 
   // Loading STEP file
   STEPCAFControl_Reader stepReader;
+
+  // TODO : do this in-memory instead of using a tempfile
+  // std::istringstream ss;
+  // ss.rdbuf()->pubsetbuf(buf,len);
+  // stepReader.ReadStream()
+
   if (IFSelect_RetDone != stepReader.ReadFile((Standard_CString)in)) {
     std::cerr << "Error: Failed to read STEP file \"" << in << "\" !"
               << std::endl;
@@ -83,8 +90,8 @@ static int step_to_glb(char *in, char *out) {
     return 1;
   }
 
-  std::cout << "Meshing shapes (linear " << g_theLinDeflection << ", angular "
-            << g_theAngDeflection << ") ..." << std::endl;
+  std::cout << "Meshing shapes (linear " << tol_linear << ", angular "
+            << tol_angle << ") ..." << std::endl;
 
   XSControl_Reader reader = stepReader.Reader();
 
@@ -95,8 +102,8 @@ static int step_to_glb(char *in, char *out) {
       continue;
     }
 
-    BRepMesh_IncrementalMesh Mesh(shape, g_theLinDeflection, Standard_False,
-                                  g_theAngDeflection, Standard_True);
+    BRepMesh_IncrementalMesh Mesh(shape, tol_linear, Standard_False, tol_angle,
+                                  Standard_True);
     Mesh.Perform();
   }
 
