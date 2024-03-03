@@ -13,17 +13,13 @@ requires-python = ">=3.7"
 [project.optional-dependencies]
 test = ["pytest>=6.0"]
 
-[tool.cibuildwheel]
-# only build for CPython x86_64
-build = "cp*x86_64"
-
 [tool.cibuildwheel.linux]
 # build OCCT on linux from source on the manylinux image
 before-all = [
-'yum install -y rapidjson-devel freetype-devel fontconfig-devel',
-'cd OCCT',
+'yum install -y freetype-devel fontconfig-devel',
+'cd upstream/OCCT',
 'git clean -xdf',
-'cmake -D USE_RAPIDJSON:BOOL="ON" .',
+'cmake -D USE_RAPIDJSON:BOOL="ON" -D 3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include/rapidjson" .',
 'make -j8'
 ]
 

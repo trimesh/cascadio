@@ -1,3 +1,6 @@
 [submodule "OCCT"]
-	path = OCCT
+	path = upstream/OCCT
 	url = https://github.com/Open-Cascade-SAS/OCCT.git
+[submodule "upstream/rapidjson"]
+	path = upstream/rapidjson
+	url = https://github.com/Tencent/rapidjson.git
