@@ -13,6 +13,10 @@ requires-python = ">=3.7"
 [project.optional-dependencies]
 test = ["pytest>=6.0"]
 
+[tool.cibuildwheel]
+# only build for CPython x86_64
+build = "cp*x86_64"
+
 [tool.cibuildwheel.linux]
 # build OCCT on linux from source on the manylinux image
 before-all = [

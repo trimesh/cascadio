@@ -9,7 +9,7 @@ This is *not* intended to be a full binding of OpenCASCADE like [OCP](https://gi
 
 ### Local Build
 
-Developed on Linux which should run locally with:
+Developed on Linux which should build locally with:
 ```
 cibuildwheel --platform linux
 ```
