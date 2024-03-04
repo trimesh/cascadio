@@ -31,4 +31,4 @@ before-test = "pip install pytest"
 test-command = "pytest {project}/tests"
 
 # point auditwheel at the OCCT libraries
-repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
