@@ -22,7 +22,9 @@ before-all = [
 'cd upstream/OCCT',
 'git clean -xdf',
 'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" .',
-'ninja'
+'ninja',
+'mv lin64/gcc/lib . || true',
+'mv lin32/gcc/lib . || true',
 ]
 
 before-test = "pip install pytest"
