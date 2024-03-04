@@ -9,11 +9,37 @@ build-backend = "scikit_build_core.build"
 name = "cascadio"
 version = "0.0.1"
 requires-python = ">=3.7"
+authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
+license = {file = "LICENSE/LICENSE-cascadio.md"}
+description = "Convert STEP files to GLB using OpenCASCADE"
+keywords = ["graphics", "STEP", "GLTF"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Natural Language :: English",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling"
+]
+urls = {Homepage = "https://github.com/trimesh/cascadio"}
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
 
 [project.optional-dependencies]
-test = ["pytest"]
+tests = ["pytest", "trimesh"]
 
 [tool.cibuildwheel]
+# `yum` would need to be replaced in the `before-all`
+# script before the musl linux can build OpenCASCADE
 skip = "*musl*"
 
 [tool.cibuildwheel.linux]
@@ -29,7 +55,7 @@ before-all = [
 'mv lin32/gcc/lib . || true',
 ]
 
-before-test = "pip install pytest"
+before-test = "pip install {project}[tests]"
 test-command = "pytest {project}/tests"
 
 # point auditwheel at the OCCT libraries
