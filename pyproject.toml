@@ -18,7 +18,7 @@ test = ["pytest"]
 # build OCCT on linux from source on the manylinux image
 before-all = [
 'pip install ninja',
-'yum install freetype-devel fontconfig-devel',
+'yum install -y freetype-devel fontconfig-devel',
 'cd upstream/OCCT',
 'git clean -xdf',
 'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" .',
