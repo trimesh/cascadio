@@ -13,6 +13,8 @@ requires-python = ">=3.7"
 [project.optional-dependencies]
 test = ["pytest"]
 
+[tool.cibuildwheel]
+skip = "*musl*"
 
 [tool.cibuildwheel.linux]
 # build OCCT on linux from source on the manylinux image
