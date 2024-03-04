@@ -30,10 +30,9 @@ target_include_directories(cascadio PUBLIC
 # Set path to executable directories
 target_link_directories(cascadio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lib")
 
-# Add OpenCascade libraries
+# Add just the OpenCASCADE libraries we need
 target_link_libraries(cascadio PRIVATE -Wl,--no-as-needed
-  -lTKGeomBase -lTKXCAF -lTKTopTest -lTKXSDRAWGLTF -lTKDECascade -lTKGeomAlgo -lTKDEIGES -lTKDE -lTKLCAF -lTKXSDRAW -lTKernel -lTKShHealing -lTKService -lTKV3d -lTKXSDRAWVRML -lTKXSDRAWDE -lTKBinL -lTKXmlL -lTKQADraw -lTKOffset -lTKG2d -lTKStdL -lTKXMesh -lTKExpress -lTKXDEDRAW -lTKCDF -lTKDEGLTF -lTKDCAF -lTKRWMesh -lTKFillet -lTKDEVRML -lTKBool -lTKG3d -lTKBRep -lTKBO -lTKXSBase -lTKDraw -lTKXmlXCAF -lTKPrim -lTKMeshVS -lTKHLR -lTKMesh -lTKStd -lTKTopAlgo -lTKVCAF -lTKXSDRAWSTEP -lTKMath -lTKBinXCAF -lTKFeat -lTKDESTEP -lTKBin -lTKXml -lTKCAF -lTKXSDRAWIGES
- )
+ -lTKDEGLTF -lTKXSDRAWSTEP)
 
 install(TARGETS cascadio LIBRARY DESTINATION .)
 

@@ -12,8 +12,6 @@ This is *not* intended to be a full binding of OpenCASCADE like [OCP](https://gi
 Developed on Linux which should build locally with docker:
 
 ```
-# keeping the containers means the OCCT build is cached
-# which makes debugging a lot easier
-# only building one target 
-CIBW_DEBUG_KEEP_CONTAINER=1 CIBW_BUILD="cp312-manylinux-x86_64" cibuildwheel --platform linux
+# this doesn't cache the OCCT build unfortunately
+CIBW_BUILD="cp312-manylinux_x86_64" cibuildwheel --platform linux
 ```

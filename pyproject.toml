@@ -55,7 +55,7 @@ before-all = [
 'mv lin32/gcc/lib . || true',
 ]
 
-before-test = "pip install {project}[tests]"
+test-extras = "tests"
 test-command = "pytest {project}/tests"
 
 # point auditwheel at the OCCT libraries
