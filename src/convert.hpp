@@ -10,27 +10,8 @@
 // GLTF Write methods
 #include <RWGltf_CafWriter.hxx>
 
-/// @name Defines
-const Standard_Real DefaultLinDeflection = 0.1;
-const Standard_Real DefaultAngDeflection = 0.5;
-
-/// @name BRepMesh_IncrementalMesh parameters
-/// https://www.opencascade.com/doc/occt-7.1.0/overview/html/occt_user_guides__modeling_algos.html#occt_modalg_11_2
-/// @{
-// static Standard_Real g_theLinDeflection = DefaultLinDeflection;
-// static Standard_Real g_theAngDeflection = DefaultAngDeflection;
-/// @}
-
-/// @name Other parameters
-/// @{
-static int g_verbose_level = 0;
-/// @}
-
-/// @name Error messages
-/// @{
 static const char *errorInvalidOutExtension =
     "output filename shall have .glTF or .glb extension.";
-/// @}
 
 /// Transcode STEP to glTF
 static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
@@ -115,8 +96,8 @@ static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
   }
 
   RWGltf_CafWriter cafWriter(out, gltfIsBinary);
-  // SetTransformationFormat (RWGltf_WriterTrsfFormat theFormat)
-  // https://dev.opencascade.org/doc/refman/html/_r_w_gltf___writer_trsf_format_8hxx.html#a24e114d176d2b2254deac8f1b3e95bf7
+  // TODO : set parameters here like "merge faces into one primitive"
+  // and "use MAT4 transforms, always
 
   Message_ProgressRange progress;
 

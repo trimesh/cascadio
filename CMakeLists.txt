@@ -31,6 +31,8 @@ target_include_directories(cascadio PUBLIC
 target_link_directories(cascadio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lib")
 
 # Add just the OpenCASCADE libraries we need
+# note that auditwheel will pull the other
+# required libraries into the wheel
 target_link_libraries(cascadio PRIVATE -Wl,--no-as-needed
  -lTKDEGLTF -lTKXSDRAWSTEP)
 
