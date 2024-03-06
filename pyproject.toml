@@ -14,8 +14,6 @@ license = {file = "LICENSE/LICENSE-cascadio.md"}
 description = "Convert STEP files to GLB using OpenCASCADE"
 keywords = ["graphics", "STEP", "GLTF"]
 classifiers = [
-    "Development Status :: 5 - Alpha",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
