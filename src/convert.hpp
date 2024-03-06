@@ -17,7 +17,6 @@ static const char *errorInvalidOutExtension =
 static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
                        Standard_Real tol_angle) {
   Standard_Boolean gltfIsBinary = Standard_False;
-
   // glTF format depends on output file extension
   const char *out_ext = strrchr(out, '.');
   if (!out_ext) {
@@ -54,7 +53,6 @@ static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
   stepReader.SetColorMode(true);
   stepReader.SetNameMode(true);
   stepReader.SetLayerMode(true);
-  }
 
   // Transferring to XCAF
   if (!stepReader.Transfer(doc)) {
