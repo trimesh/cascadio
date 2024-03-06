@@ -37,10 +37,6 @@ static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
   app->NewDocument("MDTV-XCAF", doc);
 
-  if (g_verbose_level >= 1) {
-    std::cout << "Loading \"" << in << "\" ..." << std::endl;
-  }
-
   // Loading STEP file
   STEPCAFControl_Reader stepReader;
 
@@ -58,9 +54,6 @@ static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
   stepReader.SetColorMode(true);
   stepReader.SetNameMode(true);
   stepReader.SetLayerMode(true);
-
-  if (g_verbose_level >= 1) {
-    std::cout << "Parsing STEP ..." << std::endl;
   }
 
   // Transferring to XCAF
@@ -89,11 +82,6 @@ static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
   }
 
   TColStd_IndexedDataMapOfStringString theFileInfo;
-
-  if (g_verbose_level >= 1) {
-    std::cout << "Saving to " << (gltfIsBinary ? "binary " : "") << "glTF ..."
-              << std::endl;
-  }
 
   RWGltf_CafWriter cafWriter(out, gltfIsBinary);
   // TODO : set parameters here like "merge faces into one primitive"
