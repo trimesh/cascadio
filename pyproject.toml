@@ -1,13 +1,11 @@
 [build-system]
-requires = [
-    "scikit_build_core[pyproject]",
-    "pybind11",
-]
+requires = ["scikit_build_core[pyproject]",
+            "pybind11"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "cascadio"
-version = "0.0.5rc0"
+version = "0.0.6rc0"
 requires-python = ">=3.7"
 authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
 license = {file = "LICENSE/LICENSE-cascadio.md"}
@@ -40,11 +38,12 @@ tests = ["pytest", "trimesh"]
 # script before the musl linux can build OpenCASCADE
 skip = "*musl*"
 
-[tool.cibuildwheel.linux]
-# build OCCT on linux from source on the manylinux image
+# pypy compiles numpy for every test
+test-skip = "pp*"
+
+# build OCCT using only platform-independant commands
 before-all = [
 'pip install ninja',
-'yum install -y freetype-devel fontconfig-devel',
 'cd upstream/OCCT',
 'git clean -xdf',
 'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" .', 
@@ -54,18 +53,10 @@ before-all = [
 test-extras = "tests"
 test-command = "pytest {project}/tests"
 
+[tool.cibuildwheel.linux]
 # point auditwheel at the OCCT libraries
 repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib:/project/upstream/OCCT/lin32/gcc/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
-# build OCCT on linux from source on the manylinux image
-before-all = [
-'pip install ninja',
-'cd upstream/OCCT',
-'git clean -xdf',
-'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" .', 
-'ninja',
-]
-
 before-build = "pip install delvewheel"
-repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+repair-wheel-command = "delvewheel repair --add-path /project/upstream/OCCT/win64/vc14/bin -w {dest_dir} {wheel}"
