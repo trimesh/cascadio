@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - release-candidate
 
 jobs:
   build_wheels:
@@ -11,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v3

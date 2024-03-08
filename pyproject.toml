@@ -47,7 +47,7 @@ before-all = [
 'yum install -y freetype-devel fontconfig-devel',
 'cd upstream/OCCT',
 'git clean -xdf',
-'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" .', 
+'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" .', 
 'ninja',
 'mv lin64/gcc/lib . || true',
 'mv lin32/gcc/lib . || true',
@@ -58,3 +58,17 @@ test-command = "pytest {project}/tests"
 
 # point auditwheel at the OCCT libraries
 repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.windows]
+# build OCCT on linux from source on the manylinux image
+before-all = [
+'pip install ninja',
+'cd upstream/OCCT',
+'git clean -xdf',
+'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" .', 
+'ninja',
+'move win64/vc14/bin/* ../../'
+]
+
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
