@@ -55,7 +55,7 @@ test-extras = "tests"
 test-command = "pytest {project}/tests"
 
 # point auditwheel at the OCCT libraries
-repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib:/project/upstream/OCCT/lin32/gcc/lib auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
 # build OCCT on linux from source on the manylinux image
