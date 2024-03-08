@@ -34,7 +34,7 @@ target_link_directories(cascadio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OC
 # note that auditwheel will pull the other
 # required libraries into the wheel
 target_link_libraries(cascadio PRIVATE -Wl,--no-as-needed
- -lTKDEGLTF -lTKXSDRAWSTEP)
+ -lTKDEGLTF -lTKDESTEP)
 
 install(TARGETS cascadio LIBRARY DESTINATION .)
 
