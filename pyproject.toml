@@ -59,4 +59,4 @@ repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib:/pr
 
 [tool.cibuildwheel.windows]
 before-build = "pip install delvewheel"
-repair-wheel-command = "delvewheel repair --add-path /project/upstream/OCCT/win64/gcc/bin --add-path /project/upstream/OCCT/win64/vc14/bin -w {dest_dir} {wheel}"
+repair-wheel-command = "delvewheel repair -add-path upstream/OCCT/win64/vc14/bin -w {dest_dir} {wheel}"
