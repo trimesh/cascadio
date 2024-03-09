@@ -7,13 +7,13 @@ cwd = os.path.abspath(os.path.dirname(__file__))
 
 
 def test_convert():
-    outfile = tempfile.NamedTemporaryFile(suffix=".glb")
     infile = os.path.join(cwd, "models", "featuretype.STEP")
 
-    # do the conversion
-    cascadio.step_to_glb(infile, outfile.name, 0.1, 0.5)
-
-    scene = trimesh.load(outfile.name, merge_primitives=True)
+    with tempfile.TemporaryDirectory() as D:
+        outfile = os.path.join(D, "outfile.glb")
+        # do the conversion
+        cascadio.step_to_glb(infile, outfile, 0.1, 0.5)
+        scene = trimesh.load(outfile, merge_primitives=True)
 
     assert len(scene.geometry) == 1
 

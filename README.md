@@ -16,7 +16,7 @@ The primary goal of this project is building wheels so vanilla `pip` can be used
 pip install cascadio
 ```
 
-Currently this is building for non-MUSL flavors of `manylinux`. You can check [PyPi](https://pypi.org/project/cascadio/#files) for current platforms.
+Currently this is building for non-MUSL flavors of `manylinux`, Windows x64, and MacOS x64+ARM. You can check [PyPi](https://pypi.org/project/cascadio/#files) for current platforms.
 
 
 ### Motivation
@@ -56,5 +56,4 @@ Pull requests welcome!
   - Currently using file names because it's easier. 
 - Support IGES 
   - Investigate using OpenCASCADE "Advanced Data Exchange" for Parasolid `.x_b`/`.x_t` and JT `.jt` support.
-- Build wheels for Windows and MacOS.
 
