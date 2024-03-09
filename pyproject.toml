@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cascadio"
-version = "0.0.6rc0"
+version = "0.0.6rc1"
 requires-python = ">=3.7"
 authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
 license = {file = "LICENSE/LICENSE-cascadio.md"}
@@ -46,7 +46,7 @@ before-all = [
 'pip install ninja',
 'cd upstream/OCCT',
 'git clean -xdf',
-'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" .', 
+'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" -DBUILD_MODULE_Visualization:BOOL="OFF" .', 
 'ninja',
 ]
 
@@ -60,3 +60,6 @@ repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib:/pr
 [tool.cibuildwheel.windows]
 before-build = "pip install delvewheel"
 repair-wheel-command = "delvewheel repair --add-path upstream/OCCT/win64/vc14/bin -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+repair-wheel-command = "DYLD_LIBRARY_PATH=upstream/OCCT/mac64/clang/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
