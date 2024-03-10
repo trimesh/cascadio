@@ -39,7 +39,7 @@ tests = ["pytest", "trimesh"]
 skip = "*musl* *win32*"
 
 # pypy compiles numpy for every test
-test-skip = "pp*"
+test-skip = "pp* *i686"
 
 # build OCCT using only platform-independant commands
 before-all = [

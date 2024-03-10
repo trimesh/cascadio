@@ -40,7 +40,7 @@ target_link_directories(
 
 # Add all possible libraries we might need
 target_link_libraries(cascadio PRIVATE
-TKGeomBase TKBinL TKFeat TKBO TKDESTL TKDE TKV3d TKOffset TKVCAF TKStdL TKG3d TKernel TKCDF TKRWMesh TKXmlXCAF TKHLR TKTopAlgo TKDECascade TKBinXCAF TKXml TKMath TKBool TKBRep TKBin TKFillet TKG2d TKXMesh TKXCAF TKDEIGES TKGeomAlgo TKDEVRML TKMesh TKStd TKXSBase TKShHealing TKPrim TKService TKXmlL TKExpress TKDESTEP TKLCAF TKCAF TKDEGLTF
+TKGeomBase TKBinL TKFeat TKBO TKDESTL TKDE TKV3d TKOffset TKStdL TKG3d TKernel TKCDF TKRWMesh TKXmlXCAF TKHLR TKTopAlgo TKDECascade TKBinXCAF TKXml TKMath TKBool TKBRep TKBin TKFillet TKG2d TKXMesh TKDEIGES TKGeomAlgo TKDEVRML TKMesh TKStd TKXSBase TKShHealing TKPrim TKService TKXmlL TKExpress TKDESTEP TKLCAF TKCAF TKDEGLTF
 )
 
 
