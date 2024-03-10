@@ -40,8 +40,7 @@ target_link_directories(
 
 # Add all possible libraries we might need
 target_link_libraries(cascadio PRIVATE
-TKGeomBase TKBinL TKFeat TKBO TKDESTL TKDE TKV3d TKOffset TKStdL TKG3d TKernel TKCDF TKRWMesh TKXmlXCAF TKHLR TKTopAlgo TKDECascade TKBinXCAF TKXml TKMath TKBool TKBRep TKBin TKFillet TKG2d TKXMesh TKDEIGES TKGeomAlgo TKDEVRML TKMesh TKStd TKXSBase TKShHealing TKPrim TKService TKXmlL TKExpress TKDESTEP TKLCAF TKCAF TKDEGLTF
+TKCAF TKPrim TKShHealing TKDEPLY TKRWMesh TKBinL TKBRep TKVCAF TKDESTL TKCDF TKTObj TKMath TKHLR TKBinTObj TKFillet TKOffset TKStd TKV3d TKFeat TKBO TKGeomBase TKernel TKStdL TKG3d TKBin TKService TKDE TKExpress TKGeomAlgo TKDEIGES TKDEGLTF TKLCAF TKDEVRML TKXmlL TKXCAF TKDECascade TKXSBase TKDESTEP TKG2d TKBool TKTopAlgo TKXml TKXmlXCAF TKDEOBJ TKXMesh TKXmlTObj TKBinXCAF TKMesh
 )
-
 
 install(TARGETS cascadio LIBRARY DESTINATION .)
