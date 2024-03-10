@@ -46,7 +46,8 @@ before-all = [
 'pip install ninja',
 'cd upstream/OCCT',
 'git clean -xdf',
-'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" -DBUILD_MODULE_Visualization:BOOL="OFF" -DBUILD_MODULE_ApplicationFramework:BOOL="OFF" .', 
+'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" -DBUILD_MODULE_Visualization:BOOL="OFF" -DBUILD_MODULE_ApplicationFramework:BOOL="OFF" .',
+"python -c \"mod = open('build.ninja').read().replace(' -lGL ', ' ').replace(' -lEGL ', ' '); open('build.ninja', 'w').write(mod)\"",
 'ninja',
 ]
 
