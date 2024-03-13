@@ -2,58 +2,94 @@
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
 #include <iostream>
-// STEP Read methods
+
+// Readers
+#include <IGESCAFControl_Reader.hxx>
 #include <STEPCAFControl_Reader.hxx>
+
 // Meshing
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <TopoDS_Shape.hxx>
 // GLTF Write methods
 #include <RWGltf_CafWriter.hxx>
 
-static const char *errorInvalidOutExtension =
-    "output filename shall have .glTF or .glb extension.";
+enum FileType {
+  // File type must be specified explicitly
+  UNSPECIFIED = 0,
+  // File is in the STEP format
+  STEP = 1,
+  // File is in the IGES format
+  IGES = 2,
+  // File is in the BREP format.
+  BREP = 3
+};
 
-/// Transcode STEP to glTF
-static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
-                       Standard_Real tol_angle, Standard_Boolean tol_relative,
-                       Standard_Boolean merge_primitives,
-                       Standard_Boolean use_parallel) {
+// Convert boundary representation files to GLB
+static int to_glb(char *in, char *out, FileType file_type,
+                  Standard_Real tol_linear, Standard_Real tol_angle,
+                  Standard_Boolean tol_relative,
+                  Standard_Boolean merge_primitives,
+                  Standard_Boolean use_parallel) {
 
   // Creating XCAF document
   Handle(TDocStd_Document) doc;
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
-  app->NewDocument("MDTV-XCAF", doc);
+  app->NewDocument("cascadio", doc);
+  XSControl_Reader reader;
 
-  // Loading STEP file
-  STEPCAFControl_Reader stepReader;
+  switch (file_type) {
+  case STEP: {
+    // TODO : do this in-memory instead of using a tempfile
+    // however `WriteStream` isn't implemented on GLTF writer
+    // so it would be a little pointless to take input as a stream
+    // std::istringstream ss;
+    // ss.rdbuf()->pubsetbuf(buf,len);
+    // stepReader.ReadStream()
+    // Loading STEP file from filename
+    STEPCAFControl_Reader stepReader;
+    if (IFSelect_RetDone != stepReader.ReadFile((Standard_CString)in)) {
+      std::cerr << "Error: Failed to read STEP file" << std::endl;
+      doc->Close();
+      return 1;
+    }
 
-  // TODO : do this in-memory instead of using a tempfile
-  // std::istringstream ss;
-  // ss.rdbuf()->pubsetbuf(buf,len);
-  // stepReader.ReadStream()
+    // Transferring to XCAF
+    if (!stepReader.Transfer(doc)) {
+      std::cerr << "Error: Failed to read STEP file" << std::endl;
+      doc->Close();
+      return 1;
+    }
+    reader = stepReader.Reader();
+    break;
+  }
 
-  if (IFSelect_RetDone != stepReader.ReadFile((Standard_CString)in)) {
-    std::cerr << "Error: Failed to read STEP file \"" << in << "\" !"
-              << std::endl;
+  case IGES: {
+    IGESCAFControl_Reader igsReader;
+
+    if (IFSelect_RetDone != igsReader.ReadFile((Standard_CString)in)) {
+      std::cerr << "Error: Failed to read IGS file" << std::endl;
+      doc->Close();
+      return 1;
+    }
+
+    igsReader.SetColorMode(true);
+    igsReader.SetNameMode(true);
+    igsReader.SetLayerMode(true);
+    // Transferring to XCAF
+    if (!igsReader.Transfer(doc)) {
+      std::cerr << "Error: Failed to convert IGS file" << std::endl;
+      doc->Close();
+      return 1;
+    }
+    reader = igsReader;
+  }
+  default: {
+    std::cerr << "Error: unknown file type!" << std::endl;
     doc->Close();
     return 1;
   }
-  stepReader.SetColorMode(true);
-  stepReader.SetNameMode(true);
-  stepReader.SetLayerMode(true);
-
-  // Transferring to XCAF
-  if (!stepReader.Transfer(doc)) {
-    std::cerr << "Error: Failed to read STEP file \"" << in << "\" !"
-              << std::endl;
-    doc->Close();
-    return 1;
   }
 
-  std::cout << "Meshing shapes (linear " << tol_linear << ", angular "
-            << tol_angle << ") ..." << std::endl;
-
-  XSControl_Reader reader = stepReader.Reader();
   for (int shape_id = 1; shape_id <= reader.NbShapes(); shape_id++) {
     TopoDS_Shape shape = reader.Shape(shape_id);
     if (shape.IsNull()) {
@@ -81,9 +117,9 @@ static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
   cafWriter.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
 
   Message_ProgressRange progress;
-  TColStd_IndexedDataMapOfStringString theFileInfo;
-  if (!cafWriter.Perform(doc, theFileInfo, progress)) {
-    std::cerr << "Error: Failed to write glTF to file !" << std::endl;
+  TColStd_IndexedDataMapOfStringString fileInfo;
+  if (!cafWriter.Perform(doc, fileInfo, progress)) {
+    std::cerr << "Error: Failed to write GLB file!" << std::endl;
     return 1;
   }
 
