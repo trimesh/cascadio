@@ -16,7 +16,7 @@ PYBIND11_MODULE(cascadio, m) {
   py::enum_<FileType>(m, "FileType")
     .value("UNSPECIFIED", FileType::UNSPECIFIED)
     .value("STEP", FileType::STEP)
-    .value("IGES", FileType::IGES)).export_values();
+    .value("IGES", FileType::IGES).export_values();
 
   m.def("to_glb", &to_glb,
         R"pbdoc(

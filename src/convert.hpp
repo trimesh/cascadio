@@ -66,22 +66,27 @@ static int to_glb(char *in, char *out, FileType file_type,
   case IGES: {
     IGESCAFControl_Reader igsReader;
 
+    // parse the IGES file
     if (IFSelect_RetDone != igsReader.ReadFile((Standard_CString)in)) {
       std::cerr << "Error: Failed to read IGS file" << std::endl;
       doc->Close();
       return 1;
     }
-
-    igsReader.SetColorMode(true);
-    igsReader.SetNameMode(true);
-    igsReader.SetLayerMode(true);
-    // Transferring to XCAF
+    // Transfer to XCAF
     if (!igsReader.Transfer(doc)) {
       std::cerr << "Error: Failed to convert IGS file" << std::endl;
       doc->Close();
       return 1;
     }
     reader = igsReader;
+
+    // TODO : sew faces here
+    // BRepBuilderAPI_Sewing Sew;
+    // Sew.Add(Face1);
+    // Sew.Add(Face2);
+    // Sew.Perform();
+    // TopoDS_Shape result= Sew.SewedShape();
+    break;
   }
   default: {
     std::cerr << "Error: unknown file type!" << std::endl;
