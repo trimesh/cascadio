@@ -18,7 +18,7 @@ def test_convert_stp(model="featuretype.STEP"):
     assert len(scene.geometry) == 1
 
 
-def test_convert_igs(model="tilt.IGS"):
+def test_convert_igs(model="microstrip.igs"):
     infile = os.path.join(cwd, "models", model)
     assert os.path.exists(infile)
 
