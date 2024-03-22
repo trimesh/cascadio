@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Multimedia :: Graphics",
     "Topic :: Multimedia :: Graphics :: 3D Modeling"
 ]
-urls = {Homepage = "https://github.com/trimesh/cascadio"}
+urls = {Homepage = "https://github.com/mikedh/cascadio"}
 
 [project.readme]
 file = "README.md"
