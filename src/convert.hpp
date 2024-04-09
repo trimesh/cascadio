@@ -50,9 +50,6 @@ static int step_to_glb(char *in, char *out, Standard_Real tol_linear,
     return 1;
   }
 
-  std::cout << "Meshing shapes (linear " << tol_linear << ", angular "
-            << tol_angle << ") ..." << std::endl;
-
   XSControl_Reader reader = stepReader.Reader();
   for (int shape_id = 1; shape_id <= reader.NbShapes(); shape_id++) {
     TopoDS_Shape shape = reader.Shape(shape_id);
