@@ -19,7 +19,7 @@ jobs:
           submodules: true
       - uses: ilammy/msvc-dev-cmd@v1.13.0
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.16.5
+        uses: pypa/cibuildwheel@v2.17.0
         with:
           output-dir: wheelhouse
 
