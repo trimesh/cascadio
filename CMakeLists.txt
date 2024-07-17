@@ -26,6 +26,7 @@ option(SYSTEM_OPENCASCADE "Use an external/system copy of OpenCASCADE" OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
 if(SYSTEM_OPENCASCADE)
+  # this is used for system packagers like fedora
   find_package(OpenCASCADE CONFIG REQUIRED)
   # Set path to header files directories
   target_include_directories(cascadio PUBLIC "${OpenCASCADE_INCLUDE_DIR}")
