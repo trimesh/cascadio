@@ -20,23 +20,31 @@ pybind11_add_module(cascadio src/main.cpp)
 target_compile_definitions(cascadio
                            PRIVATE VERSION_INFO=${PROJECT_VERSION})
 
+option(SYSTEM_OPENCASCADE "Use an external/system copy of OpenCASCADE" OFF)
+
 # Set the C++ standard to C++11
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
-# Set path to header files directories
-target_include_directories(cascadio PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/include/opencascade>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/inc>)
+if(SYSTEM_OPENCASCADE)
+  find_package(OpenCASCADE CONFIG REQUIRED)
+  # Set path to header files directories
+  target_include_directories(cascadio PUBLIC "${OpenCASCADE_INCLUDE_DIR}")
+else()
+  # Set path to header files directories
+  target_include_directories(cascadio PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/include/opencascade>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/inc>)
 
-# Set path to executable directories
-target_link_directories(
-  cascadio PUBLIC
-  "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/gcc/lib"
-  "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/vc14/lib"
-  "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin64/gcc/lib"
-  "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin32/gcc/lib"
-  "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/mac64/clang/lib"
-)
+  # Set path to executable directories
+  target_link_directories(
+    cascadio PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/gcc/lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/vc14/lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin64/gcc/lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin32/gcc/lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/mac64/clang/lib"
+  )
+endif()
 
 # Add all possible libraries we might need
 target_link_libraries(cascadio PRIVATE
