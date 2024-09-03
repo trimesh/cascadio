@@ -16,7 +16,14 @@ The primary goal of this project is building wheels so vanilla `pip` can be used
 pip install cascadio
 ```
 
-Currently this is building for non-MUSL flavors of `manylinux`, Windows x64, and MacOS x64+ARM. You can check [PyPi](https://pypi.org/project/cascadio/#files) for current platforms.
+Currently this works on non-MUSL flavors of Linux, Windows x64, and MacOS x64+ARM. You can check [PyPi](https://pypi.org/project/cascadio/#files) for current platforms.
+
+:warning: :warning: PyPI has a size limit, and each release of this is large! We will *not* be keeping every release on PyPi (i.e. if we run out of space we delete versions) so be very careful pinning the version! :warning: :warning:
+
+We'll keep the following versions as "LTS" style releases on PyPi:
+```
+pip install cascadio==0.0.13
+```
 
 
 ### Motivation
