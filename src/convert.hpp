@@ -13,6 +13,7 @@
 // OBJ Write methods
 #include <RWObj_CafWriter.hxx>
 
+/// Transcode STEP to GLB ( the binary format of glTF )
 static int step_to_glb(char *input_path, char *output_path,
                        Standard_Real tol_linear,
                        Standard_Real tol_angle,
