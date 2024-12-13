@@ -24,7 +24,7 @@ static int step_to_glb(char *input_path, char *output_path,
   // Creating XCAF document
   Handle(TDocStd_Document) doc;
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
-  app->NewDocument("MDTV-XCAF", doc);
+  app->NewDocument("BinXCAF", doc);
 
   // Loading STEP file
   STEPCAFControl_Reader stepReader;
