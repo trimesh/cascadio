@@ -13,10 +13,6 @@
 // OBJ Write methods
 #include <RWObj_CafWriter.hxx>
 
-static const char *errorInvalidOutExtension =
-    "output filename shall have .glTF or .glb extension.";
-
-/// Transcode STEP to glTF
 static int step_to_glb(char *input_path, char *output_path,
                        Standard_Real tol_linear,
                        Standard_Real tol_angle,
