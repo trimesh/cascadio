@@ -81,7 +81,7 @@ static int step_to_glb(char *input_path, char *output_path,
   Message_ProgressRange progress;
   TColStd_IndexedDataMapOfStringString theFileInfo;
   if (!cafWriter.Perform(doc, theFileInfo, progress)) {
-    std::cerr << "Error: Failed to write glTF to file !" << std::endl;
+    std::cerr << "Error: Failed to write glB to file !" << std::endl;
     doc->Close();
     return 1;
   }
