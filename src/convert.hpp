@@ -96,9 +96,7 @@ static int step_to_obj(char *input_path, char *output_path,
                        Standard_Real tol_angle,
                        Standard_Boolean tol_relative,
                        Standard_Boolean use_parallel,
-                       Standard_Boolean use_colors,
-                       Standard_Boolean swap_z_and_y_axis
-                       ) {
+                       Standard_Boolean use_colors) {
 
   // Creating XCAF document
   Handle(TDocStd_Document) doc;
@@ -147,14 +145,6 @@ static int step_to_obj(char *input_path, char *output_path,
 
   // Export as OBJ ( and if applicable MTL file for materials too )
   RWObj_CafWriter cafWriter(output_path);
-  if( swap_z_and_y_axis ) {
-    cafWriter.ChangeCoordinateSystemConverter().SetInputCoordinateSystem(
-        RWMesh_CoordinateSystem::RWMesh_CoordinateSystem_Zup
-    );
-    cafWriter.ChangeCoordinateSystemConverter().SetOutputCoordinateSystem(
-        RWMesh_CoordinateSystem::RWMesh_CoordinateSystem_Yup
-    );
-  }
 
   Message_ProgressRange progress;
   TColStd_IndexedDataMapOfStringString theFileInfo;

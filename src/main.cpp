@@ -69,8 +69,6 @@ use_colors
   Disabling colors will skip exporting a MTL sidecar file.
   If input STEP doesn't use color/material then no MTL will be exported,
   regardless of 'use_colors'.
-swap_z_and_y_axis
-  Whether to swap y and z axis in the exported meshes.
 
 )pbdoc",
 	py::arg("input_path"),
@@ -79,8 +77,7 @@ swap_z_and_y_axis
 	py::arg("tol_angular") = 0.5,
 	py::arg("tol_relative") = false,
 	py::arg("use_parallel") = true,
-	py::arg("use_colors") = true,
-	py::arg("swap_z_and_y_axis") = true
+	py::arg("use_colors") = true
 	);
 
 #ifdef VERSION_INFO
