@@ -4,15 +4,13 @@
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 
-int add(int i, int j) { return i + j; }
-
 namespace py = pybind11;
 
 PYBIND11_MODULE(cascadio, m) {
   m.doc() = R"pbdoc(
         cascadio
         ---------
-        A module for converting BREP files into GLB.
+        A module for converting BREP files into GLB and OBJ.
     )pbdoc";
 
   m.def("step_to_glb",
@@ -22,9 +20,9 @@ Convert a step file to a GLB file.
 
 Parameters
 ----------
-file_name
+input_path
   The input STEP file to load.
-file_out
+output_path
   The path to save the GLB file.
 tol_linear
   How large should linear deflection be allowed.
@@ -38,13 +36,48 @@ use_parallel
   Use parallel execution to produce meshes and exports.
 
 )pbdoc",
-	py::arg("file_name"),
-	py::arg("file_out"),
+	py::arg("input_path"),
+	py::arg("output_path"),
 	py::arg("tol_linear") = 0.01,
 	py::arg("tol_angular") = 0.5,
 	py::arg("tol_relative") = false,
 	py::arg("merge_primitives") = true,
 	py::arg("use_parallel") = true
+	);
+
+  m.def("step_to_obj",
+	&step_to_obj,
+R"pbdoc(
+Convert a step file to a OBJ ( and if applicable MTL ) file.
+
+Parameters
+----------
+input_path
+  The input STEP file to load.
+output_path
+  The path to save the OBJ ( and if applicable MTL ) file.
+tol_linear
+  How large should linear deflection be allowed.
+tol_angular
+  How large should angular deflection be allowed.
+tol_relative
+  Is tol_linear relative to edge length, or an absolute distance?
+use_parallel
+  Use parallel execution to produce meshes and exports.
+use_colors
+  Whether to export/use colors/materials from the STEP input.
+  Disabling colors will skip exporting a MTL sidecar file.
+  If input STEP doesn't use color/material then no MTL will be exported,
+  regardless of 'use_colors'.
+
+)pbdoc",
+	py::arg("input_path"),
+	py::arg("output_path"),
+	py::arg("tol_linear") = 0.01,
+	py::arg("tol_angular") = 0.5,
+	py::arg("tol_relative") = false,
+	py::arg("use_parallel") = true,
+	py::arg("use_colors") = true
 	);
 
 #ifdef VERSION_INFO

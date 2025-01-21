@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - release-candidate
 
 jobs:
   build_wheels:
@@ -19,7 +18,7 @@ jobs:
           submodules: true
       - uses: ilammy/msvc-dev-cmd@v1.13.0
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.20.0
+        uses: pypa/cibuildwheel@v2.22.0
         with:
           output-dir: wheelhouse
 
