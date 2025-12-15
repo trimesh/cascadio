@@ -41,6 +41,10 @@ wheel.packages = ["src/cascadio"]
 # script before the musl linux can build OpenCASCADE
 skip = "*musl* *win32*"
 
+# Use manylinux_2_28 for GCC 12+ (needed for OCCT 8.x constexpr)
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
 # pypy compiles numpy for every test
 test-skip = "pp* *i686"
 
