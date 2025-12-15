@@ -24,15 +24,20 @@ find_package(
 
 find_package(pybind11 CONFIG REQUIRED)
 
+# Set the C++ standard to C++17 before creating targets
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 pybind11_add_module(_core src/main.cpp)
 target_compile_definitions(_core
                            PRIVATE VERSION_INFO=${PROJECT_VERSION})
 
-option(SYSTEM_OPENCASCADE "Use an external/system copy of OpenCASCADE" OFF)
+# Also set C++17 explicitly on the target for good measure
+set_target_properties(_core PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON)
 
-# Set the C++ standard to C++17
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(SYSTEM_OPENCASCADE "Use an external/system copy of OpenCASCADE" OFF)
 
 if(SYSTEM_OPENCASCADE)
   # this is used for system packagers like fedora
