@@ -1,16 +1,17 @@
 #pragma once
 
+#include "iges.hpp"
 #include "materials.hpp"
 #include "primitives.hpp"
+#include "step.hpp"
+#include "tempfile.hpp"
 
 #include <Message_ProgressRange.hxx>
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
+#include <fstream>
 #include <sstream>
-#include <unistd.h>
 
-// STEP Read methods
-#include <STEPCAFControl_Reader.hxx>
 // Meshing
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <RWMesh_CoordinateSystem.hxx>
@@ -20,110 +21,77 @@
 #include <RWObj_CafWriter.hxx>
 
 // ============================================================================
-// STEP Loading
+// File Type Enum
 // ============================================================================
 
-/// Result of loading a STEP file
-struct StepLoadResult {
+enum class FileType { UNSPECIFIED = 0, STEP = 1, IGES = 2 };
+
+// ============================================================================
+// Generic Loading (dispatches to STEP or IGES)
+// ============================================================================
+
+/// Generic load result structure
+struct LoadResult {
   Handle(TDocStd_Document) doc;
   std::vector<TopoDS_Shape> shapes;
   bool success;
 
-  StepLoadResult() : success(false) {}
+  LoadResult() : success(false) {}
 };
 
-/// Load a STEP file from disk and mesh the shapes
-static StepLoadResult
-loadStepFile(const char *input_path, Standard_Real tol_linear,
-             Standard_Real tol_angle, Standard_Boolean tol_relative,
-             Standard_Boolean use_parallel,
-             Standard_Boolean use_colors = Standard_True) {
-  StepLoadResult result;
+/// Load a BREP file (STEP or IGES) from disk
+static LoadResult loadFile(const char *input_path, FileType file_type,
+                           Standard_Real tol_linear, Standard_Real tol_angle,
+                           Standard_Boolean tol_relative,
+                           Standard_Boolean use_parallel,
+                           Standard_Boolean use_colors = Standard_True) {
+  LoadResult result;
 
-  Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
-  app->NewDocument("BinXCAF", result.doc);
-
-  STEPCAFControl_Reader stepReader;
-
-  if (IFSelect_RetDone != stepReader.ReadFile((Standard_CString)input_path)) {
-    std::cerr << "Error: Failed to read STEP file \"" << input_path << "\""
-              << std::endl;
-    result.doc->Close();
-    return result;
+  if (file_type == FileType::STEP) {
+    StepLoadResult stepResult =
+        loadStepFile(input_path, tol_linear, tol_angle, tol_relative,
+                     use_parallel, use_colors);
+    result.doc = stepResult.doc;
+    result.shapes = stepResult.shapes;
+    result.success = stepResult.success;
+  } else if (file_type == FileType::IGES) {
+    IgesLoadResult igesResult =
+        loadIgesFile(input_path, tol_linear, tol_angle, tol_relative,
+                     use_parallel, use_colors);
+    result.doc = igesResult.doc;
+    result.shapes = igesResult.shapes;
+    result.success = igesResult.success;
+  } else {
+    std::cerr << "Error: Unsupported file type" << std::endl;
   }
 
-  stepReader.SetColorMode(use_colors);
-  stepReader.SetNameMode(true);
-  stepReader.SetLayerMode(true);
-
-  if (!stepReader.Transfer(result.doc)) {
-    std::cerr << "Error: Failed to transfer STEP file \"" << input_path << "\""
-              << std::endl;
-    result.doc->Close();
-    return result;
-  }
-
-  XSControl_Reader reader = stepReader.Reader();
-  for (int shape_id = 1; shape_id <= reader.NbShapes(); shape_id++) {
-    TopoDS_Shape shape = reader.Shape(shape_id);
-    if (shape.IsNull()) {
-      continue;
-    }
-    result.shapes.push_back(shape);
-    BRepMesh_IncrementalMesh mesh(shape, tol_linear, tol_relative, tol_angle,
-                                  use_parallel);
-    mesh.Perform();
-  }
-
-  result.success = true;
   return result;
 }
 
-/// Load a STEP file from memory (bytes) and mesh the shapes
-static StepLoadResult
-loadStepBytes(const std::string &stepData, Standard_Real tol_linear,
-              Standard_Real tol_angle, Standard_Boolean tol_relative,
-              Standard_Boolean use_parallel,
-              Standard_Boolean use_colors = Standard_True) {
-  StepLoadResult result;
+/// Load a BREP file (STEP or IGES) from memory
+static LoadResult loadBytes(const std::string &data, FileType file_type,
+                            Standard_Real tol_linear, Standard_Real tol_angle,
+                            Standard_Boolean tol_relative,
+                            Standard_Boolean use_parallel,
+                            Standard_Boolean use_colors = Standard_True) {
+  LoadResult result;
 
-  Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
-  app->NewDocument("BinXCAF", result.doc);
-
-  STEPCAFControl_Reader stepReader;
-
-  // Create an input stream from the string data
-  std::istringstream stepStream(stepData);
-
-  if (IFSelect_RetDone != stepReader.ReadStream("step_data.step", stepStream)) {
-    std::cerr << "Error: Failed to read STEP data from memory" << std::endl;
-    result.doc->Close();
-    return result;
+  if (file_type == FileType::STEP) {
+    StepLoadResult stepResult = loadStepBytes(
+        data, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
+    result.doc = stepResult.doc;
+    result.shapes = stepResult.shapes;
+    result.success = stepResult.success;
+  } else if (file_type == FileType::IGES) {
+    IgesLoadResult igesResult = loadIgesBytes(
+        data, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
+    result.doc = igesResult.doc;
+    result.shapes = igesResult.shapes;
+    result.success = igesResult.success;
+  } else {
+    std::cerr << "Error: Unsupported file type" << std::endl;
   }
 
-  stepReader.SetColorMode(use_colors);
-  stepReader.SetNameMode(true);
-  stepReader.SetLayerMode(true);
-
-  if (!stepReader.Transfer(result.doc)) {
-    std::cerr << "Error: Failed to transfer STEP data" << std::endl;
-    result.doc->Close();
-    return result;
-  }
-
-  XSControl_Reader reader = stepReader.Reader();
-  for (int shape_id = 1; shape_id <= reader.NbShapes(); shape_id++) {
-    TopoDS_Shape shape = reader.Shape(shape_id);
-    if (shape.IsNull()) {
-      continue;
-    }
-    result.shapes.push_back(shape);
-    BRepMesh_IncrementalMesh mesh(shape, tol_linear, tol_relative, tol_angle,
-                                  use_parallel);
-    mesh.Perform();
-  }
-
-  result.success = true;
   return result;
 }
 
@@ -154,33 +122,29 @@ static std::vector<char> exportToGlbBytes(Handle(TDocStd_Document) doc,
   // approach but encapsulate it here. In the future, could patch OCCT to
   // support streams.
 
-  // Create a unique temp filename
-  char tempPath[] = "/tmp/cascadio_XXXXXX.glb";
-  int fd = mkstemps(tempPath, 4); // 4 = length of ".glb"
-  if (fd == -1) {
+  // Create a unique temp file
+  TempFile tempFile(".glb");
+  if (!tempFile.valid()) {
     std::cerr << "Error: Failed to create temp file for GLB export"
               << std::endl;
     return {};
   }
-  close(fd);
+  // Close fd so exportToGlbFile can write to it
+  tempFile.close_fd();
 
   // Export to temp file
-  if (!exportToGlbFile(doc, tempPath, merge_primitives, use_parallel)) {
-    std::remove(tempPath);
-    return {};
+  if (!exportToGlbFile(doc, tempFile.path(), merge_primitives, use_parallel)) {
+    return {};  // TempFile destructor handles cleanup
   }
 
   // Read temp file into memory
-  std::ifstream file(tempPath, std::ios::binary | std::ios::ate);
+  std::ifstream file(tempFile.path(), std::ios::binary | std::ios::ate);
   if (!file) {
-    std::remove(tempPath);
     return {};
   }
 
   std::streampos pos = file.tellg();
   if (pos == std::streampos(-1) || pos < 0) {
-    file.close();
-    std::remove(tempPath);
     return {};
   }
   std::streamsize size = pos;
@@ -188,32 +152,29 @@ static std::vector<char> exportToGlbBytes(Handle(TDocStd_Document) doc,
 
   std::vector<char> result(static_cast<size_t>(size));
   if (!file.read(result.data(), size)) {
-    file.close();
-    std::remove(tempPath);
     return {};
   }
-  file.close();
-  std::remove(tempPath);
 
   return result;
+  // TempFile destructor automatically cleans up
 }
 
 // ============================================================================
 // Public API
 // ============================================================================
 
-/// Transcode STEP file to GLB file
-static int step_to_glb(char *input_path, char *output_path,
-                       Standard_Real tol_linear, Standard_Real tol_angle,
-                       Standard_Boolean tol_relative,
-                       Standard_Boolean merge_primitives,
-                       Standard_Boolean use_parallel,
-                       Standard_Boolean include_brep = Standard_False,
-                       std::set<std::string> brep_types = {},
-                       Standard_Boolean include_materials = Standard_False) {
+/// Transcode BREP file (STEP or IGES) to GLB file
+static int to_glb(char *input_path, char *output_path, FileType file_type,
+                  Standard_Real tol_linear, Standard_Real tol_angle,
+                  Standard_Boolean tol_relative,
+                  Standard_Boolean merge_primitives,
+                  Standard_Boolean use_parallel,
+                  Standard_Boolean include_brep = Standard_False,
+                  std::set<std::string> brep_types = {},
+                  Standard_Boolean include_materials = Standard_False) {
 
-  StepLoadResult loaded = loadStepFile(input_path, tol_linear, tol_angle,
-                                       tol_relative, use_parallel);
+  LoadResult loaded = loadFile(input_path, file_type, tol_linear, tol_angle,
+                               tol_relative, use_parallel);
   if (!loaded.success) {
     return 1;
   }
@@ -260,18 +221,18 @@ static int step_to_glb(char *input_path, char *output_path,
   return 0;
 }
 
-/// Transcode STEP bytes to GLB bytes (no temp files exposed to Python)
+/// Transcode BREP bytes (STEP or IGES) to GLB bytes (no temp files)
 static std::string
-step_to_glb_bytes(const std::string &step_data, Standard_Real tol_linear,
-                  Standard_Real tol_angle, Standard_Boolean tol_relative,
-                  Standard_Boolean merge_primitives,
-                  Standard_Boolean use_parallel,
-                  Standard_Boolean include_brep = Standard_False,
-                  std::set<std::string> brep_types = {},
-                  Standard_Boolean include_materials = Standard_False) {
+to_glb_bytes(const std::string &data, FileType file_type,
+             Standard_Real tol_linear, Standard_Real tol_angle,
+             Standard_Boolean tol_relative, Standard_Boolean merge_primitives,
+             Standard_Boolean use_parallel,
+             Standard_Boolean include_brep = Standard_False,
+             std::set<std::string> brep_types = {},
+             Standard_Boolean include_materials = Standard_False) {
 
-  StepLoadResult loaded = loadStepBytes(step_data, tol_linear, tol_angle,
-                                        tol_relative, use_parallel);
+  LoadResult loaded = loadBytes(data, file_type, tol_linear, tol_angle,
+                                tol_relative, use_parallel);
   if (!loaded.success) {
     return "";
   }
@@ -315,6 +276,34 @@ step_to_glb_bytes(const std::string &step_data, Standard_Real tol_linear,
   }
 
   return std::string(glbData.begin(), glbData.end());
+}
+
+/// Transcode STEP file to GLB file (backward compatibility wrapper)
+static int step_to_glb(char *input_path, char *output_path,
+                       Standard_Real tol_linear, Standard_Real tol_angle,
+                       Standard_Boolean tol_relative,
+                       Standard_Boolean merge_primitives,
+                       Standard_Boolean use_parallel,
+                       Standard_Boolean include_brep = Standard_False,
+                       std::set<std::string> brep_types = {},
+                       Standard_Boolean include_materials = Standard_False) {
+  return to_glb(input_path, output_path, FileType::STEP, tol_linear, tol_angle,
+                tol_relative, merge_primitives, use_parallel, include_brep,
+                brep_types, include_materials);
+}
+
+/// Transcode STEP bytes to GLB bytes (backward compatibility wrapper)
+static std::string
+step_to_glb_bytes(const std::string &step_data, Standard_Real tol_linear,
+                  Standard_Real tol_angle, Standard_Boolean tol_relative,
+                  Standard_Boolean merge_primitives,
+                  Standard_Boolean use_parallel,
+                  Standard_Boolean include_brep = Standard_False,
+                  std::set<std::string> brep_types = {},
+                  Standard_Boolean include_materials = Standard_False) {
+  return to_glb_bytes(step_data, FileType::STEP, tol_linear, tol_angle,
+                      tol_relative, merge_primitives, use_parallel,
+                      include_brep, brep_types, include_materials);
 }
 
 /// Transcode STEP file to OBJ file

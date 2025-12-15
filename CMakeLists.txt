@@ -1,13 +1,21 @@
 cmake_minimum_required(VERSION 3.15...3.26)
 
-# Set project name
-# Set project name
+# Set project name and version from scikit-build variables
 set(project_name "${SKBUILD_PROJECT_NAME}")
+set(project_version "${SKBUILD_PROJECT_VERSION}")
+
+# Handle case where variables aren't set (e.g., building directly with cmake)
+if(NOT project_name)
+  set(project_name "cascadio")
+endif()
+if(NOT project_version)
+  set(project_version "0.0.1")
+endif()
 
 project(
   ${project_name}
-  LANGUAGES CXX
-  VERSION "${SKBUILD_PROJECT_VERSION}")
+  VERSION ${project_version}
+  LANGUAGES CXX)
 
 find_package(
   Python

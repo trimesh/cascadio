@@ -16,11 +16,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      
+      - name: Get OCCT cache key
+        id: occt-key
+        shell: bash
+        run: |
+          echo "hash=${{ runner.os }}-${{ hashFiles('upstream/OCCT/CMakeLists.txt', 'pyproject.toml') }}" >> $GITHUB_OUTPUT
+      
+      - name: Cache OCCT build
+        id: cache-occt
+        uses: actions/cache@v4
+        with:
+          path: |
+            upstream/OCCT/lin64
+            upstream/OCCT/lin32
+            upstream/OCCT/win64
+            upstream/OCCT/mac64
+          key: occt-${{ steps.occt-key.outputs.hash }}
+      
       - uses: ilammy/msvc-dev-cmd@v1.13.0
+      
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.2.1
+        uses: pypa/cibuildwheel@v2.22.0
         with:
           output-dir: wheelhouse
+      
       - uses: actions/upload-artifact@v4
         with:
           path: ./wheelhouse/*.whl

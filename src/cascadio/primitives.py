@@ -104,6 +104,17 @@ class Torus:
 # Union type for any primitive
 BrepPrimitive = Union[Plane, Cylinder, Cone, Sphere, Torus]
 
+__all__ = [
+    "Plane",
+    "Cylinder",
+    "Cone",
+    "Sphere",
+    "Torus",
+    "BrepPrimitive",
+    "parse_primitive",
+    "parse_brep_faces",
+]
+
 
 def parse_primitive(data: dict) -> Optional[BrepPrimitive]:
     """

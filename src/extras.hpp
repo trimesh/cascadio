@@ -288,6 +288,10 @@ static bool injectExtrasIntoGlb(const char *glbPath,
     return false;
   }
   outFile.write(result.data(), result.size());
+  if (!outFile) {
+    std::cerr << "Error: Failed to write GLB file" << std::endl;
+    return false;
+  }
   outFile.close();
 
   return true;

@@ -223,9 +223,10 @@ def test_step_to_glb_bytes():
     # Read STEP file as bytes
     step_data = step_path.read_bytes()
 
-    # Convert to GLB bytes
-    glb_data = cascadio.step_to_glb_bytes(
+    # Convert to GLB bytes using load()
+    glb_data = cascadio.load(
         step_data,
+        file_type="step",
         tol_linear=TOL_LINEAR,
         tol_angular=TOL_ANGULAR,
         include_brep=True,
@@ -266,16 +267,18 @@ def test_step_to_glb_bytes_performance():
 
     # Time bytes-based method
     def bytes_based():
-        return cascadio.step_to_glb_bytes(
+        return cascadio.load(
             step_data,
+            file_type="step",
             tol_linear=TOL_LINEAR,
             tol_angular=TOL_ANGULAR,
         )
 
     # Time bytes-based with include_brep
     def bytes_with_brep():
-        return cascadio.step_to_glb_bytes(
+        return cascadio.load(
             step_data,
+            file_type="step",
             tol_linear=TOL_LINEAR,
             tol_angular=TOL_ANGULAR,
             include_brep=True,
@@ -312,8 +315,9 @@ def test_convert_step_to_glb_with_materials():
     step_path = MATERIAL_STEP_PATH
 
     # Convert with materials
-    glb_data = cascadio.step_to_glb_bytes(
+    glb_data = cascadio.load(
         step_path.read_bytes(),
+        file_type="step",
         tol_linear=TOL_LINEAR,
         tol_angular=TOL_ANGULAR,
         include_materials=True,
