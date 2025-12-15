@@ -33,6 +33,9 @@ content-type = "text/markdown"
 [project.optional-dependencies]
 tests = ["pytest", "trimesh", "chardet"]
 
+[tool.scikit-build]
+wheel.packages = ["src/cascadio"]
+
 [tool.cibuildwheel]
 # `yum` would need to be replaced in the `before-all`
 # script before the musl linux can build OpenCASCADE

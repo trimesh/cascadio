@@ -1,16 +1,17 @@
 #include "convert.hpp"
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(cascadio, m) {
+PYBIND11_MODULE(_core, m) {
   m.doc() = R"pbdoc(
-        cascadio
-        ---------
-        A module for converting BREP files into GLB and OBJ.
+        cascadio._core
+        --------------
+        C++ core module for converting BREP files into GLB and OBJ.
     )pbdoc";
 
   m.def("step_to_glb",
@@ -34,6 +35,14 @@ merge_primitives
   Produce a GLB with one mesh primitive per part.
 use_parallel
   Use parallel execution to produce meshes and exports.
+include_brep
+  Include BREP analytical primitive data in GLB extras.
+  Primitives (plane, cylinder, cone, sphere, torus) are stored
+  in extras.brep_faces with face_index, type, and geometry params.
+brep_types
+  If non-empty, only include these primitive types in brep_faces.
+  Valid values: "plane", "cylinder", "cone", "sphere", "torus".
+  If empty (default), all primitive types are included.
 
 )pbdoc",
 	py::arg("input_path"),
@@ -42,7 +51,62 @@ use_parallel
 	py::arg("tol_angular") = 0.5,
 	py::arg("tol_relative") = false,
 	py::arg("merge_primitives") = true,
-	py::arg("use_parallel") = true
+	py::arg("use_parallel") = true,
+	py::arg("include_brep") = false,
+	py::arg("brep_types") = std::set<std::string>()
+	);
+
+  m.def("step_to_glb_bytes",
+	[](py::bytes step_data,
+	   Standard_Real tol_linear,
+	   Standard_Real tol_angle,
+	   Standard_Boolean tol_relative,
+	   Standard_Boolean merge_primitives,
+	   Standard_Boolean use_parallel,
+	   Standard_Boolean include_brep,
+	   std::set<std::string> brep_types) -> py::bytes {
+		std::string data = step_data;
+		std::string result = step_to_glb_bytes(data, tol_linear, tol_angle,
+		                                        tol_relative, merge_primitives,
+		                                        use_parallel, include_brep, brep_types);
+		return py::bytes(result);
+	},
+R"pbdoc(
+Convert STEP data (bytes) to GLB data (bytes) without temp files.
+
+Parameters
+----------
+step_data
+  The STEP file content as bytes.
+tol_linear
+  How large should linear deflection be allowed.
+tol_angular
+  How large should angular deflection be allowed.
+tol_relative
+  Is tol_linear relative to edge length, or an absolute distance?
+merge_primitives
+  Produce a GLB with one mesh primitive per part.
+use_parallel
+  Use parallel execution to produce meshes and exports.
+include_brep
+  Include BREP analytical primitive data in GLB extras.
+brep_types
+  If non-empty, only include these primitive types in brep_faces.
+
+Returns
+-------
+bytes
+  The GLB file content as bytes, or empty bytes on error.
+
+)pbdoc",
+	py::arg("step_data"),
+	py::arg("tol_linear") = 0.01,
+	py::arg("tol_angular") = 0.5,
+	py::arg("tol_relative") = false,
+	py::arg("merge_primitives") = true,
+	py::arg("use_parallel") = true,
+	py::arg("include_brep") = false,
+	py::arg("brep_types") = std::set<std::string>()
 	);
 
   m.def("step_to_obj",
