@@ -115,9 +115,10 @@ def test_convert_step_to_glb_with_brep():
     # Get the mesh
     mesh = list(scene.geometry.values())[0]
 
-    # Should have brep_faces in mesh metadata
-    assert "brep_faces" in mesh.metadata
-    brep_faces = mesh.metadata["brep_faces"]
+    # Should have cascadio.primitives in mesh metadata
+    assert "cascadio" in mesh.metadata
+    assert "primitives" in mesh.metadata["cascadio"]
+    brep_faces = mesh.metadata["cascadio"]["primitives"]
 
     # Check brep_faces content
     assert len(brep_faces) == 96  # featuretype.STEP has 96 faces
@@ -171,7 +172,7 @@ def test_convert_step_to_glb_brep_types_filter():
         )
         scene_cyl = trimesh.load(glb_cyl, merge_primitives=True)
         mesh_cyl = list(scene_cyl.geometry.values())[0]
-        brep_cyl = mesh_cyl.metadata["brep_faces"]
+        brep_cyl = mesh_cyl.metadata["cascadio"]["primitives"]
 
         # Should only have cylinders
         assert len(brep_cyl) == 46
@@ -189,7 +190,7 @@ def test_convert_step_to_glb_brep_types_filter():
         )
         scene_plane = trimesh.load(glb_plane, merge_primitives=True)
         mesh_plane = list(scene_plane.geometry.values())[0]
-        brep_plane = mesh_plane.metadata["brep_faces"]
+        brep_plane = mesh_plane.metadata["cascadio"]["primitives"]
 
         # Should only have planes
         assert len(brep_plane) == 49
@@ -207,7 +208,7 @@ def test_convert_step_to_glb_brep_types_filter():
         )
         scene_both = trimesh.load(glb_both, merge_primitives=True)
         mesh_both = list(scene_both.geometry.values())[0]
-        brep_both = mesh_both.metadata["brep_faces"]
+        brep_both = mesh_both.metadata["cascadio"]["primitives"]
 
         # Should have both types (95 analytical faces)
         assert len(brep_both) == 95
@@ -237,8 +238,9 @@ def test_step_to_glb_bytes():
 
     assert len(scene.geometry) == 1
     mesh = list(scene.geometry.values())[0]
-    assert "brep_faces" in mesh.metadata
-    assert len(mesh.metadata["brep_faces"]) == 96
+    assert "cascadio" in mesh.metadata
+    assert "primitives" in mesh.metadata["cascadio"]
+    assert len(mesh.metadata["cascadio"]["primitives"]) == 96
 
 
 def test_step_to_glb_bytes_performance():
@@ -319,19 +321,15 @@ def test_convert_step_to_glb_with_materials():
 
     assert len(glb_data) > 0
 
-    # Parse GLB JSON to get materials
-    import struct
-    import json
+    # Load with trimesh and check mesh metadata
+    scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
+    mesh = list(scene.geometry.values())[0]
 
-    json_len = struct.unpack("<I", glb_data[12:16])[0]
-    json_data = json.loads(glb_data[20 : 20 + json_len].decode("utf-8"))
+    # Materials should be in mesh.metadata.cascadio.materials
+    assert "cascadio" in mesh.metadata
+    assert "materials" in mesh.metadata["cascadio"]
 
-    # Materials should be in asset.extras.materials
-    assert "asset" in json_data
-    assert "extras" in json_data["asset"]
-    assert "materials" in json_data["asset"]["extras"]
-
-    materials = json_data["asset"]["extras"]["materials"]
+    materials = mesh.metadata["cascadio"]["materials"]
     assert len(materials) == 1
 
     # Materials are arbitrary dicts - check the raw data

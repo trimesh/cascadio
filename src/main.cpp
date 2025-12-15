@@ -14,9 +14,8 @@ PYBIND11_MODULE(_core, m) {
         C++ core module for converting BREP files into GLB and OBJ.
     )pbdoc";
 
-  m.def("step_to_glb",
-	&step_to_glb,
-R"pbdoc(
+  m.def("step_to_glb", &step_to_glb,
+        R"pbdoc(
 Convert a step file to a GLB file.
 
 Parameters
@@ -49,36 +48,27 @@ include_materials
   visual properties (colors, PBR metallic/roughness).
 
 )pbdoc",
-	py::arg("input_path"),
-	py::arg("output_path"),
-	py::arg("tol_linear") = 0.01,
-	py::arg("tol_angular") = 0.5,
-	py::arg("tol_relative") = false,
-	py::arg("merge_primitives") = true,
-	py::arg("use_parallel") = true,
-	py::arg("include_brep") = false,
-	py::arg("brep_types") = std::set<std::string>(),
-	py::arg("include_materials") = false
-	);
+        py::arg("input_path"), py::arg("output_path"),
+        py::arg("tol_linear") = 0.01, py::arg("tol_angular") = 0.5,
+        py::arg("tol_relative") = false, py::arg("merge_primitives") = true,
+        py::arg("use_parallel") = true, py::arg("include_brep") = false,
+        py::arg("brep_types") = std::set<std::string>(),
+        py::arg("include_materials") = false);
 
-  m.def("step_to_glb_bytes",
-	[](py::bytes step_data,
-	   Standard_Real tol_linear,
-	   Standard_Real tol_angle,
-	   Standard_Boolean tol_relative,
-	   Standard_Boolean merge_primitives,
-	   Standard_Boolean use_parallel,
-	   Standard_Boolean include_brep,
-	   std::set<std::string> brep_types,
-	   Standard_Boolean include_materials) -> py::bytes {
-		std::string data = step_data;
-		std::string result = step_to_glb_bytes(data, tol_linear, tol_angle,
-		                                        tol_relative, merge_primitives,
-		                                        use_parallel, include_brep, brep_types,
-		                                        include_materials);
-		return py::bytes(result);
-	},
-R"pbdoc(
+  m.def(
+      "step_to_glb_bytes",
+      [](py::bytes step_data, Standard_Real tol_linear, Standard_Real tol_angle,
+         Standard_Boolean tol_relative, Standard_Boolean merge_primitives,
+         Standard_Boolean use_parallel, Standard_Boolean include_brep,
+         std::set<std::string> brep_types,
+         Standard_Boolean include_materials) -> py::bytes {
+        std::string data = step_data;
+        std::string result = step_to_glb_bytes(
+            data, tol_linear, tol_angle, tol_relative, merge_primitives,
+            use_parallel, include_brep, brep_types, include_materials);
+        return py::bytes(result);
+      },
+      R"pbdoc(
 Convert STEP data (bytes) to GLB data (bytes) without temp files.
 
 Parameters
@@ -108,20 +98,15 @@ bytes
   The GLB file content as bytes, or empty bytes on error.
 
 )pbdoc",
-	py::arg("step_data"),
-	py::arg("tol_linear") = 0.01,
-	py::arg("tol_angular") = 0.5,
-	py::arg("tol_relative") = false,
-	py::arg("merge_primitives") = true,
-	py::arg("use_parallel") = true,
-	py::arg("include_brep") = false,
-	py::arg("brep_types") = std::set<std::string>(),
-	py::arg("include_materials") = false
-	);
+      py::arg("step_data"), py::arg("tol_linear") = 0.01,
+      py::arg("tol_angular") = 0.5, py::arg("tol_relative") = false,
+      py::arg("merge_primitives") = true, py::arg("use_parallel") = true,
+      py::arg("include_brep") = false,
+      py::arg("brep_types") = std::set<std::string>(),
+      py::arg("include_materials") = false);
 
-  m.def("step_to_obj",
-	&step_to_obj,
-R"pbdoc(
+  m.def("step_to_obj", &step_to_obj,
+        R"pbdoc(
 Convert a step file to a OBJ ( and if applicable MTL ) file.
 
 Parameters
@@ -145,14 +130,10 @@ use_colors
   regardless of 'use_colors'.
 
 )pbdoc",
-	py::arg("input_path"),
-	py::arg("output_path"),
-	py::arg("tol_linear") = 0.01,
-	py::arg("tol_angular") = 0.5,
-	py::arg("tol_relative") = false,
-	py::arg("use_parallel") = true,
-	py::arg("use_colors") = true
-	);
+        py::arg("input_path"), py::arg("output_path"),
+        py::arg("tol_linear") = 0.01, py::arg("tol_angular") = 0.5,
+        py::arg("tol_relative") = false, py::arg("use_parallel") = true,
+        py::arg("use_colors") = true);
 
 #ifdef VERSION_INFO
   m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
