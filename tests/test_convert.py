@@ -10,6 +10,7 @@ import trimesh
 MODELS_DIR = Path(__file__).parent / "models"
 FEATURE_TYPE_STEP_PATH = MODELS_DIR / "featuretype.STEP"
 COLORED_STEP_PATH = MODELS_DIR / "colored.step"
+MATERIAL_STEP_PATH = MODELS_DIR / "material.stp"
 TOL_LINEAR = 0.1
 TOL_ANGULAR = 0.5
 
@@ -302,3 +303,40 @@ def test_step_to_glb_bytes_performance():
     assert len(bytes_result) > 0
     # Sizes should be similar (not exact due to temp file naming differences in GLTF)
     assert abs(len(file_result) - len(bytes_result)) < 1000
+
+
+def test_convert_step_to_glb_with_materials():
+    """Test that include_materials=True extracts material data from STEP."""
+    step_path = MATERIAL_STEP_PATH
+
+    # Convert with materials
+    glb_data = cascadio.step_to_glb_bytes(
+        step_path.read_bytes(),
+        tol_linear=TOL_LINEAR,
+        tol_angular=TOL_ANGULAR,
+        include_materials=True,
+    )
+
+    assert len(glb_data) > 0
+
+    # Parse GLB JSON to get materials
+    import struct
+    import json
+
+    json_len = struct.unpack("<I", glb_data[12:16])[0]
+    json_data = json.loads(glb_data[20 : 20 + json_len].decode("utf-8"))
+
+    # Materials should be in asset.extras.materials
+    assert "asset" in json_data
+    assert "extras" in json_data["asset"]
+    assert "materials" in json_data["asset"]["extras"]
+
+    materials = json_data["asset"]["extras"]["materials"]
+    assert len(materials) == 1
+
+    # Materials are arbitrary dicts - check the raw data
+    mat = materials[0]
+    assert mat["name"] == "Steel"
+    assert mat["description"] == "Steel"
+    assert "density" in mat
+    assert 0.007 < mat["density"] < 0.008  # ~0.00785 g/mm³ for steel

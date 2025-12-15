@@ -43,6 +43,10 @@ brep_types
   If non-empty, only include these primitive types in brep_faces.
   Valid values: "plane", "cylinder", "cone", "sphere", "torus".
   If empty (default), all primitive types are included.
+include_materials
+  Include material data in GLB asset.extras.materials.
+  Materials include physical properties (name, density) and
+  visual properties (colors, PBR metallic/roughness).
 
 )pbdoc",
 	py::arg("input_path"),
@@ -53,7 +57,8 @@ brep_types
 	py::arg("merge_primitives") = true,
 	py::arg("use_parallel") = true,
 	py::arg("include_brep") = false,
-	py::arg("brep_types") = std::set<std::string>()
+	py::arg("brep_types") = std::set<std::string>(),
+	py::arg("include_materials") = false
 	);
 
   m.def("step_to_glb_bytes",
@@ -64,11 +69,13 @@ brep_types
 	   Standard_Boolean merge_primitives,
 	   Standard_Boolean use_parallel,
 	   Standard_Boolean include_brep,
-	   std::set<std::string> brep_types) -> py::bytes {
+	   std::set<std::string> brep_types,
+	   Standard_Boolean include_materials) -> py::bytes {
 		std::string data = step_data;
 		std::string result = step_to_glb_bytes(data, tol_linear, tol_angle,
 		                                        tol_relative, merge_primitives,
-		                                        use_parallel, include_brep, brep_types);
+		                                        use_parallel, include_brep, brep_types,
+		                                        include_materials);
 		return py::bytes(result);
 	},
 R"pbdoc(
@@ -92,6 +99,8 @@ include_brep
   Include BREP analytical primitive data in GLB extras.
 brep_types
   If non-empty, only include these primitive types in brep_faces.
+include_materials
+  Include material data in GLB asset.extras.materials.
 
 Returns
 -------
@@ -106,7 +115,8 @@ bytes
 	py::arg("merge_primitives") = true,
 	py::arg("use_parallel") = true,
 	py::arg("include_brep") = false,
-	py::arg("brep_types") = std::set<std::string>()
+	py::arg("brep_types") = std::set<std::string>(),
+	py::arg("include_materials") = false
 	);
 
   m.def("step_to_obj",
