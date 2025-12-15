@@ -46,15 +46,23 @@ else()
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/inc>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/rapidjson/include>)
 
-  # Set path to executable directories
-  target_link_directories(
-    _core PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/gcc/lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/vc14/lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin64/gcc/lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin32/gcc/lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/mac64/clang/lib"
-  )
+  # Check for OCCT in external cache (for local development)
+  # This allows local builds without polluting upstream/OCCT with absolute paths
+  if(DEFINED ENV{CASCADIO_OCCT_LIB})
+    set(OCCT_LIB_DIR "$ENV{CASCADIO_OCCT_LIB}")
+    message(STATUS "Using OCCT libs from CASCADIO_OCCT_LIB: ${OCCT_LIB_DIR}")
+    target_link_directories(_core PUBLIC "${OCCT_LIB_DIR}")
+  else()
+    # Set path to executable directories (in-tree build for CI)
+    target_link_directories(
+      _core PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/gcc/lib"
+      "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/win64/vc14/lib"
+      "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin64/gcc/lib"
+      "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/lin32/gcc/lib"
+      "${CMAKE_CURRENT_SOURCE_DIR}/upstream/OCCT/mac64/clang/lib"
+    )
+  endif()
 endif()
 
 # Add all possible libraries we might need

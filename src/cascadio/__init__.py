@@ -5,6 +5,8 @@ This module provides functions to convert BREP files (STEP, IGES)
 to triangulated mesh formats (GLB, OBJ).
 """
 
+from typing import Literal, Optional, Set
+
 # Import the C extension functions and enums
 from cascadio._core import (
     FileType,
@@ -22,6 +24,10 @@ STEP = FileType.STEP
 IGES = FileType.IGES
 
 
+# Valid BREP primitive types
+BrepType = Literal["plane", "cylinder", "cone", "sphere", "torus"]
+
+
 def load(
     data: bytes,
     file_type: str = "step",
@@ -31,7 +37,7 @@ def load(
     merge_primitives: bool = True,
     use_parallel: bool = True,
     include_brep: bool = False,
-    brep_types: set = None,
+    brep_types: Optional[Set[BrepType]] = None,
     include_materials: bool = False,
 ) -> bytes:
     """

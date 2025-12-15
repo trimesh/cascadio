@@ -9,6 +9,7 @@
 #include <Message_ProgressRange.hxx>
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
 #include <fstream>
 #include <sstream>
 
@@ -179,6 +180,11 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
     return 1;
   }
 
+  // Get length unit from document (scale factor in meters)
+  // This matches what RWGltf_CafWriter uses for coordinate conversion
+  Standard_Real lengthUnit = 1.0;
+  XCAFDoc_DocumentTool::GetLengthUnit(loaded.doc, lengthUnit);
+
   // Extract materials before exporting (need access to document)
   rapidjson::Document matDoc;
   matDoc.SetArray();
@@ -213,7 +219,7 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
   if ((include_brep && !loaded.shapes.empty()) ||
       (include_materials && materialsPtr != nullptr)) {
     if (!injectExtrasIntoGlb(output_path, loaded.shapes, brep_types,
-                             materialsPtr)) {
+                             materialsPtr, lengthUnit)) {
       std::cerr << "Warning: Failed to inject extras into GLB" << std::endl;
     }
   }
@@ -236,6 +242,11 @@ to_glb_bytes(const std::string &data, FileType file_type,
   if (!loaded.success) {
     return "";
   }
+
+  // Get length unit from document (scale factor in meters)
+  // This matches what RWGltf_CafWriter uses for coordinate conversion
+  Standard_Real lengthUnit = 1.0;
+  XCAFDoc_DocumentTool::GetLengthUnit(loaded.doc, lengthUnit);
 
   // Extract materials before closing document
   rapidjson::Document matDoc;
@@ -268,7 +279,7 @@ to_glb_bytes(const std::string &data, FileType file_type,
   if ((include_brep && !loaded.shapes.empty()) ||
       (include_materials && materialsPtr != nullptr)) {
     glbData = injectExtrasIntoGlbData(glbData, loaded.shapes, brep_types,
-                                      materialsPtr);
+                                      materialsPtr, lengthUnit);
     if (glbData.empty()) {
       std::cerr << "Warning: Failed to inject extras into GLB" << std::endl;
       return "";

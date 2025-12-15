@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build_wheels:
@@ -50,6 +53,7 @@ jobs:
     name: Upload To PyPi
     needs: build_wheels
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       id-token: write
     steps:
@@ -68,6 +72,7 @@ jobs:
     name: Create GitHub Release
     needs: [build_wheels]
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v3

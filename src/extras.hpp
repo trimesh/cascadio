@@ -3,6 +3,7 @@
 #include <Quantity_Color.hxx>
 #include <Quantity_ColorRGBA.hxx>
 #include <TopoDS_Shape.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -67,7 +68,8 @@ static void addBounds(rapidjson::Value &obj, const char *name, double min,
 static rapidjson::Value
 extractAllPrimitives(const TopoDS_Shape &shape,
                      rapidjson::Document::AllocatorType &alloc,
-                     const std::set<std::string> &allowedTypes);
+                     const std::set<std::string> &allowedTypes,
+                     Standard_Real lengthUnit);
 
 // ============================================================================
 // GLB Processing (in-memory)
@@ -75,11 +77,13 @@ extractAllPrimitives(const TopoDS_Shape &shape,
 
 /// Inject BREP primitives and materials into GLB data in memory
 /// Returns modified GLB data, or empty vector on error
+/// lengthUnit is the scale factor to convert to meters (from XCAFDoc_DocumentTool::GetLengthUnit)
 static std::vector<char>
 injectExtrasIntoGlbData(const std::vector<char> &glbData,
                         const std::vector<TopoDS_Shape> &shapes,
                         const std::set<std::string> &allowedTypes = {},
-                        const rapidjson::Value *materials = nullptr) {
+                        const rapidjson::Value *materials = nullptr,
+                        Standard_Real lengthUnit = 1.0) {
 
   if (glbData.size() < 12) {
     std::cerr << "Error: GLB data too small for header" << std::endl;
@@ -180,7 +184,7 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
       if (!shapes.empty() && i < numShapes) {
         ensureMeshCascadio(mesh);
         rapidjson::Value facesArray =
-            extractAllPrimitives(shapes[i], doc.GetAllocator(), allowedTypes);
+            extractAllPrimitives(shapes[i], doc.GetAllocator(), allowedTypes, lengthUnit);
         mesh["extras"]["cascadio"].AddMember("primitives", facesArray,
                                              doc.GetAllocator());
       }
@@ -248,10 +252,12 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
 }
 
 /// Inject BREP primitives and materials into GLB file on disk
+/// lengthUnit is the scale factor to convert to meters (from XCAFDoc_DocumentTool::GetLengthUnit)
 static bool injectExtrasIntoGlb(const char *glbPath,
                                 const std::vector<TopoDS_Shape> &shapes,
                                 const std::set<std::string> &allowedTypes = {},
-                                const rapidjson::Value *materials = nullptr) {
+                                const rapidjson::Value *materials = nullptr,
+                                Standard_Real lengthUnit = 1.0) {
   // Read entire file
   std::ifstream inFile(glbPath, std::ios::binary | std::ios::ate);
   if (!inFile) {
@@ -276,7 +282,7 @@ static bool injectExtrasIntoGlb(const char *glbPath,
 
   // Process in memory
   std::vector<char> result =
-      injectExtrasIntoGlbData(glbData, shapes, allowedTypes, materials);
+      injectExtrasIntoGlbData(glbData, shapes, allowedTypes, materials, lengthUnit);
   if (result.empty()) {
     return false;
   }

@@ -34,24 +34,23 @@ A lot of analysis can be done on triangulated surface meshes that doesn't need t
 ### Contributing
 
 Developed on Linux which should build wheels locally with docker:
-```
-# this doesn't cache the OCCT build unfortunately.
-# It would be nice if it did! You could do it by building OCCT
-# in the manylinux images and then passing the new tag to CIBW
+```bash
+# Build wheels using cibuildwheel (builds OCCT inside container)
 CIBW_BUILD="cp312-manylinux_x86_64" cibuildwheel --platform linux
 ```
 
-Or, if you want to develop that will *only* work in your local environment for development:
+For local development without docker:
+```bash
+# build OCCT to occt_cache/
+python scripts/build_occt.py
+
+# source the env vars it writes
+source occt_cache/env.sh
+
+# install and test
+pip install -e .
+pytest tests/
 ```
-# just run the `before-all` from pyproject.toml which is approximatly:
-cd upstream/OCCT
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DUSE_RAPIDJSON:BOOL="ON" \
-      -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" .
-ninja
-mv lin64/gcc/lib .
-```
-Then `pip install .` will build and install locally. Make sure to point `LD_LIBRARY_PATH=upstream/OCCT/lin64/gcc/lib` or wherever you put the libraries.
 
 
 ### Future Work
