@@ -4,14 +4,15 @@ import timeit
 from pathlib import Path
 
 import cascadio
-import cascadio.trimesh_ext  # Register extension handlers
+import cascadio.extension  # Register extension handlers
 import numpy as np
 import pytest
 import trimesh
 
 # Check if trimesh has extension registry support
 try:
-    from trimesh.exchange.gltf.extensions import register_handler
+    from trimesh.exchange.gltf.extensions import register_handler  # noqa
+
     _HAS_EXTENSION_REGISTRY = True
 except ImportError:
     _HAS_EXTENSION_REGISTRY = False
@@ -101,7 +102,9 @@ def test_convert_step_to_obj_without_colors():
     assert np.allclose(mesh.visual.material.main_color, np.array([102, 102, 102, 255]))
 
 
-@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
 def test_convert_step_to_glb_with_brep():
     """Test that include_brep=True embeds BREP primitive data in mesh extras."""
     step_path = FEATURE_TYPE_STEP_PATH
@@ -164,10 +167,12 @@ def test_convert_step_to_glb_with_brep():
     assert len(plane.x_dir) == 3
 
 
-@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
 def test_convert_step_to_glb_brep_types_filter():
     """Test that brep_types parameter filters which primitives are included.
-    
+
     When filtering, the primitives array preserves index alignment with brep_index
     by including null entries for filtered-out faces.
     """
@@ -245,7 +250,9 @@ def test_convert_step_to_glb_brep_types_filter():
         assert types == {"cylinder", "plane"}
 
 
-@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
 def test_step_to_glb_bytes():
     """Test the bytes-based conversion without temp files."""
     step_path = FEATURE_TYPE_STEP_PATH
@@ -383,11 +390,15 @@ def brep_mesh():
         tol_angular=TOL_ANGULAR,
         include_brep=True,
     )
-    scene = trimesh.load_scene(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
+    scene = trimesh.load_scene(
+        io.BytesIO(glb_data), file_type="glb", merge_primitives=True
+    )
     return list(scene.geometry.values())[0]
 
 
-@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
 def test_cylinder_parameters(brep_mesh):
     """Validate cylinder primitive parameters (unit axis, positive radius, valid bounds)."""
     brep_faces = brep_mesh.metadata["brep_faces"]
@@ -404,7 +415,9 @@ def test_cylinder_parameters(brep_mesh):
         assert np.isfinite(cyl.v_bounds[0]) and np.isfinite(cyl.v_bounds[1])
 
 
-@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
 def test_cylinder_units_match_mesh(brep_mesh):
     """Verify cylinders and mesh use consistent units (meters)."""
     brep_faces = brep_mesh.metadata["brep_faces"]
@@ -412,7 +425,9 @@ def test_cylinder_units_match_mesh(brep_mesh):
     cylinders = [p for p in primitives if isinstance(p, cascadio.primitives.Cylinder)]
 
     # Mesh extents ~127mm x 63.5mm x 35mm in meters
-    assert np.allclose(brep_mesh.bounding_box.extents, [0.127, 0.0635, 0.034925], rtol=0.01)
+    assert np.allclose(
+        brep_mesh.bounding_box.extents, [0.127, 0.0635, 0.034925], rtol=0.01
+    )
 
     # Cylinder radii should be in meters (1.5mm to 10mm range)
     radii = [c.radius for c in cylinders]
@@ -420,7 +435,9 @@ def test_cylinder_units_match_mesh(brep_mesh):
     assert 0.0001 < max(radii) < 0.1
 
 
-@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
 def test_cylinder_vertices_on_surface(brep_mesh, tolerance: float = 1e-8):
     """Verify mesh vertices mapped to cylinders lie on the cylinder surface."""
     brep_index = brep_mesh.face_attributes.get("brep_index")
@@ -449,6 +466,6 @@ def test_cylinder_vertices_on_surface(brep_mesh, tolerance: float = 1e-8):
 
         max_err = np.abs(dist - prim.radius).max()
         if max_err > tolerance:
-            errors.append(f"Cylinder {idx}: {max_err*1000:.4f}mm error")
+            errors.append(f"Cylinder {idx}: {max_err * 1000:.4f}mm error")
 
     assert len(errors) == 0, f"Vertex errors: {errors[:3]}"

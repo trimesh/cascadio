@@ -21,7 +21,7 @@ def test_load_step_bytes():
     assert len(glb_data) > 0
 
     # Load with trimesh to verify it's valid
-    scene = trimesh.load_scene(file_obj=BytesIO(glb_data), file_type='glb')
+    scene = trimesh.load_scene(file_obj=BytesIO(glb_data), file_type="glb")
     assert len(scene.geometry) == 1
 
 
@@ -46,12 +46,11 @@ def test_load_iges_bytes():
     assert len(glb_data) > 0
 
     # Load with trimesh to verify it's valid and is one mesh
-    scene = trimesh.load_scene(file_obj=BytesIO(glb_data), file_type='glb')
-    
+    scene = trimesh.load_scene(file_obj=BytesIO(glb_data), file_type="glb")
+
     # With stitching and merge_primitives, we should get a single unified mesh
     assert len(scene.geometry) == 1
     print(f"IGES loaded successfully as {len(scene.geometry)} mesh(es)")
-
 
 
 def test_load_iges_file_extensions():
@@ -84,7 +83,7 @@ def test_step_to_glb():
         outfile = os.path.join(D, "output.glb")
         cascadio.step_to_glb(step_file, outfile, tol_linear=0.1, tol_angular=0.5)
         assert os.path.exists(outfile)
-        
+
         scene = trimesh.load(outfile)
         assert len(scene.geometry) == 1
 
@@ -98,7 +97,7 @@ def test_step_to_obj():
         outfile = os.path.join(D, "output.obj")
         cascadio.step_to_obj(step_file, outfile, tol_linear=0.1, tol_angular=0.5)
         assert os.path.exists(outfile)
-        
+
         mesh = trimesh.load(outfile)
         assert mesh.vertices is not None
         assert len(mesh.vertices) > 0
@@ -111,4 +110,3 @@ if __name__ == "__main__":
     test_step_to_glb()
     test_step_to_obj()
     print("All tests passed!")
-
