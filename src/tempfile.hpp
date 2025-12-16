@@ -24,7 +24,7 @@ public:
       random_part += charset[dist(gen)];
     }
 
-    path_ = (std::filesystem::temp_directory_path() / 
+    path_ = (std::filesystem::temp_directory_path() /
              ("cascadio_" + random_part + extension)).string();
 
     // Create the file to ensure it exists and we have exclusive access

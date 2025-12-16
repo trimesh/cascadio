@@ -61,4 +61,6 @@ before-build = "pip install delvewheel"
 repair-wheel-command = "delvewheel repair --add-path upstream/OCCT/win64/vc14/bin -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
+# Require macOS 10.15+ for std::filesystem support
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.15" }
 repair-wheel-command = "DYLD_LIBRARY_PATH=upstream/OCCT/mac64/clang/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
