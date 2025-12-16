@@ -65,11 +65,9 @@ static void addBounds(rapidjson::Value &obj, const char *name, double min,
 }
 
 // Forward declaration - implemented in primitives.hpp
-static rapidjson::Value
-extractAllPrimitives(const TopoDS_Shape &shape,
-                     rapidjson::Document::AllocatorType &alloc,
-                     const std::set<std::string> &allowedTypes,
-                     Standard_Real lengthUnit);
+static rapidjson::Value extractAllPrimitives(
+    const TopoDS_Shape &shape, rapidjson::Document::AllocatorType &alloc,
+    const std::set<std::string> &allowedTypes, Standard_Real lengthUnit);
 
 // ============================================================================
 // GLB Processing (in-memory)
@@ -77,7 +75,8 @@ extractAllPrimitives(const TopoDS_Shape &shape,
 
 /// Inject BREP primitives and materials into GLB data in memory
 /// Returns modified GLB data, or empty vector on error
-/// lengthUnit is the scale factor to convert to meters (from XCAFDoc_DocumentTool::GetLengthUnit)
+/// lengthUnit is the scale factor to convert to meters (from
+/// XCAFDoc_DocumentTool::GetLengthUnit)
 static std::vector<char>
 injectExtrasIntoGlbData(const std::vector<char> &glbData,
                         const std::vector<TopoDS_Shape> &shapes,
@@ -158,7 +157,48 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
     return {};
   }
 
-  // Helper to ensure mesh.extras.cascadio exists
+  // Extension name constant
+  const char *EXTENSION_NAME = "TM_brep_faces";
+
+  // Helper to ensure extensionsUsed array exists and contains our extension
+  auto ensureExtensionUsed = [&doc, EXTENSION_NAME]() {
+    if (!doc.HasMember("extensionsUsed")) {
+      doc.AddMember("extensionsUsed", rapidjson::Value(rapidjson::kArrayType),
+                    doc.GetAllocator());
+    }
+    auto &extUsed = doc["extensionsUsed"];
+    bool found = false;
+    for (auto &v : extUsed.GetArray()) {
+      if (v.IsString() && std::string(v.GetString()) == EXTENSION_NAME) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      rapidjson::Value extName;
+      extName.SetString(EXTENSION_NAME, doc.GetAllocator());
+      extUsed.PushBack(extName, doc.GetAllocator());
+    }
+  };
+
+  // Helper to ensure primitive.extensions.TM_brep_faces exists
+  auto ensurePrimitiveExtension =
+      [&doc, EXTENSION_NAME](rapidjson::Value &primitive) -> rapidjson::Value & {
+    if (!primitive.HasMember("extensions")) {
+      primitive.AddMember("extensions",
+                          rapidjson::Value(rapidjson::kObjectType),
+                          doc.GetAllocator());
+    }
+    if (!primitive["extensions"].HasMember(EXTENSION_NAME)) {
+      primitive["extensions"].AddMember(
+          rapidjson::StringRef(EXTENSION_NAME),
+          rapidjson::Value(rapidjson::kObjectType), doc.GetAllocator());
+    }
+    return primitive["extensions"][EXTENSION_NAME];
+  };
+
+  // Helper to ensure mesh.extras.cascadio exists (for materials which aren't
+  // part of TM_brep_faces)
   auto ensureMeshCascadio = [&doc](rapidjson::Value &mesh) {
     if (!mesh.HasMember("extras")) {
       mesh.AddMember("extras", rapidjson::Value(rapidjson::kObjectType),
@@ -171,7 +211,7 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
     }
   };
 
-  // Add primitives and materials to each mesh's extras.cascadio
+  // Add TM_brep_faces extension to mesh primitives
   if (doc.HasMember("meshes") && doc["meshes"].IsArray()) {
     auto &meshes = doc["meshes"];
     size_t numMeshes = meshes.Size();
@@ -180,16 +220,25 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
     for (size_t i = 0; i < numMeshes; i++) {
       auto &mesh = meshes[i];
 
-      // Add primitives if shapes provided
+      // Add BREP faces extension to mesh primitives
       if (!shapes.empty() && i < numShapes) {
-        ensureMeshCascadio(mesh);
-        rapidjson::Value facesArray =
-            extractAllPrimitives(shapes[i], doc.GetAllocator(), allowedTypes, lengthUnit);
-        mesh["extras"]["cascadio"].AddMember("primitives", facesArray,
-                                             doc.GetAllocator());
+        rapidjson::Value facesArray = extractAllPrimitives(
+            shapes[i], doc.GetAllocator(), allowedTypes, lengthUnit);
+
+        // Add to each primitive in the mesh (typically just one)
+        if (mesh.HasMember("primitives") && mesh["primitives"].IsArray()) {
+          for (auto &primitive : mesh["primitives"].GetArray()) {
+            ensureExtensionUsed();
+            auto &ext = ensurePrimitiveExtension(primitive);
+            // Move facesArray into "faces" property
+            rapidjson::Value facesCopy;
+            facesCopy.CopyFrom(facesArray, doc.GetAllocator());
+            ext.AddMember("faces", facesCopy, doc.GetAllocator());
+          }
+        }
       }
 
-      // Add materials to each mesh (document-level materials apply to all)
+      // Add materials to mesh.extras.cascadio (not part of TM_brep_faces)
       if (materials != nullptr && materials->IsArray() &&
           materials->Size() > 0) {
         ensureMeshCascadio(mesh);
@@ -252,7 +301,8 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
 }
 
 /// Inject BREP primitives and materials into GLB file on disk
-/// lengthUnit is the scale factor to convert to meters (from XCAFDoc_DocumentTool::GetLengthUnit)
+/// lengthUnit is the scale factor to convert to meters (from
+/// XCAFDoc_DocumentTool::GetLengthUnit)
 static bool injectExtrasIntoGlb(const char *glbPath,
                                 const std::vector<TopoDS_Shape> &shapes,
                                 const std::set<std::string> &allowedTypes = {},
@@ -281,8 +331,8 @@ static bool injectExtrasIntoGlb(const char *glbPath,
   inFile.close();
 
   // Process in memory
-  std::vector<char> result =
-      injectExtrasIntoGlbData(glbData, shapes, allowedTypes, materials, lengthUnit);
+  std::vector<char> result = injectExtrasIntoGlbData(
+      glbData, shapes, allowedTypes, materials, lengthUnit);
   if (result.empty()) {
     return false;
   }

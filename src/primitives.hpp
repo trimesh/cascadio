@@ -40,13 +40,14 @@ static const char *getSurfaceTypeName(GeomAbs_SurfaceType surfType) {
 
 /// Extract BREP primitive info for a face and add to JSON array
 /// If allowedTypes is non-empty, only include faces with types in the set
-/// lengthUnit is the scale factor to convert to meters (from XCAFDoc_DocumentTool::GetLengthUnit)
-static void
-extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
-                     rapidjson::Value &facesArray,
-                     rapidjson::Document::AllocatorType &alloc,
-                     const std::set<std::string> &allowedTypes = {},
-                     Standard_Real lengthUnit = 1.0) {
+/// (filtered faces get a null entry to preserve index mapping)
+/// lengthUnit is the scale factor to convert to meters (from
+/// XCAFDoc_DocumentTool::GetLengthUnit)
+static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
+                                 rapidjson::Value &facesArray,
+                                 rapidjson::Document::AllocatorType &alloc,
+                                 const std::set<std::string> &allowedTypes = {},
+                                 Standard_Real lengthUnit = 1.0) {
   BRepAdaptor_Surface surf(face, Standard_True);
   GeomAbs_SurfaceType surfType = surf.GetType();
 
@@ -54,10 +55,15 @@ extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
   const char *typeName = getSurfaceTypeName(surfType);
 
   // If filtering is enabled, check if this type should be included
+  // Add null entry to preserve index mapping with brep_index
   if (!allowedTypes.empty()) {
-    if (typeName == nullptr ||
-        allowedTypes.find(typeName) == allowedTypes.end()) {
-      return; // Skip this face
+    // Note: std::set::count with const char* creates a temp string - acceptable
+    // overhead for filtering flexibility. For perf-critical paths, could use
+    // an enum-based filter instead.
+    if (typeName == nullptr || allowedTypes.count(typeName) == 0) {
+      // Add null to preserve index (brep_index references array position)
+      facesArray.PushBack(rapidjson::Value(), alloc);
+      return;
     }
   }
 
@@ -78,10 +84,9 @@ extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     obj.AddMember("type", "plane", alloc);
     // For planes, u and v are both lengths, scale them
     addBounds(obj, "v_bounds", vMin * lengthUnit, vMax * lengthUnit, alloc);
-    addVec3(obj, "origin",
-            pos.Location().X() * lengthUnit,
-            pos.Location().Y() * lengthUnit,
-            pos.Location().Z() * lengthUnit, alloc);
+    addVec3(obj, "origin", pos.Location().X() * lengthUnit,
+            pos.Location().Y() * lengthUnit, pos.Location().Z() * lengthUnit,
+            alloc);
     addVec3(obj, "normal", pos.Direction().X(), pos.Direction().Y(),
             pos.Direction().Z(), alloc);
     addVec3(obj, "x_dir", pos.XDirection().X(), pos.XDirection().Y(),
@@ -94,10 +99,9 @@ extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     obj.AddMember("type", "cylinder", alloc);
     // For cylinders, v is the height along axis (length), scale it
     addBounds(obj, "v_bounds", vMin * lengthUnit, vMax * lengthUnit, alloc);
-    addVec3(obj, "origin",
-            pos.Location().X() * lengthUnit,
-            pos.Location().Y() * lengthUnit,
-            pos.Location().Z() * lengthUnit, alloc);
+    addVec3(obj, "origin", pos.Location().X() * lengthUnit,
+            pos.Location().Y() * lengthUnit, pos.Location().Z() * lengthUnit,
+            alloc);
     addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
             pos.Direction().Z(), alloc);
     obj.AddMember("radius", cyl.Radius() * lengthUnit, alloc);
@@ -110,9 +114,7 @@ extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     obj.AddMember("type", "cone", alloc);
     // For cones, v is distance along axis (length), scale it
     addBounds(obj, "v_bounds", vMin * lengthUnit, vMax * lengthUnit, alloc);
-    addVec3(obj, "apex",
-            apex.X() * lengthUnit,
-            apex.Y() * lengthUnit,
+    addVec3(obj, "apex", apex.X() * lengthUnit, apex.Y() * lengthUnit,
             apex.Z() * lengthUnit, alloc);
     addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
             pos.Direction().Z(), alloc);
@@ -125,10 +127,9 @@ extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     obj.AddMember("type", "sphere", alloc);
     // For spheres, both u and v are angles, no scaling needed for bounds
     addBounds(obj, "v_bounds", vMin, vMax, alloc);
-    addVec3(obj, "center",
-            sph.Location().X() * lengthUnit,
-            sph.Location().Y() * lengthUnit,
-            sph.Location().Z() * lengthUnit, alloc);
+    addVec3(obj, "center", sph.Location().X() * lengthUnit,
+            sph.Location().Y() * lengthUnit, sph.Location().Z() * lengthUnit,
+            alloc);
     obj.AddMember("radius", sph.Radius() * lengthUnit, alloc);
     break;
   }
@@ -138,10 +139,9 @@ extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     obj.AddMember("type", "torus", alloc);
     // For torus, both u and v are angles, no scaling needed for bounds
     addBounds(obj, "v_bounds", vMin, vMax, alloc);
-    addVec3(obj, "center",
-            pos.Location().X() * lengthUnit,
-            pos.Location().Y() * lengthUnit,
-            pos.Location().Z() * lengthUnit, alloc);
+    addVec3(obj, "center", pos.Location().X() * lengthUnit,
+            pos.Location().Y() * lengthUnit, pos.Location().Z() * lengthUnit,
+            alloc);
     addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
             pos.Direction().Z(), alloc);
     obj.AddMember("major_radius", tor.MajorRadius() * lengthUnit, alloc);
@@ -159,7 +159,8 @@ extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
 }
 
 /// Extract all BREP primitives from a shape into a JSON array
-/// lengthUnit is the scale factor to convert to meters (from XCAFDoc_DocumentTool::GetLengthUnit)
+/// lengthUnit is the scale factor to convert to meters (from
+/// XCAFDoc_DocumentTool::GetLengthUnit)
 static rapidjson::Value
 extractAllPrimitives(const TopoDS_Shape &shape,
                      rapidjson::Document::AllocatorType &alloc,
@@ -171,7 +172,8 @@ extractAllPrimitives(const TopoDS_Shape &shape,
   for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More();
        explorer.Next()) {
     TopoDS_Face face = TopoDS::Face(explorer.Current());
-    extractFacePrimitive(face, faceIndex, facesArray, alloc, allowedTypes, lengthUnit);
+    extractFacePrimitive(face, faceIndex, facesArray, alloc, allowedTypes,
+                         lengthUnit);
     faceIndex++;
   }
 

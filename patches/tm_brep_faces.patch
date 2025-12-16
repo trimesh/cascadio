@@ -1,0 +1,430 @@
+diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
+index f5f50d0fa4..64fd839178 100644
+--- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
++++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
+@@ -493,6 +493,7 @@ void RWGltf_CafWriter::saveTriangleIndices(RWGltf_GltfFace&           theGltfFac
+     if (theMesh.get() != nullptr)
+     {
+       theMesh->IndicesVec.push_back(aTri);
++      theMesh->FaceIndicesVec.push_back(myCurrentFaceIndex);
+     }
+     else
+     {
+@@ -512,6 +513,57 @@ void RWGltf_CafWriter::saveTriangleIndices(RWGltf_GltfFace&           theGltfFac
+ 
+ //=================================================================================================
+ 
++void RWGltf_CafWriter::saveFaceIndices(RWGltf_GltfFace&           theGltfFace,
++                                       std::ostream&              theBinFile,
++                                       const RWMesh_FaceIterator& theFaceIter,
++                                       Standard_Integer&          theAccessorNb,
++                                       const std::shared_ptr<RWGltf_CafWriter::Mesh>& theMesh)
++{
++  // Initialize FaceIndices accessor on first call
++  if (theGltfFace.FaceIndices.Id == RWGltf_GltfAccessor::INVALID_ID)
++  {
++    theGltfFace.FaceIndices.Id         = theAccessorNb++;
++    theGltfFace.FaceIndices.ByteOffset = (int64_t)theBinFile.tellp() - myBuffViewFaceIdx.ByteOffset;
++    theGltfFace.FaceIndices.Type       = RWGltf_GltfAccessorLayout_Scalar;
++    // Choose component type based on number of faces
++    // Use UInt8 for <255 faces, UInt16 for <65535, UInt32 otherwise
++    // For now, use UInt16 as a reasonable default
++    theGltfFace.FaceIndices.ComponentType = RWGltf_GltfAccessorCompType_UInt16;
++  }
++
++  // Save face index for each triangle in this BREP face
++  const Standard_Integer aNbTriangles = theFaceIter.NbTriangles();
++  theGltfFace.FaceIndices.Count += aNbTriangles;
++  
++  for (Standard_Integer anElemIter = 0; anElemIter < aNbTriangles; ++anElemIter)
++  {
++    if (theMesh.get() != nullptr)
++    {
++      // Face indices already stored in saveTriangleIndices for Draco
++    }
++    else
++    {
++      if (theGltfFace.FaceIndices.ComponentType == RWGltf_GltfAccessorCompType_UInt8)
++      {
++        uint8_t aFaceIdx = static_cast<uint8_t>(myCurrentFaceIndex);
++        theBinFile.write(reinterpret_cast<const char*>(&aFaceIdx), sizeof(aFaceIdx));
++      }
++      else if (theGltfFace.FaceIndices.ComponentType == RWGltf_GltfAccessorCompType_UInt16)
++      {
++        uint16_t aFaceIdx = static_cast<uint16_t>(myCurrentFaceIndex);
++        theBinFile.write(reinterpret_cast<const char*>(&aFaceIdx), sizeof(aFaceIdx));
++      }
++      else
++      {
++        uint32_t aFaceIdx = static_cast<uint32_t>(myCurrentFaceIndex);
++        theBinFile.write(reinterpret_cast<const char*>(&aFaceIdx), sizeof(aFaceIdx));
++      }
++    }
++  }
++}
++
++//=================================================================================================
++
+ void RWGltf_CafWriter::saveEdgeIndices(RWGltf_GltfFace&           theGltfFace,
+                                        std::ostream&              theBinFile,
+                                        const RWMesh_EdgeIterator& theEdgeIter)
+@@ -783,11 +835,28 @@ Standard_Boolean RWGltf_CafWriter::writeShapesToBin(
+         saveIndices(theGltfFace, theBinFile, theShapeIter, theAccessorNb, theMesh);
+         break;
+       }
++      case RWGltf_GltfArrayType_FaceIndices: {
++        if (const RWMesh_FaceIterator* aFaceIter =
++              dynamic_cast<const RWMesh_FaceIterator*>(&theShapeIter))
++        {
++          saveFaceIndices(theGltfFace, theBinFile, *aFaceIter, theAccessorNb, theMesh);
++        }
++        break;
++      }
+       default: {
+         break;
+       }
+     }
+ 
++    // Increment face index after processing each BREP face (for FaceIndices pass)
++    if (theArrType == RWGltf_GltfArrayType_FaceIndices)
++    {
++      if (dynamic_cast<const RWMesh_FaceIterator*>(&theShapeIter) != nullptr)
++      {
++        ++myCurrentFaceIndex;
++      }
++    }
++
+     if (!theBinFile.good())
+     {
+       Message::SendFail(TCollection_AsciiString("File '") + myBinFileNameFull
+@@ -836,6 +905,13 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+   myBuffViewInd.ByteLength = 0;
+   myBuffViewInd.Target     = RWGltf_GltfBufferViewTarget_ELEMENT_ARRAY_BUFFER;
+ 
++  myBuffViewFaceIdx.Id         = RWGltf_GltfAccessor::INVALID_ID;
++  myBuffViewFaceIdx.ByteOffset = 0;
++  myBuffViewFaceIdx.ByteLength = 0;
++  myBuffViewFaceIdx.Target     = RWGltf_GltfBufferViewTarget_ARRAY_BUFFER;
++
++  myCurrentFaceIndex = 0;
++
+   myBuffViewsDraco.clear();
+ 
+   myBinDataMap.Clear();
+@@ -855,11 +931,12 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+     return false;
+   }
+ 
+-  Message_ProgressScope      aPSentryBin(aScope.Next(), "Binary data", 4);
+-  const RWGltf_GltfArrayType anArrTypes[4] = {RWGltf_GltfArrayType_Position,
++  Message_ProgressScope      aPSentryBin(aScope.Next(), "Binary data", 5);
++  const RWGltf_GltfArrayType anArrTypes[5] = {RWGltf_GltfArrayType_Position,
+                                               RWGltf_GltfArrayType_Normal,
+                                               RWGltf_GltfArrayType_TCoord0,
+-                                              RWGltf_GltfArrayType_Indices};
++                                              RWGltf_GltfArrayType_Indices,
++                                              RWGltf_GltfArrayType_FaceIndices};
+ 
+   // dispatch shapes
+   NCollection_DataMap<XCAFPrs_Style, Handle(RWGltf_GltfFace)> aMergedFaces;
+@@ -896,7 +973,7 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+   NCollection_Map<Handle(RWGltf_GltfFaceList)>         aWrittenFaces;
+   NCollection_DataMap<TopoDS_Shape, Handle(RWGltf_GltfFace), TopTools_ShapeMapHasher>
+     aWrittenPrimData;
+-  for (Standard_Integer aTypeIter = 0; aTypeIter < 4; ++aTypeIter)
++  for (Standard_Integer aTypeIter = 0; aTypeIter < 5; ++aTypeIter)
+   {
+     const RWGltf_GltfArrayType anArrType = (RWGltf_GltfArrayType)anArrTypes[aTypeIter];
+     RWGltf_GltfBufferView*     aBuffView = NULL;
+@@ -914,12 +991,21 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+       case RWGltf_GltfArrayType_Indices:
+         aBuffView = &myBuffViewInd;
+         break;
++      case RWGltf_GltfArrayType_FaceIndices:
++        aBuffView = &myBuffViewFaceIdx;
++        break;
+       default:
+         break;
+     }
+     aBuffView->ByteOffset = aBinFile->tellp();
+     aWrittenFaces.Clear(false);
+     aWrittenPrimData.Clear(false);
++    
++    // Reset face index counter at start of FaceIndices pass
++    if (anArrType == RWGltf_GltfArrayType_FaceIndices)
++    {
++      myCurrentFaceIndex = 0;
++    }
+ #ifdef HAVE_DRACO
+     size_t aMeshIndex = 0;
+ #endif
+@@ -979,6 +1065,10 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+               aGltfFace->Indices = anOldGltfFace->Indices;
+               break;
+             }
++            case RWGltf_GltfArrayType_FaceIndices: {
++              aGltfFace->FaceIndices = anOldGltfFace->FaceIndices;
++              break;
++            }
+             default: {
+               break;
+             }
+@@ -1081,6 +1171,10 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+   {
+     myBuffViewInd.Id = aBuffViewId++;
+   }
++  if (myBuffViewFaceIdx.ByteLength > 0)
++  {
++    myBuffViewFaceIdx.Id = aBuffViewId++;
++  }
+ 
+   if (myDracoParameters.DracoCompression)
+   {
+@@ -1425,14 +1519,15 @@ void RWGltf_CafWriter::writeAccessors(const RWGltf_GltfSceneNodeMap&)
+   myWriter->Key(RWGltf_GltfRootElementName(RWGltf_GltfRootElement_Accessors));
+   myWriter->StartArray();
+ 
+-  const RWGltf_GltfArrayType                   anArrTypes[4] = {RWGltf_GltfArrayType_Position,
++  const RWGltf_GltfArrayType                   anArrTypes[5] = {RWGltf_GltfArrayType_Position,
+                                                                 RWGltf_GltfArrayType_Normal,
+                                                                 RWGltf_GltfArrayType_TCoord0,
+-                                                                RWGltf_GltfArrayType_Indices};
++                                                                RWGltf_GltfArrayType_Indices,
++                                                                RWGltf_GltfArrayType_FaceIndices};
+   NCollection_Map<Handle(RWGltf_GltfFaceList)> aWrittenFaces;
+   NCollection_Map<int>                         aWrittenIds;
+   int                                          aNbAccessors = 0;
+-  for (Standard_Integer aTypeIter = 0; aTypeIter < 4; ++aTypeIter)
++  for (Standard_Integer aTypeIter = 0; aTypeIter < 5; ++aTypeIter)
+   {
+     const RWGltf_GltfArrayType anArrType = (RWGltf_GltfArrayType)anArrTypes[aTypeIter];
+     aWrittenFaces.Clear(false);
+@@ -1511,6 +1606,21 @@ void RWGltf_CafWriter::writeAccessors(const RWGltf_GltfSceneNodeMap&)
+             writeIndices(*aGltfFace);
+             break;
+           }
++          case RWGltf_GltfArrayType_FaceIndices: {
++            const int anAccessorId = aGltfFace->FaceIndices.Id;
++            if (anAccessorId == RWGltf_GltfAccessor::INVALID_ID || !aWrittenIds.Add(anAccessorId))
++            {
++              break;
++            }
++
++            if (anAccessorId != aNbAccessors)
++            {
++              throw Standard_ProgramError("Internal error: RWGltf_CafWriter::writeAccessors()");
++            }
++            ++aNbAccessors;
++            writeFaceIndices(*aGltfFace);
++            break;
++          }
+           default: {
+             break;
+           }
+@@ -1709,6 +1819,35 @@ void RWGltf_CafWriter::writeIndices(const RWGltf_GltfFace& theGltfFace)
+ 
+ //=================================================================================================
+ 
++void RWGltf_CafWriter::writeFaceIndices(const RWGltf_GltfFace& theGltfFace)
++{
++#ifdef HAVE_RAPIDJSON
++  Standard_ProgramError_Raise_if(myWriter.get() == NULL,
++                                 "Internal error: RWGltf_CafWriter::writeFaceIndices()");
++  if (theGltfFace.FaceIndices.Id == RWGltf_GltfAccessor::INVALID_ID)
++  {
++    return;
++  }
++
++  myWriter->StartObject();
++  myWriter->Key("bufferView");
++  myWriter->Int(myBuffViewFaceIdx.Id);
++  myWriter->Key("byteOffset");
++  myWriter->Int64(theGltfFace.FaceIndices.ByteOffset);
++  myWriter->Key("componentType");
++  myWriter->Int(theGltfFace.FaceIndices.ComponentType);
++  myWriter->Key("count");
++  myWriter->Int64(theGltfFace.FaceIndices.Count);
++  myWriter->Key("type");
++  myWriter->String("SCALAR");
++  myWriter->EndObject();
++#else
++  (void)theGltfFace;
++#endif
++}
++
++//=================================================================================================
++
+ void RWGltf_CafWriter::writeAnimations()
+ {
+   Standard_ProgramError_Raise_if(myWriter.get() == NULL,
+@@ -1833,6 +1972,20 @@ void RWGltf_CafWriter::writeBufferViews(const Standard_Integer theBinDataBufferI
+     myWriter->Int(myBuffViewInd.Target);
+     myWriter->EndObject();
+   }
++  if (myBuffViewFaceIdx.Id != RWGltf_GltfAccessor::INVALID_ID)
++  {
++    aBuffViewId++;
++    myWriter->StartObject();
++    myWriter->Key("buffer");
++    myWriter->Int(theBinDataBufferId);
++    myWriter->Key("byteLength");
++    myWriter->Int64(myBuffViewFaceIdx.ByteLength);
++    myWriter->Key("byteOffset");
++    myWriter->Int64(myBuffViewFaceIdx.ByteOffset);
++    myWriter->Key("target");
++    myWriter->Int(myBuffViewFaceIdx.Target);
++    myWriter->EndObject();
++  }
+   if (myDracoParameters.DracoCompression)
+   {
+     for (size_t aBufInd = 0; aBufInd != myBuffViewsDraco.size(); ++aBufInd)
+@@ -1895,21 +2048,30 @@ void RWGltf_CafWriter::writeExtensions()
+   Standard_ProgramError_Raise_if(myWriter.get() == NULL,
+                                  "Internal error: RWGltf_CafWriter::writeExtensions()");
+ 
+-  if (myDracoParameters.DracoCompression)
++  const bool hasDraco = myDracoParameters.DracoCompression;
++  const bool hasBrepFaces = myBuffViewFaceIdx.ByteLength > 0;
++  
++  if (hasDraco || hasBrepFaces)
+   {
+     myWriter->Key(RWGltf_GltfRootElementName(RWGltf_GltfRootElement_ExtensionsUsed));
+-
+     myWriter->StartArray();
++    if (hasBrepFaces)
+     {
+-      myWriter->Key("KHR_draco_mesh_compression");
++      myWriter->String("TM_brep_faces");
++    }
++    if (hasDraco)
++    {
++      myWriter->String("KHR_draco_mesh_compression");
+     }
+     myWriter->EndArray();
++  }
+ 
++  if (hasDraco)
++  {
+     myWriter->Key(RWGltf_GltfRootElementName(RWGltf_GltfRootElement_ExtensionsRequired));
+-
+     myWriter->StartArray();
+     {
+-      myWriter->Key("KHR_draco_mesh_compression");
++      myWriter->String("KHR_draco_mesh_compression");
+     }
+     myWriter->EndArray();
+   }
+@@ -2070,10 +2232,27 @@ void RWGltf_CafWriter::writePrimArray(const RWGltf_GltfFace&         theGltfFace
+         break;
+     }
+ 
+-    if (myDracoParameters.DracoCompression && hasTriangulation(theGltfFace))
++    // Write extensions if needed (Draco or TM_brep_faces)
++    const bool hasDraco = myDracoParameters.DracoCompression && hasTriangulation(theGltfFace);
++    const bool hasBrepFaces = theGltfFace.FaceIndices.Id != RWGltf_GltfAccessor::INVALID_ID;
++    
++    if (hasDraco || hasBrepFaces)
+     {
+       myWriter->Key("extensions");
+       myWriter->StartObject();
++      
++      // TM_brep_faces extension for per-triangle face indices
++      if (hasBrepFaces)
++      {
++        myWriter->Key("TM_brep_faces");
++        myWriter->StartObject();
++        myWriter->Key("faceIndices");
++        myWriter->Int(theGltfFace.FaceIndices.Id);
++        myWriter->EndObject();
++      }
++      
++      // KHR_draco_mesh_compression extension
++      if (hasDraco)
+       {
+         myWriter->Key("KHR_draco_mesh_compression");
+         myWriter->StartObject();
+@@ -2102,6 +2281,7 @@ void RWGltf_CafWriter::writePrimArray(const RWGltf_GltfFace&         theGltfFace
+         myWriter->EndObject();
+         myWriter->EndObject();
+       }
++      
+       myWriter->EndObject();
+     }
+   }
+diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
+index 5c4f8e0be6..03cfc1a4a1 100644
+--- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
++++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
+@@ -56,6 +56,7 @@ public:
+     std::vector<Graphic3d_Vec3> NormalsVec;   //!< vector for mesh normals
+     std::vector<Graphic3d_Vec2> TexCoordsVec; //!< vector for mesh texture UV coordinates
+     std::vector<Poly_Triangle>  IndicesVec;   //!< vector for mesh indices
++    std::vector<Standard_Integer> FaceIndicesVec; //!< vector for per-triangle face indices (TM_brep_faces)
+   };
+ 
+   //! Main constructor.
+@@ -289,6 +290,19 @@ protected:
+     const RWMesh_FaceIterator&                     theFaceIter,
+     const std::shared_ptr<RWGltf_CafWriter::Mesh>& theMesh);
+ 
++  //! Write per-triangle face indices into binary file for TM_brep_faces extension.
++  //! @param[out] theGltfFace  glTF face definition
++  //! @param[out] theBinFile   output file to write into
++  //! @param[in] theFaceIter   current face to write
++  //! @param[in][out] theAccessorNb running accessor index for IDs
++  //! @param[in][out] theMesh   mesh
++  Standard_EXPORT virtual void saveFaceIndices(
++    RWGltf_GltfFace&                               theGltfFace,
++    std::ostream&                                  theBinFile,
++    const RWMesh_FaceIterator&                     theFaceIter,
++    Standard_Integer&                              theAccessorNb,
++    const std::shared_ptr<RWGltf_CafWriter::Mesh>& theMesh);
++
+   //! Write edge indexes into binary file.
+   //! @param[out] theGltfFace  glTF face definition
+   //! @param[out] theBinFile   output file to write into
+@@ -323,6 +337,11 @@ protected:
+   //! @param[in] theGltfFace  face definition to write
+   Standard_EXPORT virtual void writeIndices(const RWGltf_GltfFace& theGltfFace);
+ 
++  //! Write bufferView for per-triangle face indices within RWGltf_GltfRootElement_Accessors section
++  //! (TM_brep_faces extension).
++  //! @param[in] theGltfFace  face definition to write
++  Standard_EXPORT virtual void writeFaceIndices(const RWGltf_GltfFace& theGltfFace);
++
+ protected:
+   //! Write RWGltf_GltfRootElement_Accessors section.
+   //! @param[in] theSceneNodeMap  ordered map of scene nodes
+@@ -524,6 +543,8 @@ protected:
+   RWGltf_GltfBufferView                         myBuffViewNorm;      //!< current buffer view with nodes normals
+   RWGltf_GltfBufferView                         myBuffViewTextCoord; //!< current buffer view with nodes UV coordinates
+   RWGltf_GltfBufferView                         myBuffViewInd;       //!< current buffer view with triangulation indexes
++  RWGltf_GltfBufferView                         myBuffViewFaceIdx;   //!< current buffer view with per-triangle face indices (TM_brep_faces)
++  Standard_Integer                              myCurrentFaceIndex;  //!< current face index during iteration
+   ShapeToGltfFaceMap                            myBinDataMap;        //!< map for TopoDS_Face to glTF face (merging duplicates)
+   int64_t                                       myBinDataLen64;      //!< length of binary file
+ 
+diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfArrayType.hxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfArrayType.hxx
+index 688eaf0622..77431a78e2 100644
+--- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfArrayType.hxx
++++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfArrayType.hxx
+@@ -29,6 +29,7 @@ enum RWGltf_GltfArrayType
+   RWGltf_GltfArrayType_TCoord1,  //!< "TEXCOORD_1" within "attributes" element
+   RWGltf_GltfArrayType_Joint,    //!< "JOINT"      within "attributes" element
+   RWGltf_GltfArrayType_Weight,   //!< "WEIGHT"     within "attributes" element
++  RWGltf_GltfArrayType_FaceIndices, //!< per-triangle face indices for TM_brep_faces extension
+ };
+ 
+ //! Parse GltfArrayType from string.
+diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfFace.hxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfFace.hxx
+index f0f0efe250..866020c4ff 100644
+--- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfFace.hxx
++++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_GltfFace.hxx
+@@ -29,6 +29,7 @@ public:
+   RWGltf_GltfAccessor NodeNorm; //!< accessor for nodal normals
+   RWGltf_GltfAccessor NodeUV;   //!< accessor for nodal UV texture coordinates
+   RWGltf_GltfAccessor Indices;  //!< accessor for indexes
++  RWGltf_GltfAccessor FaceIndices; //!< accessor for per-triangle face indices (TM_brep_faces)
+   TopoDS_Shape        Shape;    //!< original Face or face list
+   XCAFPrs_Style       Style;    //!< face style
+                                 // clang-format off

@@ -25,7 +25,8 @@ public:
     }
 
     path_ = (std::filesystem::temp_directory_path() /
-             ("cascadio_" + random_part + extension)).string();
+             ("cascadio_" + random_part + extension))
+                .string();
 
     // Create the file to ensure it exists and we have exclusive access
     std::ofstream ofs(path_, std::ios::binary);
@@ -48,18 +49,21 @@ public:
 
   /// Check if the temp file was created successfully
   bool valid() const { return !path_.empty(); }
-  
+
   /// Get the file path
   const char *path() const { return path_.c_str(); }
 
   /// Write data to the file (overwrites any existing content)
   bool write_and_close(const void *data, size_t size) {
-    if (path_.empty()) return false;
-    
+    if (path_.empty())
+      return false;
+
     std::ofstream ofs(path_, std::ios::binary | std::ios::trunc);
-    if (!ofs) return false;
-    
-    ofs.write(static_cast<const char *>(data), static_cast<std::streamsize>(size));
+    if (!ofs)
+      return false;
+
+    ofs.write(static_cast<const char *>(data),
+              static_cast<std::streamsize>(size));
     return ofs.good();
   }
 

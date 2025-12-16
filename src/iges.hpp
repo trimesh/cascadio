@@ -57,7 +57,7 @@ static TopoDS_Shape stitchShapes(const std::vector<TopoDS_Shape> &shapes,
   }
 
   sewing.Perform();
-  
+
   // Get the sewed result - even if sewing didn't improve connectivity,
   // SewedShape() returns a valid compound of the input shapes
   TopoDS_Shape sewedShape = sewing.SewedShape();
@@ -133,8 +133,8 @@ loadIgesFile(const char *input_path, Standard_Real tol_linear,
       return result;
     }
     result.shapes.push_back(stitched);
-    BRepMesh_IncrementalMesh mesh(stitched, tol_linear, tol_relative,
-                                  tol_angle, use_parallel);
+    BRepMesh_IncrementalMesh mesh(stitched, tol_linear, tol_relative, tol_angle,
+                                  use_parallel);
     mesh.Perform();
     // Add stitched shape to the document
     shapeTool->AddShape(stitched, Standard_False);

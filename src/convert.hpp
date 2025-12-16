@@ -16,6 +16,9 @@
 // Meshing
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <RWMesh_CoordinateSystem.hxx>
+// Bounding box for unit detection
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
 // GLTF Write methods
 #include <RWGltf_CafWriter.hxx>
 // OBJ Write methods
@@ -100,6 +103,45 @@ static LoadResult loadBytes(const std::string &data, FileType file_type,
 // GLB Export
 // ============================================================================
 
+/// Detect length unit from document or shapes
+/// Returns scale factor to convert to meters (e.g., 0.001 for millimeters)
+static Standard_Real detectLengthUnit(Handle(TDocStd_Document) doc,
+                                      const std::vector<TopoDS_Shape> &shapes) {
+  Standard_Real lengthUnit = 1.0;
+
+  // Try to get length unit from document first
+  if (XCAFDoc_DocumentTool::GetLengthUnit(doc, lengthUnit)) {
+    return lengthUnit;
+  }
+
+  // Length unit not stored in document - try to detect from shapes
+  // Many STEP files don't populate this attribute correctly.
+  if (shapes.empty()) {
+    return lengthUnit;
+  }
+
+  Bnd_Box bbox;
+  for (const auto &shape : shapes) {
+    BRepBndLib::Add(shape, bbox);
+  }
+
+  if (bbox.IsVoid()) {
+    return lengthUnit;
+  }
+
+  Standard_Real xmin, ymin, zmin, xmax, ymax, zmax;
+  bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+  Standard_Real maxExtent = std::max({xmax - xmin, ymax - ymin, zmax - zmin});
+
+  // If max extent > 1.0, likely in mm (typical CAD parts are 10-1000mm)
+  // glTF expects meters, so if extent suggests mm, use 0.001
+  if (maxExtent > 1.0) {
+    lengthUnit = 0.001; // Assume millimeters -> meters
+  }
+
+  return lengthUnit;
+}
+
 /// Export document to GLB file
 static bool exportToGlbFile(Handle(TDocStd_Document) doc,
                             const char *output_path,
@@ -135,7 +177,7 @@ static std::vector<char> exportToGlbBytes(Handle(TDocStd_Document) doc,
 
   // Export to temp file
   if (!exportToGlbFile(doc, tempFile.path(), merge_primitives, use_parallel)) {
-    return {};  // TempFile destructor handles cleanup
+    return {}; // TempFile destructor handles cleanup
   }
 
   // Read temp file into memory
@@ -180,10 +222,8 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
     return 1;
   }
 
-  // Get length unit from document (scale factor in meters)
-  // This matches what RWGltf_CafWriter uses for coordinate conversion
-  Standard_Real lengthUnit = 1.0;
-  XCAFDoc_DocumentTool::GetLengthUnit(loaded.doc, lengthUnit);
+  // Get length unit (scale factor to meters for glTF output)
+  Standard_Real lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
 
   // Extract materials before exporting (need access to document)
   rapidjson::Document matDoc;
@@ -243,10 +283,8 @@ to_glb_bytes(const std::string &data, FileType file_type,
     return "";
   }
 
-  // Get length unit from document (scale factor in meters)
-  // This matches what RWGltf_CafWriter uses for coordinate conversion
-  Standard_Real lengthUnit = 1.0;
-  XCAFDoc_DocumentTool::GetLengthUnit(loaded.doc, lengthUnit);
+  // Get length unit (scale factor to meters for glTF output)
+  Standard_Real lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
 
   // Extract materials before closing document
   rapidjson::Document matDoc;

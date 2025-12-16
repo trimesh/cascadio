@@ -19,6 +19,9 @@ from cascadio._core import (
 # Import primitives submodule
 from . import primitives
 
+# Import trimesh extension (registers handler on import if trimesh available)
+from . import trimesh_ext
+
 # File type constants for convenience
 STEP = FileType.STEP
 IGES = FileType.IGES
@@ -126,4 +129,5 @@ __all__ = [
     "step_to_obj",
     "__version__",
     "primitives",
+    "trimesh_ext",
 ]

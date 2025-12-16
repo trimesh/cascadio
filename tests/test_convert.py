@@ -4,8 +4,17 @@ import timeit
 from pathlib import Path
 
 import cascadio
+import cascadio.trimesh_ext  # Register extension handlers
 import numpy as np
+import pytest
 import trimesh
+
+# Check if trimesh has extension registry support
+try:
+    from trimesh.exchange.gltf.extensions import register_handler
+    _HAS_EXTENSION_REGISTRY = True
+except ImportError:
+    _HAS_EXTENSION_REGISTRY = False
 
 MODELS_DIR = Path(__file__).parent / "models"
 FEATURE_TYPE_STEP_PATH = MODELS_DIR / "featuretype.STEP"
@@ -92,6 +101,7 @@ def test_convert_step_to_obj_without_colors():
     assert np.allclose(mesh.visual.material.main_color, np.array([102, 102, 102, 255]))
 
 
+@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
 def test_convert_step_to_glb_with_brep():
     """Test that include_brep=True embeds BREP primitive data in mesh extras."""
     step_path = FEATURE_TYPE_STEP_PATH
@@ -115,10 +125,9 @@ def test_convert_step_to_glb_with_brep():
     # Get the mesh
     mesh = list(scene.geometry.values())[0]
 
-    # Should have cascadio.primitives in mesh metadata
-    assert "cascadio" in mesh.metadata
-    assert "primitives" in mesh.metadata["cascadio"]
-    brep_faces = mesh.metadata["cascadio"]["primitives"]
+    # Should have brep_faces in mesh metadata from TM_brep_faces extension
+    assert "brep_faces" in mesh.metadata
+    brep_faces = mesh.metadata["brep_faces"]
 
     # Check brep_faces content
     assert len(brep_faces) == 96  # featuretype.STEP has 96 faces
@@ -155,8 +164,13 @@ def test_convert_step_to_glb_with_brep():
     assert len(plane.x_dir) == 3
 
 
+@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
 def test_convert_step_to_glb_brep_types_filter():
-    """Test that brep_types parameter filters which primitives are included."""
+    """Test that brep_types parameter filters which primitives are included.
+    
+    When filtering, the primitives array preserves index alignment with brep_index
+    by including null entries for filtered-out faces.
+    """
     step_path = FEATURE_TYPE_STEP_PATH
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -172,11 +186,17 @@ def test_convert_step_to_glb_brep_types_filter():
         )
         scene_cyl = trimesh.load(glb_cyl, merge_primitives=True)
         mesh_cyl = list(scene_cyl.geometry.values())[0]
-        brep_cyl = mesh_cyl.metadata["cascadio"]["primitives"]
+        brep_cyl = mesh_cyl.metadata["brep_faces"]
+        brep_index_cyl = mesh_cyl.face_attributes["brep_index"]
 
-        # Should only have cylinders
-        assert len(brep_cyl) == 46
-        assert all(f["type"] == "cylinder" for f in brep_cyl)
+        # Total primitives should match max brep_index + 1 to preserve alignment
+        assert len(brep_cyl) == 96  # Total face count
+        # Non-null entries should be cylinders only
+        cylinders = [f for f in brep_cyl if f is not None]
+        assert len(cylinders) == 46
+        assert all(f["type"] == "cylinder" for f in cylinders)
+        # brep_index should still correctly map to primitives
+        assert brep_index_cyl.max() == len(brep_cyl) - 1
 
         # Test with only planes
         glb_plane = Path(temp_dir) / "planes.glb"
@@ -190,11 +210,17 @@ def test_convert_step_to_glb_brep_types_filter():
         )
         scene_plane = trimesh.load(glb_plane, merge_primitives=True)
         mesh_plane = list(scene_plane.geometry.values())[0]
-        brep_plane = mesh_plane.metadata["cascadio"]["primitives"]
+        brep_plane = mesh_plane.metadata["brep_faces"]
+        brep_index_plane = mesh_plane.face_attributes["brep_index"]
 
-        # Should only have planes
-        assert len(brep_plane) == 49
-        assert all(f["type"] == "plane" for f in brep_plane)
+        # Total primitives should match face count
+        assert len(brep_plane) == 96
+        # Non-null entries should be planes only
+        planes = [f for f in brep_plane if f is not None]
+        assert len(planes) == 49
+        assert all(f["type"] == "plane" for f in planes)
+        # brep_index should still correctly map to primitives
+        assert brep_index_plane.max() == len(brep_plane) - 1
 
         # Test with both
         glb_both = Path(temp_dir) / "both.glb"
@@ -208,14 +234,18 @@ def test_convert_step_to_glb_brep_types_filter():
         )
         scene_both = trimesh.load(glb_both, merge_primitives=True)
         mesh_both = list(scene_both.geometry.values())[0]
-        brep_both = mesh_both.metadata["cascadio"]["primitives"]
+        brep_both = mesh_both.metadata["brep_faces"]
 
-        # Should have both types (95 analytical faces)
-        assert len(brep_both) == 95
-        types = {f["type"] for f in brep_both}
+        # Total primitives should match face count (1 non-analytical face filtered)
+        assert len(brep_both) == 96
+        # Non-null entries should be cylinders and planes
+        non_null = [f for f in brep_both if f is not None]
+        assert len(non_null) == 95  # 46 cylinders + 49 planes
+        types = {f["type"] for f in non_null}
         assert types == {"cylinder", "plane"}
 
 
+@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
 def test_step_to_glb_bytes():
     """Test the bytes-based conversion without temp files."""
     step_path = FEATURE_TYPE_STEP_PATH
@@ -239,9 +269,8 @@ def test_step_to_glb_bytes():
 
     assert len(scene.geometry) == 1
     mesh = list(scene.geometry.values())[0]
-    assert "cascadio" in mesh.metadata
-    assert "primitives" in mesh.metadata["cascadio"]
-    assert len(mesh.metadata["cascadio"]["primitives"]) == 96
+    assert "brep_faces" in mesh.metadata
+    assert len(mesh.metadata["brep_faces"]) == 96
 
 
 def test_step_to_glb_bytes_performance():
@@ -342,3 +371,84 @@ def test_convert_step_to_glb_with_materials():
     assert mat["description"] == "Steel"
     assert "density" in mat
     assert 0.007 < mat["density"] < 0.008  # ~0.00785 g/mm³ for steel
+
+
+@pytest.fixture
+def brep_mesh():
+    """Load featuretype.STEP with BREP data for cylinder tests."""
+    glb_data = cascadio.load(
+        FEATURE_TYPE_STEP_PATH.read_bytes(),
+        file_type="step",
+        tol_linear=TOL_LINEAR,
+        tol_angular=TOL_ANGULAR,
+        include_brep=True,
+    )
+    scene = trimesh.load_scene(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
+    return list(scene.geometry.values())[0]
+
+
+@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+def test_cylinder_parameters(brep_mesh):
+    """Validate cylinder primitive parameters (unit axis, positive radius, valid bounds)."""
+    brep_faces = brep_mesh.metadata["brep_faces"]
+    primitives = cascadio.primitives.parse_brep_faces(brep_faces)
+    cylinders = [p for p in primitives if isinstance(p, cascadio.primitives.Cylinder)]
+
+    assert len(cylinders) == 46
+
+    for cyl in cylinders:
+        axis = np.array(cyl.axis)
+        assert np.isclose(np.linalg.norm(axis), 1.0, atol=1e-6)
+        assert cyl.radius > 0
+        assert cyl.u_bounds[1] > cyl.u_bounds[0]
+        assert np.isfinite(cyl.v_bounds[0]) and np.isfinite(cyl.v_bounds[1])
+
+
+@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+def test_cylinder_units_match_mesh(brep_mesh):
+    """Verify cylinders and mesh use consistent units (meters)."""
+    brep_faces = brep_mesh.metadata["brep_faces"]
+    primitives = cascadio.primitives.parse_brep_faces(brep_faces)
+    cylinders = [p for p in primitives if isinstance(p, cascadio.primitives.Cylinder)]
+
+    # Mesh extents ~127mm x 63.5mm x 35mm in meters
+    assert np.allclose(brep_mesh.bounding_box.extents, [0.127, 0.0635, 0.034925], rtol=0.01)
+
+    # Cylinder radii should be in meters (1.5mm to 10mm range)
+    radii = [c.radius for c in cylinders]
+    assert 0.0001 < min(radii) < 0.1
+    assert 0.0001 < max(radii) < 0.1
+
+
+@pytest.mark.skipif(not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available")
+def test_cylinder_vertices_on_surface(brep_mesh, tolerance: float = 1e-8):
+    """Verify mesh vertices mapped to cylinders lie on the cylinder surface."""
+    brep_index = brep_mesh.face_attributes.get("brep_index")
+    if brep_index is None:
+        pytest.skip("brep_index not available")
+
+    brep_index = np.asarray(brep_index).flatten()
+    primitives = cascadio.primitives.parse_brep_faces(brep_mesh.metadata["brep_faces"])
+
+    errors = []
+    for idx, prim in enumerate(primitives):
+        if not isinstance(prim, cascadio.primitives.Cylinder):
+            continue
+
+        tri_indices = np.where(brep_index == idx)[0]
+        if len(tri_indices) == 0:
+            continue
+
+        origin, axis = np.array(prim.origin), np.array(prim.axis)
+        verts = brep_mesh.vertices[np.unique(brep_mesh.faces[tri_indices])]
+
+        # Distance from cylinder axis
+        to_verts = verts - origin
+        perp = to_verts - np.outer(np.dot(to_verts, axis), axis)
+        dist = np.linalg.norm(perp, axis=1)
+
+        max_err = np.abs(dist - prim.radius).max()
+        if max_err > tolerance:
+            errors.append(f"Cylinder {idx}: {max_err*1000:.4f}mm error")
+
+    assert len(errors) == 0, f"Vertex errors: {errors[:3]}"

@@ -7,6 +7,8 @@ For local development:
 - Builds OCCT to {project}/occt_cache/ to avoid polluting upstream/
 - Set CASCADIO_OCCT_LIB env var to point pip install to the cached libs
 - Headers in upstream/OCCT are still used (they don't have absolute paths)
+- Applies patches from patches/ directory automatically
+- Supports incremental builds (use --clean for full rebuild)
 
 For cibuildwheel:
 - Detects CIBUILDWHEEL=1 env var
@@ -14,6 +16,8 @@ For cibuildwheel:
 - Cache persists across cibuildwheel runs
 """
 
+import argparse
+import glob
 import os
 import platform
 import subprocess
@@ -71,9 +75,47 @@ def run(cmd, **kwargs):
         sys.exit(result.returncode)
 
 
+def apply_patches(occt_src, patches_dir):
+    """Apply patches from patches/ directory if they haven't been applied."""
+    if not os.path.isdir(patches_dir):
+        return
+
+    patches = sorted(glob.glob(os.path.join(patches_dir, "*.patch")))
+    if not patches:
+        return
+
+    print(f"Found {len(patches)} patch(es) to check...")
+
+    for patch_path in patches:
+        patch_name = os.path.basename(patch_path)
+
+        # Check if patch is already applied by doing a dry-run reverse
+        result = subprocess.run(
+            ["git", "apply", "--reverse", "--check", patch_path],
+            cwd=occt_src,
+            capture_output=True,
+        )
+
+        if result.returncode == 0:
+            print(f"  {patch_name}: already applied")
+            continue
+
+        # Check if patch can be applied
+        result = subprocess.run(
+            ["git", "apply", "--check", patch_path], cwd=occt_src, capture_output=True
+        )
+
+        if result.returncode == 0:
+            print(f"  {patch_name}: applying...")
+            run(["git", "apply", patch_path], cwd=occt_src)
+        else:
+            print(f"  {patch_name}: FAILED to apply (may have conflicts)")
+            print(f"    {result.stderr.decode()}")
+
+
 def get_lib_marker(base_path, system, in_tree=False):
     """Get the path to the library marker file.
-    
+
     Args:
         base_path: Base directory for libraries
         system: Platform name (Linux, Darwin, Windows)
@@ -99,10 +141,22 @@ def write_env_file(lib_dir):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Build OpenCASCADE for cascadio")
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clean build (remove CMake cache and rebuild from scratch)",
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Force rebuild even if libraries exist"
+    )
+    args = parser.parse_args()
+
     system = platform.system()
 
     # OCCT source is always in upstream/OCCT relative to project root
     occt_src = os.path.join(PROJECT_ROOT, "upstream", "OCCT")
+    patches_dir = os.path.join(PROJECT_ROOT, "patches")
 
     if IN_CIBUILDWHEEL:
         # In CI: build in-tree
@@ -115,9 +169,10 @@ def main():
         marker = get_lib_marker(LOCAL_CACHE_DIR, system, in_tree=False)
         print(f"Local development build, using cache at {LOCAL_CACHE_DIR}")
 
-    # Check cache
-    if os.path.exists(marker):
+    # Check cache (skip if --force)
+    if os.path.exists(marker) and not args.force:
         print(f"Using cached OCCT ({marker} exists)")
+        print("Use --force to rebuild, or --clean for full rebuild")
         if not IN_CIBUILDWHEEL:
             lib_dir = os.path.dirname(marker)
             write_env_file(lib_dir)
@@ -135,8 +190,23 @@ def main():
 
     os.chdir(occt_src)
 
-    # Clean build artifacts
-    run(["git", "clean", "-xdf"])
+    # Apply patches before building
+    apply_patches(occt_src, patches_dir)
+
+    # Clean build if requested (removes CMake cache but keeps source changes)
+    if args.clean:
+        print("Cleaning CMake cache...")
+        cmake_cache = os.path.join(occt_src, "CMakeCache.txt")
+        cmake_files = os.path.join(occt_src, "CMakeFiles")
+        build_ninja = os.path.join(occt_src, "build.ninja")
+        if os.path.exists(cmake_cache):
+            os.remove(cmake_cache)
+        if os.path.exists(build_ninja):
+            os.remove(build_ninja)
+        if os.path.isdir(cmake_files):
+            import shutil
+
+            shutil.rmtree(cmake_files)
 
     # Build cmake args
     cmake_args = CMAKE_ARGS.copy()
@@ -152,19 +222,27 @@ def main():
 
     cmake_args.append(".")
 
-    # Configure with cmake
-    run(["cmake"] + cmake_args)
+    # Only run cmake configure if needed (no build.ninja or --clean was used)
+    build_ninja_path = os.path.join(occt_src, "build.ninja")
+    needs_configure = not os.path.exists(build_ninja_path) or args.clean
 
-    # Patch build.ninja to remove GL/EGL linking on Linux
-    if system == "Linux" and os.path.exists("build.ninja"):
-        with open("build.ninja", "r") as f:
-            content = f.read()
-        content = content.replace(" -lGL ", " ").replace(" -lEGL ", " ")
-        with open("build.ninja", "w") as f:
-            f.write(content)
-        print("Patched build.ninja to remove GL/EGL")
+    if needs_configure:
+        print("Configuring with CMake...")
+        run(["cmake"] + cmake_args)
 
-    # Build
+        # Patch build.ninja to remove GL/EGL linking on Linux
+        if system == "Linux" and os.path.exists("build.ninja"):
+            with open("build.ninja", "r") as f:
+                content = f.read()
+            content = content.replace(" -lGL ", " ").replace(" -lEGL ", " ")
+            with open("build.ninja", "w") as f:
+                f.write(content)
+            print("Patched build.ninja to remove GL/EGL")
+    else:
+        print("Using existing CMake configuration (use --clean to reconfigure)")
+
+    # Build (ninja handles incremental builds automatically)
+    print("Building with ninja (incremental)...")
     run(["ninja"])
 
     # For local builds, also install to get libs in the cache dir
