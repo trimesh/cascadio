@@ -26,7 +26,9 @@ except ImportError:
     def register_handler(*args, **kwargs):
         def decorator(fn):
             return fn
+
         return decorator
+
 
 from .primitives import (
     BrepPrimitive,
@@ -38,7 +40,9 @@ from .primitives import (
 )
 
 
-def _parse_face_to_primitive(face: Optional[Dict], face_index: int) -> Optional[BrepPrimitive]:
+def _parse_face_to_primitive(
+    face: Optional[Dict], face_index: int
+) -> Optional[BrepPrimitive]:
     """
     Convert a face definition from TM_brep_faces to a cascadio primitive.
 
@@ -56,7 +60,7 @@ def _parse_face_to_primitive(face: Optional[Dict], face_index: int) -> Optional[
     """
     if face is None:
         return None
-        
+
     face_type = face.get("type")
     if face_type is None:
         return None
@@ -149,6 +153,7 @@ def process_brep_faces(
         result["brep_primitives"] = primitives
 
     return result
+
 
 @register_handler("TM_brep_faces", "primitive")
 def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:

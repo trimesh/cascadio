@@ -82,7 +82,7 @@ def test_convert_step_to_obj_colors(use_colors, expected_color):
             tol_angular=TOL_ANGULAR,
             use_colors=use_colors,
         )
-        
+
         # MTL file should exist only when colors are enabled
         assert mtl_path.exists() == use_colors
         mesh = trimesh.load(obj_path, merge_primitives=True)
@@ -168,7 +168,9 @@ def test_convert_step_to_glb_with_brep():
         ({"cylinder", "plane"}, 95, {"cylinder", "plane"}),
     ],
 )
-def test_convert_step_to_glb_brep_types_filter(brep_types, expected_count, expected_types):
+def test_convert_step_to_glb_brep_types_filter(
+    brep_types, expected_count, expected_types
+):
     """Test that brep_types parameter filters which primitives are included.
 
     When filtering, the primitives array preserves index alignment with brep_index
@@ -186,7 +188,7 @@ def test_convert_step_to_glb_brep_types_filter(brep_types, expected_count, expec
         include_brep=True,
         brep_types=brep_types,
     )
-    
+
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
     mesh = list(scene.geometry.values())[0]
     brep_faces = mesh.metadata["brep_faces"]
@@ -194,12 +196,12 @@ def test_convert_step_to_glb_brep_types_filter(brep_types, expected_count, expec
 
     # Total primitives should match total face count (preserves alignment)
     assert len(brep_faces) == 96
-    
+
     # Non-null entries should match filter
     non_null = [f for f in brep_faces if f is not None]
     assert len(non_null) == expected_count
     assert {f["type"] for f in non_null} == expected_types
-    
+
     # brep_index should correctly map to primitives
     assert brep_index.max() == len(brep_faces) - 1
 
@@ -279,10 +281,18 @@ def test_step_to_glb_bytes_performance():
 
     # Time bytes-based methods
     def bytes_based():
-        return cascadio.load(step_data, file_type="step", tol_linear=TOL_LINEAR, tol_angular=TOL_ANGULAR)
+        return cascadio.load(
+            step_data, file_type="step", tol_linear=TOL_LINEAR, tol_angular=TOL_ANGULAR
+        )
 
     def bytes_with_brep():
-        return cascadio.load(step_data, file_type="step", tol_linear=TOL_LINEAR, tol_angular=TOL_ANGULAR, include_brep=True)
+        return cascadio.load(
+            step_data,
+            file_type="step",
+            tol_linear=TOL_LINEAR,
+            tol_angular=TOL_ANGULAR,
+            include_brep=True,
+        )
 
     file_time = timeit.timeit(file_based, number=n_iterations)
     file_brep_time = timeit.timeit(file_based_brep, number=n_iterations)
@@ -291,9 +301,15 @@ def test_step_to_glb_bytes_performance():
 
     print(f"\nPerformance ({n_iterations} iterations):")
     print(f"  File-based (no BREP):   {file_time / n_iterations * 1000:.1f}ms/call")
-    print(f"  File-based (with BREP): {file_brep_time / n_iterations * 1000:.1f}ms/call  (+{(file_brep_time / file_time - 1) * 100:.1f}%)")
-    print(f"  Bytes (no BREP):        {bytes_time / n_iterations * 1000:.1f}ms/call  ({file_time / bytes_time:.2f}x faster)")
-    print(f"  Bytes (with BREP):      {brep_time / n_iterations * 1000:.1f}ms/call  (+{(brep_time / bytes_time - 1) * 100:.1f}%, {file_brep_time / brep_time:.2f}x faster)")
+    print(
+        f"  File-based (with BREP): {file_brep_time / n_iterations * 1000:.1f}ms/call  (+{(file_brep_time / file_time - 1) * 100:.1f}%)"
+    )
+    print(
+        f"  Bytes (no BREP):        {bytes_time / n_iterations * 1000:.1f}ms/call  ({file_time / bytes_time:.2f}x faster)"
+    )
+    print(
+        f"  Bytes (with BREP):      {brep_time / n_iterations * 1000:.1f}ms/call  (+{(brep_time / bytes_time - 1) * 100:.1f}%, {file_brep_time / brep_time:.2f}x faster)"
+    )
 
     # Verify outputs are valid
     assert len(file_based()) > 0

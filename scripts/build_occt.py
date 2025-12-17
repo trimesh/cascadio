@@ -97,24 +97,32 @@ def apply_patches(occt_src, patches_dir):
 
     for patch_path in patches:
         patch_name = os.path.basename(patch_path)
+        abs_patch_path = os.path.abspath(patch_path)
 
         # Check if patch is already applied by doing a dry-run reverse
-        try:
-            subprocess.run(
-                ["git", "apply", "--reverse", "--check", patch_path],
-                cwd=occt_src,
-                capture_output=True,
-                check=True,
-            )
+        result = subprocess.run(
+            [
+                "patch",
+                "-p1",
+                "--reverse",
+                "--dry-run",
+                "--force",
+                "--silent",
+                "-i",
+                abs_patch_path,
+            ],
+            cwd=occt_src,
+            capture_output=True,
+        )
+
+        if result.returncode == 0:
             print(f"  {patch_name}: already applied")
             continue
-        except subprocess.CalledProcessError:
-            pass
 
-        # Try applying with 3-way merge (most robust, handles whitespace/line endings)
+        # Apply the patch (patch handles line ending conversion automatically)
         print(f"  {patch_name}: applying...")
         subprocess.run(
-            ["git", "apply", "--3way", patch_path],
+            ["patch", "-p1", "-i", abs_patch_path],
             cwd=occt_src,
             check=True,
         )
