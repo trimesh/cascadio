@@ -142,25 +142,37 @@ static Standard_Real detectLengthUnit(Handle(TDocStd_Document) doc,
   return lengthUnit;
 }
 
-/// Export document to GLB file
+/// Export document to GLB file with optional face data collection
 static bool exportToGlbFile(Handle(TDocStd_Document) doc,
                             const char *output_path,
                             Standard_Boolean merge_primitives,
-                            Standard_Boolean use_parallel) {
+                            Standard_Boolean use_parallel,
+                            std::vector<FaceTriangleData> *faceData = nullptr) {
   RWGltf_CafWriter cafWriter(output_path, Standard_True);
   cafWriter.SetMergeFaces(merge_primitives);
   cafWriter.SetParallel(use_parallel);
   cafWriter.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
+
+  // Set callback to collect face data if requested
+  if (faceData != nullptr) {
+    faceData->clear();
+    cafWriter.SetFaceDataCallback(
+        [faceData](Standard_Integer faceIndex, Standard_Integer triStart,
+                   Standard_Integer triCount, const TopoDS_Face &face) {
+          faceData->push_back({faceIndex, triStart, triCount, face});
+        });
+  }
 
   Message_ProgressRange progress;
   TColStd_IndexedDataMapOfStringString fileInfo;
   return cafWriter.Perform(doc, fileInfo, progress);
 }
 
-/// Export document to GLB in memory
-static std::vector<char> exportToGlbBytes(Handle(TDocStd_Document) doc,
-                                          Standard_Boolean merge_primitives,
-                                          Standard_Boolean use_parallel) {
+/// Export document to GLB in memory with optional face data collection
+static std::vector<char>
+exportToGlbBytes(Handle(TDocStd_Document) doc, Standard_Boolean merge_primitives,
+                 Standard_Boolean use_parallel,
+                 std::vector<FaceTriangleData> *faceData = nullptr) {
   // OCCT's RWGltf_CafWriter requires a file path, so we use a temp file
   // approach but encapsulate it here. In the future, could patch OCCT to
   // support streams.
@@ -175,8 +187,9 @@ static std::vector<char> exportToGlbBytes(Handle(TDocStd_Document) doc,
   // Close fd so exportToGlbFile can write to it
   tempFile.close_fd();
 
-  // Export to temp file
-  if (!exportToGlbFile(doc, tempFile.path(), merge_primitives, use_parallel)) {
+  // Export to temp file with optional face data collection
+  if (!exportToGlbFile(doc, tempFile.path(), merge_primitives, use_parallel,
+                       faceData)) {
     return {}; // TempFile destructor handles cleanup
   }
 
@@ -206,72 +219,8 @@ static std::vector<char> exportToGlbBytes(Handle(TDocStd_Document) doc,
 // Public API
 // ============================================================================
 
-/// Transcode BREP file (STEP or IGES) to GLB file
-static int to_glb(char *input_path, char *output_path, FileType file_type,
-                  Standard_Real tol_linear, Standard_Real tol_angle,
-                  Standard_Boolean tol_relative,
-                  Standard_Boolean merge_primitives,
-                  Standard_Boolean use_parallel,
-                  Standard_Boolean include_brep = Standard_False,
-                  std::set<std::string> brep_types = {},
-                  Standard_Boolean include_materials = Standard_False) {
-
-  LoadResult loaded = loadFile(input_path, file_type, tol_linear, tol_angle,
-                               tol_relative, use_parallel);
-  if (!loaded.success) {
-    return 1;
-  }
-
-  // Get length unit (scale factor to meters for glTF output)
-  Standard_Real lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
-
-  // Extract materials before exporting (need access to document)
-  rapidjson::Document matDoc;
-  matDoc.SetArray();
-  rapidjson::Value *materialsPtr = nullptr;
-  if (include_materials) {
-    rapidjson::Value materials =
-        extractMaterials(loaded.doc, matDoc.GetAllocator());
-    // Move materials into the document as root
-    matDoc.Swap(materials);
-    materialsPtr = &matDoc;
-  }
-
-  if (!exportToGlbFile(loaded.doc, output_path, merge_primitives,
-                       use_parallel)) {
-    std::cerr << "Error: Failed to write GLB to file" << std::endl;
-    loaded.shapes.clear();
-    closeDocument(loaded.doc);
-    return 1;
-  }
-
-  closeDocument(loaded.doc);
-
-  // Metadata injection only works reliably with merge_primitives=true
-  // (single merged mesh). With multiple meshes, shape-to-mesh indexing
-  // is not guaranteed to be correct.
-  if (!merge_primitives && (include_brep || include_materials)) {
-    std::cerr << "Warning: include_brep and include_materials require "
-                 "merge_primitives=true. Skipping metadata injection."
-              << std::endl;
-    return 0;
-  }
-
-  if ((include_brep && !loaded.shapes.empty()) ||
-      (include_materials && materialsPtr != nullptr)) {
-    if (!injectExtrasIntoGlb(output_path, loaded.shapes, brep_types,
-                             materialsPtr, lengthUnit)) {
-      std::cerr << "Warning: Failed to inject extras into GLB" << std::endl;
-    }
-  }
-
-  // Clear shapes to release geometry memory
-  loaded.shapes.clear();
-
-  return 0;
-}
-
-/// Transcode BREP bytes (STEP or IGES) to GLB bytes (no temp files)
+/// Transcode BREP bytes (STEP or IGES) to GLB bytes
+/// This is the main API - one-shot conversion with no disk round-trips
 static std::string
 to_glb_bytes(const std::string &data, FileType file_type,
              Standard_Real tol_linear, Standard_Real tol_angle,
@@ -301,8 +250,13 @@ to_glb_bytes(const std::string &data, FileType file_type,
     materialsPtr = &matDoc;
   }
 
+  // Collect face data via callback if include_brep is requested
+  std::vector<FaceTriangleData> faceData;
+  std::vector<FaceTriangleData> *faceDataPtr =
+      (include_brep && merge_primitives) ? &faceData : nullptr;
+
   std::vector<char> glbData =
-      exportToGlbBytes(loaded.doc, merge_primitives, use_parallel);
+      exportToGlbBytes(loaded.doc, merge_primitives, use_parallel, faceDataPtr);
   closeDocument(loaded.doc);
 
   if (glbData.empty()) {
@@ -318,24 +272,81 @@ to_glb_bytes(const std::string &data, FileType file_type,
     return std::string(glbData.begin(), glbData.end());
   }
 
-  if ((include_brep && !loaded.shapes.empty()) ||
-      (include_materials && materialsPtr != nullptr)) {
+  // Inject BREP extension using face data from callback
+  if (include_brep && !faceData.empty()) {
+    glbData = injectBrepExtensionWithFaceData(glbData, faceData, brep_types,
+                                              materialsPtr, lengthUnit);
+    if (glbData.empty()) {
+      std::cerr << "Warning: Failed to inject BREP extension into GLB"
+                << std::endl;
+      return "";
+    }
+  } else if (include_materials && materialsPtr != nullptr) {
+    // Materials only (no BREP) - use old injection method
     glbData = injectExtrasIntoGlbData(glbData, loaded.shapes, brep_types,
                                       materialsPtr, lengthUnit);
     if (glbData.empty()) {
-      std::cerr << "Warning: Failed to inject extras into GLB" << std::endl;
-      loaded.shapes.clear();
+      std::cerr << "Warning: Failed to inject materials into GLB" << std::endl;
       return "";
     }
   }
 
-  // Clear shapes to release geometry memory
-  loaded.shapes.clear();
-
   return std::string(glbData.begin(), glbData.end());
 }
 
+// ============================================================================
+// Legacy File-based API (prefer to_glb_bytes for efficiency)
+// ============================================================================
+// NOTE: These file-based routes are LEGACY. All new code should use
+// to_glb_bytes(bytes) -> bytes for optimal performance (no disk I/O).
+// File-based routes exist only for backward compatibility.
+// ============================================================================
+
+/// Transcode BREP file (STEP or IGES) to GLB file
+/// LEGACY: Use to_glb_bytes() instead for better performance
+static int to_glb(char *input_path, char *output_path, FileType file_type,
+                  Standard_Real tol_linear, Standard_Real tol_angle,
+                  Standard_Boolean tol_relative,
+                  Standard_Boolean merge_primitives,
+                  Standard_Boolean use_parallel,
+                  Standard_Boolean include_brep = Standard_False,
+                  std::set<std::string> brep_types = {},
+                  Standard_Boolean include_materials = Standard_False) {
+
+  // Read input file
+  std::ifstream inFile(input_path, std::ios::binary);
+  if (!inFile) {
+    std::cerr << "Error: Cannot open input file" << std::endl;
+    return 1;
+  }
+  std::string inputData((std::istreambuf_iterator<char>(inFile)),
+                        std::istreambuf_iterator<char>());
+  inFile.close();
+
+  // Use bytes-based API (no disk round-trips)
+  std::string glbData =
+      to_glb_bytes(inputData, file_type, tol_linear, tol_angle, tol_relative,
+                   merge_primitives, use_parallel, include_brep, brep_types,
+                   include_materials);
+
+  if (glbData.empty()) {
+    return 1;
+  }
+
+  // Write output file
+  std::ofstream outFile(output_path, std::ios::binary);
+  if (!outFile) {
+    std::cerr << "Error: Cannot open output file" << std::endl;
+    return 1;
+  }
+  outFile.write(glbData.data(), glbData.size());
+  outFile.close();
+
+  return 0;
+}
+
 /// Transcode STEP file to GLB file (backward compatibility wrapper)
+/// LEGACY: Use to_glb_bytes() instead for better performance
 static int step_to_glb(char *input_path, char *output_path,
                        Standard_Real tol_linear, Standard_Real tol_angle,
                        Standard_Boolean tol_relative,
@@ -350,6 +361,7 @@ static int step_to_glb(char *input_path, char *output_path,
 }
 
 /// Transcode STEP bytes to GLB bytes (backward compatibility wrapper)
+/// LEGACY: Use to_glb_bytes() directly instead
 static std::string
 step_to_glb_bytes(const std::string &step_data, Standard_Real tol_linear,
                   Standard_Real tol_angle, Standard_Boolean tol_relative,
@@ -364,6 +376,7 @@ step_to_glb_bytes(const std::string &step_data, Standard_Real tol_linear,
 }
 
 /// Transcode STEP file to OBJ file
+/// LEGACY: File-based conversion for backward compatibility only
 static int step_to_obj(char *input_path, char *output_path,
                        Standard_Real tol_linear, Standard_Real tol_angle,
                        Standard_Boolean tol_relative,

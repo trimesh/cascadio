@@ -150,9 +150,8 @@ def process_brep_faces(
 
     return result
 
-
 @register_handler("TM_brep_faces", "primitive")
-def _import_brep_faces_cascadio(ext_data: Dict, **kwargs) -> Optional[Dict]:
+def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:
     """
     Handle TM_brep_faces extension during import (cascadio version).
 
@@ -160,7 +159,7 @@ def _import_brep_faces_cascadio(ext_data: Dict, **kwargs) -> Optional[Dict]:
     - face_attributes: dict of per-face arrays (e.g., brep_index)
     - metadata: dict of additional data (e.g., brep_primitives)
     """
-    if ext_data is None:
+    if data is None:
         return None
 
     result = {
@@ -170,15 +169,15 @@ def _import_brep_faces_cascadio(ext_data: Dict, **kwargs) -> Optional[Dict]:
 
     # Get face indices accessor
     face_indices = None
-    if "faceIndices" in ext_data:
-        accessor_idx = ext_data["faceIndices"]
+    if "faceIndices" in data:
+        accessor_idx = data["faceIndices"]
         accessors = kwargs.get("accessors")
         if accessors is not None and accessor_idx < len(accessors):
             face_indices = np.asarray(accessors[accessor_idx])
             result["face_attributes"]["brep_index"] = face_indices
 
     # Get face definitions if present
-    faces = ext_data.get("faces")
+    faces = data.get("faces")
 
     # Process into cascadio primitives
     if faces is not None:

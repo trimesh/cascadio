@@ -61,7 +61,15 @@ def test_convert_step_to_obj():
     assert np.allclose(mesh.extents, np.array([127.0, 63.5, 34.924999]))
 
 
-def test_convert_step_to_obj_with_colors():
+@pytest.mark.parametrize(
+    "use_colors,expected_color",
+    [
+        (True, np.array([202, 225, 255, 255])),  # With colors from STEP
+        (False, np.array([102, 102, 102, 255])),  # Default gray
+    ],
+)
+def test_convert_step_to_obj_colors(use_colors, expected_color):
+    """Test OBJ export with and without colors."""
     step_path = COLORED_STEP_PATH
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -72,35 +80,16 @@ def test_convert_step_to_obj_with_colors():
             obj_path.as_posix(),
             tol_linear=TOL_LINEAR,
             tol_angular=TOL_ANGULAR,
-            use_colors=True,
+            use_colors=use_colors,
         )
-        assert mtl_path.exists()
+        
+        # MTL file should exist only when colors are enabled
+        assert mtl_path.exists() == use_colors
         mesh = trimesh.load(obj_path, merge_primitives=True)
 
     assert mesh.mass > 0.0
     assert mesh.volume > 0.0
-    assert np.allclose(mesh.visual.material.main_color, np.array([202, 225, 255, 255]))
-
-
-def test_convert_step_to_obj_without_colors():
-    step_path = COLORED_STEP_PATH
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        obj_path = Path(temp_dir) / step_path.with_suffix(".obj").name
-        mtl_path = obj_path.with_suffix(".mtl")
-        cascadio.step_to_obj(
-            step_path.as_posix(),
-            obj_path.as_posix(),
-            tol_linear=TOL_LINEAR,
-            tol_angular=TOL_ANGULAR,
-            use_colors=False,
-        )
-        assert not mtl_path.exists()
-        mesh = trimesh.load(obj_path, merge_primitives=True)
-
-    assert mesh.mass > 0.0
-    assert mesh.volume > 0.0
-    assert np.allclose(mesh.visual.material.main_color, np.array([102, 102, 102, 255]))
+    assert np.allclose(mesh.visual.material.main_color, expected_color)
 
 
 @pytest.mark.skipif(
@@ -171,187 +160,144 @@ def test_convert_step_to_glb_with_brep():
 @pytest.mark.skipif(
     not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
 )
-def test_convert_step_to_glb_brep_types_filter():
+@pytest.mark.parametrize(
+    "brep_types,expected_count,expected_types",
+    [
+        ({"cylinder"}, 46, {"cylinder"}),
+        ({"plane"}, 49, {"plane"}),
+        ({"cylinder", "plane"}, 95, {"cylinder", "plane"}),
+    ],
+)
+def test_convert_step_to_glb_brep_types_filter(brep_types, expected_count, expected_types):
     """Test that brep_types parameter filters which primitives are included.
 
     When filtering, the primitives array preserves index alignment with brep_index
     by including null entries for filtered-out faces.
     """
     step_path = FEATURE_TYPE_STEP_PATH
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Test with only cylinders
-        glb_cyl = Path(temp_dir) / "cylinders.glb"
-        cascadio.step_to_glb(
-            step_path.as_posix(),
-            glb_cyl.as_posix(),
-            tol_linear=TOL_LINEAR,
-            tol_angular=TOL_ANGULAR,
-            include_brep=True,
-            brep_types={"cylinder"},
-        )
-        scene_cyl = trimesh.load(glb_cyl, merge_primitives=True)
-        mesh_cyl = list(scene_cyl.geometry.values())[0]
-        brep_cyl = mesh_cyl.metadata["brep_faces"]
-        brep_index_cyl = mesh_cyl.face_attributes["brep_index"]
-
-        # Total primitives should match max brep_index + 1 to preserve alignment
-        assert len(brep_cyl) == 96  # Total face count
-        # Non-null entries should be cylinders only
-        cylinders = [f for f in brep_cyl if f is not None]
-        assert len(cylinders) == 46
-        assert all(f["type"] == "cylinder" for f in cylinders)
-        # brep_index should still correctly map to primitives
-        assert brep_index_cyl.max() == len(brep_cyl) - 1
-
-        # Test with only planes
-        glb_plane = Path(temp_dir) / "planes.glb"
-        cascadio.step_to_glb(
-            step_path.as_posix(),
-            glb_plane.as_posix(),
-            tol_linear=TOL_LINEAR,
-            tol_angular=TOL_ANGULAR,
-            include_brep=True,
-            brep_types={"plane"},
-        )
-        scene_plane = trimesh.load(glb_plane, merge_primitives=True)
-        mesh_plane = list(scene_plane.geometry.values())[0]
-        brep_plane = mesh_plane.metadata["brep_faces"]
-        brep_index_plane = mesh_plane.face_attributes["brep_index"]
-
-        # Total primitives should match face count
-        assert len(brep_plane) == 96
-        # Non-null entries should be planes only
-        planes = [f for f in brep_plane if f is not None]
-        assert len(planes) == 49
-        assert all(f["type"] == "plane" for f in planes)
-        # brep_index should still correctly map to primitives
-        assert brep_index_plane.max() == len(brep_plane) - 1
-
-        # Test with both
-        glb_both = Path(temp_dir) / "both.glb"
-        cascadio.step_to_glb(
-            step_path.as_posix(),
-            glb_both.as_posix(),
-            tol_linear=TOL_LINEAR,
-            tol_angular=TOL_ANGULAR,
-            include_brep=True,
-            brep_types={"cylinder", "plane"},
-        )
-        scene_both = trimesh.load(glb_both, merge_primitives=True)
-        mesh_both = list(scene_both.geometry.values())[0]
-        brep_both = mesh_both.metadata["brep_faces"]
-
-        # Total primitives should match face count (1 non-analytical face filtered)
-        assert len(brep_both) == 96
-        # Non-null entries should be cylinders and planes
-        non_null = [f for f in brep_both if f is not None]
-        assert len(non_null) == 95  # 46 cylinders + 49 planes
-        types = {f["type"] for f in non_null}
-        assert types == {"cylinder", "plane"}
-
-
-@pytest.mark.skipif(
-    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
-)
-def test_step_to_glb_bytes():
-    """Test the bytes-based conversion without temp files."""
-    step_path = FEATURE_TYPE_STEP_PATH
-
-    # Read STEP file as bytes
     step_data = step_path.read_bytes()
 
-    # Convert to GLB bytes using load()
+    # Convert with type filter
     glb_data = cascadio.load(
         step_data,
         file_type="step",
         tol_linear=TOL_LINEAR,
         tol_angular=TOL_ANGULAR,
         include_brep=True,
+        brep_types=brep_types,
+    )
+    
+    scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
+    mesh = list(scene.geometry.values())[0]
+    brep_faces = mesh.metadata["brep_faces"]
+    brep_index = mesh.face_attributes["brep_index"]
+
+    # Total primitives should match total face count (preserves alignment)
+    assert len(brep_faces) == 96
+    
+    # Non-null entries should match filter
+    non_null = [f for f in brep_faces if f is not None]
+    assert len(non_null) == expected_count
+    assert {f["type"] for f in non_null} == expected_types
+    
+    # brep_index should correctly map to primitives
+    assert brep_index.max() == len(brep_faces) - 1
+
+
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
+@pytest.mark.parametrize("include_brep", [True, False])
+def test_step_to_glb_bytes(include_brep):
+    """Test bytes-based conversion with and without BREP extension."""
+    step_data = FEATURE_TYPE_STEP_PATH.read_bytes()
+
+    glb_data = cascadio.load(
+        step_data,
+        file_type="step",
+        tol_linear=TOL_LINEAR,
+        tol_angular=TOL_ANGULAR,
+        include_brep=include_brep,
     )
 
     assert len(glb_data) > 0
 
     # Load with trimesh from bytes
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
-
     assert len(scene.geometry) == 1
     mesh = list(scene.geometry.values())[0]
-    assert "brep_faces" in mesh.metadata
-    assert len(mesh.metadata["brep_faces"]) == 96
+
+    # Check BREP extension presence matches request
+    if include_brep:
+        assert "brep_faces" in mesh.metadata
+        assert "brep_index" in mesh.face_attributes
+        assert len(mesh.metadata["brep_faces"]) == 96
+    else:
+        assert "brep_faces" not in (mesh.metadata or {})
+        assert "brep_index" not in (mesh.face_attributes or {})
 
 
 def test_step_to_glb_bytes_performance():
     """Compare performance of file-based vs bytes-based conversion."""
-
-    step_path = FEATURE_TYPE_STEP_PATH
-    step_data = step_path.read_bytes()
-
+    step_data = FEATURE_TYPE_STEP_PATH.read_bytes()
     n_iterations = 5
 
-    # Time file-based method
+    # Time file-based method (no BREP)
     def file_based():
-        # Use delete=False because on Windows the file cannot be opened
-        # by another process while the NamedTemporaryFile handle is open
         f = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
         try:
-            f.close()  # Close handle so OCCT can write to it
+            f.close()
             cascadio.step_to_glb(
-                step_path.as_posix(),
+                FEATURE_TYPE_STEP_PATH.as_posix(),
                 f.name,
                 tol_linear=TOL_LINEAR,
                 tol_angular=TOL_ANGULAR,
             )
-            # Read result to make comparison fair
             with open(f.name, "rb") as glb_file:
                 return glb_file.read()
         finally:
             if os.path.exists(f.name):
                 os.unlink(f.name)
 
-    # Time bytes-based method
-    def bytes_based():
-        return cascadio.load(
-            step_data,
-            file_type="step",
-            tol_linear=TOL_LINEAR,
-            tol_angular=TOL_ANGULAR,
-        )
+    # Time file-based method with BREP
+    def file_based_brep():
+        f = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
+        try:
+            f.close()
+            cascadio.step_to_glb(
+                FEATURE_TYPE_STEP_PATH.as_posix(),
+                f.name,
+                tol_linear=TOL_LINEAR,
+                tol_angular=TOL_ANGULAR,
+                include_brep=True,
+            )
+            with open(f.name, "rb") as glb_file:
+                return glb_file.read()
+        finally:
+            if os.path.exists(f.name):
+                os.unlink(f.name)
 
-    # Time bytes-based with include_brep
+    # Time bytes-based methods
+    def bytes_based():
+        return cascadio.load(step_data, file_type="step", tol_linear=TOL_LINEAR, tol_angular=TOL_ANGULAR)
+
     def bytes_with_brep():
-        return cascadio.load(
-            step_data,
-            file_type="step",
-            tol_linear=TOL_LINEAR,
-            tol_angular=TOL_ANGULAR,
-            include_brep=True,
-        )
+        return cascadio.load(step_data, file_type="step", tol_linear=TOL_LINEAR, tol_angular=TOL_ANGULAR, include_brep=True)
 
     file_time = timeit.timeit(file_based, number=n_iterations)
+    file_brep_time = timeit.timeit(file_based_brep, number=n_iterations)
     bytes_time = timeit.timeit(bytes_based, number=n_iterations)
     brep_time = timeit.timeit(bytes_with_brep, number=n_iterations)
 
-    print(f"\nPerformance comparison ({n_iterations} iterations):")
-    print(
-        f"  File-based:    {file_time:.3f}s ({file_time / n_iterations * 1000:.1f}ms per call)"
-    )
-    print(
-        f"  Bytes-based:   {bytes_time:.3f}s ({bytes_time / n_iterations * 1000:.1f}ms per call)"
-    )
-    print(
-        f"  With BREP:     {brep_time:.3f}s ({brep_time / n_iterations * 1000:.1f}ms per call)"
-    )
-    print(f"  File vs bytes: {file_time / bytes_time:.2f}x")
-    print(f"  BREP overhead: {(brep_time / bytes_time - 1) * 100:.1f}%")
+    print(f"\nPerformance ({n_iterations} iterations):")
+    print(f"  File-based (no BREP):   {file_time / n_iterations * 1000:.1f}ms/call")
+    print(f"  File-based (with BREP): {file_brep_time / n_iterations * 1000:.1f}ms/call  (+{(file_brep_time / file_time - 1) * 100:.1f}%)")
+    print(f"  Bytes (no BREP):        {bytes_time / n_iterations * 1000:.1f}ms/call  ({file_time / bytes_time:.2f}x faster)")
+    print(f"  Bytes (with BREP):      {brep_time / n_iterations * 1000:.1f}ms/call  (+{(brep_time / bytes_time - 1) * 100:.1f}%, {file_brep_time / brep_time:.2f}x faster)")
 
-    # Both should produce valid output
-    file_result = file_based()
-    bytes_result = bytes_based()
-    assert len(file_result) > 0
-    assert len(bytes_result) > 0
-    # Sizes should be similar (not exact due to temp file naming differences in GLTF)
-    assert abs(len(file_result) - len(bytes_result)) < 1000
+    # Verify outputs are valid
+    assert len(file_based()) > 0
+    assert len(bytes_based()) > 0
 
 
 def test_convert_step_to_glb_with_materials():

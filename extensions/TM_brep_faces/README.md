@@ -3,7 +3,6 @@
 ## Contributors
 
 - Mike Dawson-Haggerty, Trimesh
-- [Your name here]
 
 ## Status
 

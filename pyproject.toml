@@ -44,8 +44,8 @@ skip = "*musl* *win32*"
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 
-# pypy compiles numpy for every test
-test-skip = "pp* *i686"
+# Skip testing on i686 (32-bit is not supported)
+test-skip = "*i686"
 
 # Build OCCT (skips automatically if cached)
 before-all = "pip install ninja cmake && python scripts/build_occt.py"
@@ -62,5 +62,5 @@ repair-wheel-command = "delvewheel repair --add-path upstream/OCCT/win64/vc14/bi
 
 [tool.cibuildwheel.macos]
 # Require macOS 10.15+ for std::filesystem support
-environment = { MACOSX_DEPLOYMENT_TARGET = "10.15" }
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 repair-wheel-command = "DYLD_LIBRARY_PATH=upstream/OCCT/mac64/clang/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
