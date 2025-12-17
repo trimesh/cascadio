@@ -75,6 +75,15 @@ def run(cmd, **kwargs):
         sys.exit(result.returncode)
 
 
+def build_patch(occt_src, patches_dir):
+    """Regenerate patch files from current diff in upstream/OCCT."""
+    os.makedirs(patches_dir, exist_ok=True)
+    patch_file = os.path.join(patches_dir, "tm_brep_faces.patch")
+    with open(patch_file, "w") as f:
+        subprocess.run(["git", "diff", "HEAD"], cwd=occt_src, stdout=f, check=True)
+    print(f"Generated: {patch_file}")
+
+
 def apply_patches(occt_src, patches_dir):
     """Apply patches from patches/ directory if they haven't been applied."""
     if not os.path.isdir(patches_dir):
@@ -150,6 +159,11 @@ def main():
     parser.add_argument(
         "--force", action="store_true", help="Force rebuild even if libraries exist"
     )
+    parser.add_argument(
+        "--build-patch",
+        action="store_true",
+        help="Regenerate patch files from diff in upstream/OCCT",
+    )
     args = parser.parse_args()
 
     system = platform.system()
@@ -157,6 +171,10 @@ def main():
     # OCCT source is always in upstream/OCCT relative to project root
     occt_src = os.path.join(PROJECT_ROOT, "upstream", "OCCT")
     patches_dir = os.path.join(PROJECT_ROOT, "patches")
+
+    # Handle --build-patch separately
+    if args.build_patch:
+        return build_patch(occt_src, patches_dir)
 
     if IN_CIBUILDWHEEL:
         # In CI: build in-tree

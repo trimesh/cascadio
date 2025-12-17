@@ -28,6 +28,31 @@ find_package(pybind11 CONFIG REQUIRED)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Runtime optimizations for Release builds
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# Enable Link Time Optimization (LTO) for better runtime performance
+include(CheckIPOSupported)
+check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
+
+if(LTO_SUPPORTED)
+  message(STATUS "LTO/IPO enabled for optimized builds")
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
+else()
+  message(WARNING "LTO not supported: ${LTO_ERROR}")
+endif()
+
+# Aggressive optimization flags for Release
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+
+# Additional performance flags (architecture-specific optimizations)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=x86-64-v2 -ffast-math -funroll-loops")
+endif()
+
 pybind11_add_module(_core src/main.cpp)
 target_compile_definitions(_core
                            PRIVATE VERSION_INFO=${PROJECT_VERSION})

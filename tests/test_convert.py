@@ -290,7 +290,11 @@ def test_step_to_glb_bytes_performance():
 
     # Time file-based method
     def file_based():
-        with tempfile.NamedTemporaryFile(suffix=".glb", delete=True) as f:
+        # Use delete=False because on Windows the file cannot be opened
+        # by another process while the NamedTemporaryFile handle is open
+        f = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
+        try:
+            f.close()  # Close handle so OCCT can write to it
             cascadio.step_to_glb(
                 step_path.as_posix(),
                 f.name,
@@ -298,8 +302,9 @@ def test_step_to_glb_bytes_performance():
                 tol_angular=TOL_ANGULAR,
             )
             # Read result to make comparison fair
-            f.seek(0)
-            return f.read()
+            return pathlib.Path(f.name).read_bytes()
+        finally:
+            pathlib.Path(f.name).unlink(missing_ok=True)
 
     # Time bytes-based method
     def bytes_based():
