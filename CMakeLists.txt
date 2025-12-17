@@ -48,9 +48,10 @@ endif()
 # Aggressive optimization flags for Release
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
-# Additional performance flags (architecture-specific optimizations)
+# Additional performance flags (cross-platform)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=x86-64-v2 -ffast-math -funroll-loops")
+  # Use portable optimization flags that work on all platforms
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -funroll-loops")
 endif()
 
 pybind11_add_module(_core src/main.cpp)
