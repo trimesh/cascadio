@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mesh.primitive.TM_brep_faces.schema.json",
+  "title": "TM_brep_faces mesh primitive extension",
+  "type": "object",
+  "description": "Per-triangle BREP face indices and optional analytic surface definitions",
+  "properties": {
+    "faceIndices": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index of accessor containing per-triangle face indices. Accessor must be SCALAR with unsigned integer component type. Count must equal number of triangles."
+    },
+    "faces": {
+      "type": "array",
+      "description": "Array of face definitions with analytic surface geometry",
+      "items": {
+        "$ref": "face.schema.json"
+      }
+    }
+  },
+  "required": ["faceIndices"]
+}

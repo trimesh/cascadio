@@ -19,8 +19,8 @@ from cascadio._core import (
 # Import primitives submodule
 from . import primitives
 
-# Import trimesh extension (registers handler on import if trimesh available)
-from . import trimesh_ext
+# Import trimesh extension
+from . import extension
 
 # File type constants for convenience
 STEP = FileType.STEP
