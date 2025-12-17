@@ -112,18 +112,12 @@ def apply_patches(occt_src, patches_dir):
             pass
 
         # Try applying with 3-way merge (most robust, handles whitespace/line endings)
-        try:
-            subprocess.run(
-                ["git", "apply", "--3way", patch_path],
-                cwd=occt_src,
-                capture_output=True,
-                check=True,
-            )
-            print(f"  {patch_name}: applied")
-        except subprocess.CalledProcessError as e:
-            print(f"  {patch_name}: FAILED to apply")
-            if e.stderr:
-                print(f"    {e.stderr.decode()}")
+        print(f"  {patch_name}: applying...")
+        subprocess.run(
+            ["git", "apply", "--3way", patch_path],
+            cwd=occt_src,
+            check=True,
+        )
 
 
 def get_lib_marker(base_path, system, in_tree=False):
