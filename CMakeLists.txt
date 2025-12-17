@@ -50,8 +50,9 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 # Additional performance flags (cross-platform)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  # Use portable optimization flags that work on all platforms
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -funroll-loops")
+  # Note: -ffast-math breaks OpenCASCADE's numerical geometry code
+  # (causes stack corruption due to broken NaN/Inf handling)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -funroll-loops")
 endif()
 
 pybind11_add_module(_core src/main.cpp)

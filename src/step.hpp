@@ -26,6 +26,18 @@ struct StepLoadResult {
   StepLoadResult() : success(false) {}
 };
 
+/// Close document and release from application
+/// Using app->Close() instead of doc->Close() ensures the document
+/// is removed from the application's internal document list
+static void closeDocument(Handle(TDocStd_Document) & doc) {
+  if (doc.IsNull()) {
+    return;
+  }
+  Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
+  app->Close(doc);
+  doc.Nullify();
+}
+
 /// Load a STEP file from disk and mesh the shapes
 static StepLoadResult
 loadStepFile(const char *input_path, Standard_Real tol_linear,
@@ -42,7 +54,7 @@ loadStepFile(const char *input_path, Standard_Real tol_linear,
   if (IFSelect_RetDone != stepReader.ReadFile((Standard_CString)input_path)) {
     std::cerr << "Error: Failed to read STEP file \"" << input_path << "\""
               << std::endl;
-    result.doc->Close();
+    closeDocument(result.doc);
     return result;
   }
 
@@ -53,7 +65,7 @@ loadStepFile(const char *input_path, Standard_Real tol_linear,
   if (!stepReader.Transfer(result.doc)) {
     std::cerr << "Error: Failed to transfer STEP file \"" << input_path << "\""
               << std::endl;
-    result.doc->Close();
+    closeDocument(result.doc);
     return result;
   }
 
@@ -91,7 +103,7 @@ loadStepBytes(const std::string &stepData, Standard_Real tol_linear,
 
   if (IFSelect_RetDone != stepReader.ReadStream("step_data.step", stepStream)) {
     std::cerr << "Error: Failed to read STEP data from memory" << std::endl;
-    result.doc->Close();
+    closeDocument(result.doc);
     return result;
   }
 
@@ -101,7 +113,7 @@ loadStepBytes(const std::string &stepData, Standard_Real tol_linear,
 
   if (!stepReader.Transfer(result.doc)) {
     std::cerr << "Error: Failed to transfer STEP data" << std::endl;
-    result.doc->Close();
+    closeDocument(result.doc);
     return result;
   }
 

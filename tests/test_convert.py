@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 import timeit
 from pathlib import Path
@@ -302,9 +303,11 @@ def test_step_to_glb_bytes_performance():
                 tol_angular=TOL_ANGULAR,
             )
             # Read result to make comparison fair
-            return pathlib.Path(f.name).read_bytes()
+            with open(f.name, "rb") as glb_file:
+                return glb_file.read()
         finally:
-            pathlib.Path(f.name).unlink(missing_ok=True)
+            if os.path.exists(f.name):
+                os.unlink(f.name)
 
     # Time bytes-based method
     def bytes_based():

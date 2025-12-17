@@ -1,5 +1,6 @@
 #pragma once
 
+#include "step.hpp" // for closeDocument helper
 #include "tempfile.hpp"
 
 #include <IGESControl_Reader.hxx>
@@ -129,7 +130,7 @@ loadIgesFile(const char *input_path, Standard_Real tol_linear,
     TopoDS_Shape stitched = stitchShapes(rawShapes, sewingTolerance);
     if (stitched.IsNull()) {
       std::cerr << "Error: Failed to stitch IGES shapes" << std::endl;
-      result.doc->Close();
+      closeDocument(result.doc);
       return result;
     }
     result.shapes.push_back(stitched);

@@ -240,11 +240,12 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
   if (!exportToGlbFile(loaded.doc, output_path, merge_primitives,
                        use_parallel)) {
     std::cerr << "Error: Failed to write GLB to file" << std::endl;
-    loaded.doc->Close();
+    loaded.shapes.clear();
+    closeDocument(loaded.doc);
     return 1;
   }
 
-  loaded.doc->Close();
+  closeDocument(loaded.doc);
 
   // Metadata injection only works reliably with merge_primitives=true
   // (single merged mesh). With multiple meshes, shape-to-mesh indexing
@@ -263,6 +264,9 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
       std::cerr << "Warning: Failed to inject extras into GLB" << std::endl;
     }
   }
+
+  // Clear shapes to release geometry memory
+  loaded.shapes.clear();
 
   return 0;
 }
@@ -299,7 +303,7 @@ to_glb_bytes(const std::string &data, FileType file_type,
 
   std::vector<char> glbData =
       exportToGlbBytes(loaded.doc, merge_primitives, use_parallel);
-  loaded.doc->Close();
+  closeDocument(loaded.doc);
 
   if (glbData.empty()) {
     std::cerr << "Error: Failed to export GLB" << std::endl;
@@ -320,9 +324,13 @@ to_glb_bytes(const std::string &data, FileType file_type,
                                       materialsPtr, lengthUnit);
     if (glbData.empty()) {
       std::cerr << "Warning: Failed to inject extras into GLB" << std::endl;
+      loaded.shapes.clear();
       return "";
     }
   }
+
+  // Clear shapes to release geometry memory
+  loaded.shapes.clear();
 
   return std::string(glbData.begin(), glbData.end());
 }
@@ -374,10 +382,12 @@ static int step_to_obj(char *input_path, char *output_path,
   TColStd_IndexedDataMapOfStringString fileInfo;
   if (!cafWriter.Perform(loaded.doc, fileInfo, progress)) {
     std::cerr << "Error: Failed to write OBJ to file" << std::endl;
-    loaded.doc->Close();
+    loaded.shapes.clear();
+    closeDocument(loaded.doc);
     return 1;
   }
 
-  loaded.doc->Close();
+  loaded.shapes.clear();
+  closeDocument(loaded.doc);
   return 0;
 }
