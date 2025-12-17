@@ -99,27 +99,31 @@ def apply_patches(occt_src, patches_dir):
         patch_name = os.path.basename(patch_path)
 
         # Check if patch is already applied by doing a dry-run reverse
-        result = subprocess.run(
-            ["git", "apply", "--reverse", "--check", patch_path],
-            cwd=occt_src,
-            capture_output=True,
-        )
-
-        if result.returncode == 0:
+        try:
+            subprocess.run(
+                ["git", "apply", "--reverse", "--check", patch_path],
+                cwd=occt_src,
+                capture_output=True,
+                check=True,
+            )
             print(f"  {patch_name}: already applied")
             continue
+        except subprocess.CalledProcessError:
+            pass
 
-        # Check if patch can be applied
-        result = subprocess.run(
-            ["git", "apply", "--check", patch_path], cwd=occt_src, capture_output=True
-        )
-
-        if result.returncode == 0:
-            print(f"  {patch_name}: applying...")
-            run(["git", "apply", patch_path], cwd=occt_src)
-        else:
-            print(f"  {patch_name}: FAILED to apply (may have conflicts)")
-            print(f"    {result.stderr.decode()}")
+        # Try applying with 3-way merge (most robust, handles whitespace/line endings)
+        try:
+            subprocess.run(
+                ["git", "apply", "--3way", patch_path],
+                cwd=occt_src,
+                capture_output=True,
+                check=True,
+            )
+            print(f"  {patch_name}: applied")
+        except subprocess.CalledProcessError as e:
+            print(f"  {patch_name}: FAILED to apply")
+            if e.stderr:
+                print(f"    {e.stderr.decode()}")
 
 
 def get_lib_marker(base_path, system, in_tree=False):
