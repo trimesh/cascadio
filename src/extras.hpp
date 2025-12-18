@@ -5,7 +5,10 @@
 #include <Standard_Integer.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
 #include <cstdint>
+#include <cstring>
+#include <fstream>
 #include <iostream>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
