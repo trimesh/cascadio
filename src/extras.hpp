@@ -89,10 +89,8 @@ static rapidjson::Value extractAllPrimitives(
 
 /// Parse GLB binary format and extract JSON document and binary data
 /// Returns true on success, false on error
-static bool parseGlb(const std::vector<char> &glbData,
-                     rapidjson::Document &doc,
-                     const char *&binData,
-                     uint32_t &binLength) {
+static bool parseGlb(const std::vector<char> &glbData, rapidjson::Document &doc,
+                     const char *&binData, uint32_t &binLength) {
   if (glbData.size() < 12) {
     std::cerr << "Error: GLB data too small for header" << std::endl;
     return false;
@@ -103,9 +101,12 @@ static bool parseGlb(const std::vector<char> &glbData,
 
   // Read GLB header (12 bytes)
   uint32_t magic, version, totalLength;
-  std::memcpy(&magic, ptr, 4); ptr += 4;
-  std::memcpy(&version, ptr, 4); ptr += 4;
-  std::memcpy(&totalLength, ptr, 4); ptr += 4;
+  std::memcpy(&magic, ptr, 4);
+  ptr += 4;
+  std::memcpy(&version, ptr, 4);
+  ptr += 4;
+  std::memcpy(&totalLength, ptr, 4);
+  ptr += 4;
 
   if (magic != GLB_MAGIC) {
     std::cerr << "Error: Invalid GLB magic number" << std::endl;
@@ -117,10 +118,12 @@ static bool parseGlb(const std::vector<char> &glbData,
     std::cerr << "Error: GLB data too small for JSON chunk header" << std::endl;
     return false;
   }
-  
+
   uint32_t jsonChunkLength, jsonChunkType;
-  std::memcpy(&jsonChunkLength, ptr, 4); ptr += 4;
-  std::memcpy(&jsonChunkType, ptr, 4); ptr += 4;
+  std::memcpy(&jsonChunkLength, ptr, 4);
+  ptr += 4;
+  std::memcpy(&jsonChunkType, ptr, 4);
+  ptr += 4;
 
   if (jsonChunkType != GLB_JSON_CHUNK) {
     std::cerr << "Error: First chunk is not JSON" << std::endl;
@@ -132,18 +135,20 @@ static bool parseGlb(const std::vector<char> &glbData,
     std::cerr << "Error: GLB data too small for JSON data" << std::endl;
     return false;
   }
-  
+
   const char *jsonStart = ptr;
   ptr += jsonChunkLength;
 
   // Read BIN chunk header (optional)
   binData = nullptr;
   binLength = 0;
-  
+
   if (ptr + 8 <= end) {
     uint32_t binChunkType;
-    std::memcpy(&binLength, ptr, 4); ptr += 4;
-    std::memcpy(&binChunkType, ptr, 4); ptr += 4;
+    std::memcpy(&binLength, ptr, 4);
+    ptr += 4;
+    std::memcpy(&binChunkType, ptr, 4);
+    ptr += 4;
 
     if (binChunkType == GLB_BIN_CHUNK) {
       binData = ptr;
@@ -237,7 +242,7 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
   rapidjson::Document doc;
   const char *binDataPtr = nullptr;
   uint32_t binChunkLength = 0;
-  
+
   if (!parseGlb(glbData, doc, binDataPtr, binChunkLength)) {
     return {};
   }
@@ -268,7 +273,8 @@ injectExtrasIntoGlbData(const std::vector<char> &glbData,
 
   // Helper to ensure primitive.extensions.TM_brep_faces exists
   auto ensurePrimitiveExtension =
-      [&doc, EXTENSION_NAME](rapidjson::Value &primitive) -> rapidjson::Value & {
+      [&doc,
+       EXTENSION_NAME](rapidjson::Value &primitive) -> rapidjson::Value & {
     if (!primitive.HasMember("extensions")) {
       primitive.AddMember("extensions",
                           rapidjson::Value(rapidjson::kObjectType),
@@ -404,21 +410,162 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
                                  const std::set<std::string> &allowedTypes,
                                  Standard_Real lengthUnit);
 
-/// Inject BREP extension with face data collected via callback
-/// This version creates a faceIndices accessor for per-triangle face mapping
-/// Returns modified GLB data, or empty vector on error
-static std::vector<char> injectBrepExtensionWithFaceData(
-    const std::vector<char> &glbData,
-    const std::vector<FaceTriangleData> &faceData,
-    const std::set<std::string> &allowedTypes = {},
-    const rapidjson::Value *materials = nullptr,
-    Standard_Real lengthUnit = 1.0) {
+/// Modify JSON to add BREP extension metadata (for use with JSON callback)
+/// Takes JSON string, face data, and pre-calculated faceIndices binary info
+/// Returns modified JSON string
+static std::string injectBrepExtensionIntoJson(
+    const std::string &jsonString,
+    const std::vector<FaceTriangleData> &faceData, uint32_t existingBinLength,
+    uint32_t faceIndicesBytes, const std::set<std::string> &allowedTypes,
+    const rapidjson::Value *materials, Standard_Real lengthUnit) {
+
+  // Parse JSON
+  rapidjson::Document doc;
+  doc.Parse(jsonString.c_str(), jsonString.size());
+  if (doc.HasParseError()) {
+    std::cerr << "Error: Failed to parse JSON for injection" << std::endl;
+    return jsonString;
+  }
+
+  const char *EXTENSION_NAME = "TM_brep_faces";
+  const bool hasBrepData = !faceData.empty() && faceIndicesBytes > 0;
+
+  // Only modify buffers/accessors/bufferViews if we have BREP data
+  if (hasBrepData) {
+    // Calculate new binary data layout
+    uint32_t alignedBinLength =
+        (existingBinLength + 3) & ~3; // 4-byte alignment
+    uint32_t faceIndicesOffset = alignedBinLength;
+    uint32_t alignedFaceIndicesBytes = (faceIndicesBytes + 3) & ~3;
+    uint32_t newBinLength = faceIndicesOffset + alignedFaceIndicesBytes;
+
+    // Update buffers[0].byteLength
+    if (doc.HasMember("buffers") && doc["buffers"].IsArray() &&
+        doc["buffers"].Size() > 0) {
+      doc["buffers"][0]["byteLength"].SetUint(newBinLength);
+    }
+
+    // Add bufferView for faceIndices
+    int faceIndicesBufferViewId =
+        doc.HasMember("bufferViews") && doc["bufferViews"].IsArray()
+            ? doc["bufferViews"].Size()
+            : 0;
+    if (doc.HasMember("bufferViews")) {
+      rapidjson::Value bv(rapidjson::kObjectType);
+      bv.AddMember("buffer", 0, doc.GetAllocator());
+      bv.AddMember("byteOffset", faceIndicesOffset, doc.GetAllocator());
+      bv.AddMember("byteLength", faceIndicesBytes, doc.GetAllocator());
+      doc["bufferViews"].PushBack(bv, doc.GetAllocator());
+    }
+
+    // Add accessor for faceIndices
+    int faceIndicesAccessorId =
+        doc.HasMember("accessors") && doc["accessors"].IsArray()
+            ? doc["accessors"].Size()
+            : 0;
+    if (doc.HasMember("accessors")) {
+      rapidjson::Value acc(rapidjson::kObjectType);
+      acc.AddMember("bufferView", faceIndicesBufferViewId, doc.GetAllocator());
+      acc.AddMember("byteOffset", 0, doc.GetAllocator());
+      acc.AddMember("componentType", 5125, doc.GetAllocator()); // UNSIGNED_INT
+      acc.AddMember("count", faceIndicesBytes / 4, doc.GetAllocator());
+      acc.AddMember("type", "SCALAR", doc.GetAllocator());
+      doc["accessors"].PushBack(acc, doc.GetAllocator());
+    }
+
+    // Ensure extensionsUsed contains our extension
+    if (!doc.HasMember("extensionsUsed")) {
+      doc.AddMember("extensionsUsed", rapidjson::Value(rapidjson::kArrayType),
+                    doc.GetAllocator());
+    }
+    bool found = false;
+    for (auto &v : doc["extensionsUsed"].GetArray()) {
+      if (v.IsString() && std::strcmp(v.GetString(), EXTENSION_NAME) == 0) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      rapidjson::Value extName;
+      extName.SetString(EXTENSION_NAME, doc.GetAllocator());
+      doc["extensionsUsed"].PushBack(extName, doc.GetAllocator());
+    }
+
+    // Create faces array with primitive data
+    rapidjson::Value facesArray(rapidjson::kArrayType);
+    for (const auto &fd : faceData) {
+      extractFacePrimitive(fd.face, fd.faceIndex, facesArray,
+                           doc.GetAllocator(), allowedTypes, lengthUnit);
+    }
+
+    // Add extension to first mesh primitive
+    if (doc.HasMember("meshes") && doc["meshes"].IsArray() &&
+        doc["meshes"].Size() > 0) {
+      auto &mesh = doc["meshes"][0];
+      if (mesh.HasMember("primitives") && mesh["primitives"].IsArray() &&
+          mesh["primitives"].Size() > 0) {
+        auto &prim = mesh["primitives"][0];
+
+        if (!prim.HasMember("extensions")) {
+          prim.AddMember("extensions", rapidjson::Value(rapidjson::kObjectType),
+                         doc.GetAllocator());
+        }
+
+        rapidjson::Value ext(rapidjson::kObjectType);
+        ext.AddMember("faceIndices", faceIndicesAccessorId, doc.GetAllocator());
+        ext.AddMember("faces", facesArray, doc.GetAllocator());
+
+        prim["extensions"].AddMember(rapidjson::StringRef(EXTENSION_NAME), ext,
+                                     doc.GetAllocator());
+      }
+    }
+  }
+
+  // Add materials to mesh.extras.cascadio if provided (independent of BREP
+  // data)
+  if (materials != nullptr) {
+    if (doc.HasMember("meshes") && doc["meshes"].IsArray() &&
+        doc["meshes"].Size() > 0) {
+      auto &mesh = doc["meshes"][0];
+      if (!mesh.HasMember("extras")) {
+        mesh.AddMember("extras", rapidjson::Value(rapidjson::kObjectType),
+                       doc.GetAllocator());
+      }
+      if (!mesh["extras"].HasMember("cascadio")) {
+        mesh["extras"].AddMember("cascadio",
+                                 rapidjson::Value(rapidjson::kObjectType),
+                                 doc.GetAllocator());
+      }
+      rapidjson::Value matCopy(*materials, doc.GetAllocator());
+      mesh["extras"]["cascadio"].AddMember("materials", matCopy,
+                                           doc.GetAllocator());
+    }
+  }
+
+  // Serialize back to string
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  doc.Accept(writer);
+
+  return std::string(buffer.GetString(), buffer.GetSize());
+}
+
+/// Inject BREP extension with face data collected via callback (LEGACY - for
+/// file-based roundtrip) This version creates a faceIndices accessor for
+/// per-triangle face mapping Returns modified GLB data, or empty vector on
+/// error
+static std::vector<char>
+injectBrepExtensionWithFaceData(const std::vector<char> &glbData,
+                                const std::vector<FaceTriangleData> &faceData,
+                                const std::set<std::string> &allowedTypes = {},
+                                const rapidjson::Value *materials = nullptr,
+                                Standard_Real lengthUnit = 1.0) {
 
   // Parse GLB
   rapidjson::Document doc;
   const char *binDataPtr = nullptr;
   uint32_t binChunkLength = 0;
-  
+
   if (!parseGlb(glbData, doc, binDataPtr, binChunkLength)) {
     return {};
   }

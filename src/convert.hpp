@@ -142,12 +142,14 @@ static Standard_Real detectLengthUnit(Handle(TDocStd_Document) doc,
   return lengthUnit;
 }
 
-/// Export document to GLB file with optional face data collection
-static bool exportToGlbFile(Handle(TDocStd_Document) doc,
-                            const char *output_path,
-                            Standard_Boolean merge_primitives,
-                            Standard_Boolean use_parallel,
-                            std::vector<FaceTriangleData> *faceData = nullptr) {
+/// Export document to GLB file with callbacks for face data, JSON, and binary
+/// appending
+static bool exportToGlbFile(
+    Handle(TDocStd_Document) doc, const char *output_path,
+    Standard_Boolean merge_primitives, Standard_Boolean use_parallel,
+    std::vector<FaceTriangleData> *faceData = nullptr,
+    RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
+    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
   RWGltf_CafWriter cafWriter(output_path, Standard_True);
   cafWriter.SetMergeFaces(merge_primitives);
   cafWriter.SetParallel(use_parallel);
@@ -163,19 +165,30 @@ static bool exportToGlbFile(Handle(TDocStd_Document) doc,
         });
   }
 
+  // Set JSON post-process callback if provided
+  if (jsonCallback) {
+    cafWriter.SetJsonPostProcessCallback(jsonCallback);
+  }
+
+  // Set binary append callback if provided
+  if (binaryCallback) {
+    cafWriter.SetBinaryAppendCallback(binaryCallback);
+  }
+
   Message_ProgressRange progress;
   TColStd_IndexedDataMapOfStringString fileInfo;
   return cafWriter.Perform(doc, fileInfo, progress);
 }
 
-/// Export document to GLB in memory with optional face data collection
-static std::vector<char>
-exportToGlbBytes(Handle(TDocStd_Document) doc, Standard_Boolean merge_primitives,
-                 Standard_Boolean use_parallel,
-                 std::vector<FaceTriangleData> *faceData = nullptr) {
+/// Export document to GLB in memory with callbacks
+static std::vector<char> exportToGlbBytes(
+    Handle(TDocStd_Document) doc, Standard_Boolean merge_primitives,
+    Standard_Boolean use_parallel,
+    std::vector<FaceTriangleData> *faceData = nullptr,
+    RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
+    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
   // OCCT's RWGltf_CafWriter requires a file path, so we use a temp file
-  // approach but encapsulate it here. In the future, could patch OCCT to
-  // support streams.
+  // approach but encapsulate it here.
 
   // Create a unique temp file
   TempFile tempFile(".glb");
@@ -187,9 +200,9 @@ exportToGlbBytes(Handle(TDocStd_Document) doc, Standard_Boolean merge_primitives
   // Close fd so exportToGlbFile can write to it
   tempFile.close_fd();
 
-  // Export to temp file with optional face data collection
+  // Export to temp file with callbacks
   if (!exportToGlbFile(doc, tempFile.path(), merge_primitives, use_parallel,
-                       faceData)) {
+                       faceData, jsonCallback, binaryCallback)) {
     return {}; // TempFile destructor handles cleanup
   }
 
@@ -255,8 +268,112 @@ to_glb_bytes(const std::string &data, FileType file_type,
   std::vector<FaceTriangleData> *faceDataPtr =
       (include_brep && merge_primitives) ? &faceData : nullptr;
 
+  // Create faceIndices binary data if needed (shared between callbacks)
+  std::vector<uint32_t> faceIndices;
+  auto buildFaceIndices = [&faceData, &faceIndices]() {
+    // Early exit if already built or no data
+    if (!faceIndices.empty() || faceData.empty()) {
+      return;
+    }
+
+    // Find max triangle index to determine array size
+    Standard_Integer totalTriangles = 0;
+    for (const auto &fd : faceData) {
+      totalTriangles = std::max(totalTriangles, fd.triStart + fd.triCount);
+    }
+
+    if (totalTriangles <= 0) {
+      return; // No triangles to map
+    }
+
+    // Build mapping array: triangle index -> face index
+    faceIndices.resize(totalTriangles, 0);
+    for (const auto &fd : faceData) {
+      for (Standard_Integer t = 0; t < fd.triCount; ++t) {
+        Standard_Integer idx = fd.triStart + t;
+        if (idx >= 0 && idx < totalTriangles) {
+          faceIndices[idx] = static_cast<uint32_t>(fd.faceIndex);
+        }
+      }
+    }
+  };
+
+  // Setup callbacks for direct injection (avoids GLB roundtrip)
+  RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr;
+  RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr;
+
+  if (merge_primitives && (include_brep || include_materials)) {
+    if (include_brep && faceDataPtr) {
+      // BREP extension: inject face data and optional materials
+      jsonCallback = [&](const std::string &jsonStr) -> std::string {
+        buildFaceIndices(); // Build face->triangle mapping
+
+        // Early exit if no face data collected
+        if (faceData.empty()) {
+          // Still inject materials if requested
+          if (materialsPtr) {
+            return injectBrepExtensionIntoJson(jsonStr, {}, 0, 0, brep_types,
+                                               materialsPtr, lengthUnit);
+          }
+          return jsonStr;
+        }
+
+        // Parse JSON to get existing binary chunk size
+        rapidjson::Document doc;
+        doc.Parse(jsonStr.c_str(), jsonStr.size());
+        if (doc.HasParseError()) {
+          std::cerr << "Warning: Failed to parse JSON in callback" << std::endl;
+          return jsonStr;
+        }
+
+        uint32_t existingBinLength = 0;
+        if (doc.HasMember("buffers") && doc["buffers"].IsArray() &&
+            doc["buffers"].Size() > 0 &&
+            doc["buffers"][0].HasMember("byteLength")) {
+          existingBinLength = doc["buffers"][0]["byteLength"].GetUint();
+        }
+
+        uint32_t faceIndicesBytes =
+            static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
+        return injectBrepExtensionIntoJson(jsonStr, faceData, existingBinLength,
+                                           faceIndicesBytes, brep_types,
+                                           materialsPtr, lengthUnit);
+      };
+
+      // Binary callback: append faceIndices array to GLB binary chunk
+      binaryCallback = [&](std::ostream &stream,
+                           uint32_t currentBinLength) -> uint32_t {
+        // Defensive: should never happen if jsonCallback succeeded
+        if (faceIndices.empty()) {
+          return 0;
+        }
+
+        uint32_t bytesToWrite =
+            static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
+        stream.write(reinterpret_cast<const char *>(faceIndices.data()),
+                     bytesToWrite);
+
+        // Verify write succeeded
+        if (!stream.good()) {
+          std::cerr << "Error: Failed to write faceIndices to binary chunk"
+                    << std::endl;
+          return 0;
+        }
+
+        return bytesToWrite;
+      };
+    } else if (include_materials && materialsPtr) {
+      // Materials-only: inject into mesh.extras.cascadio without BREP extension
+      jsonCallback = [&](const std::string &jsonStr) -> std::string {
+        return injectBrepExtensionIntoJson(jsonStr, {}, 0, 0, {}, materialsPtr,
+                                           lengthUnit);
+      };
+    }
+  }
+
   std::vector<char> glbData =
-      exportToGlbBytes(loaded.doc, merge_primitives, use_parallel, faceDataPtr);
+      exportToGlbBytes(loaded.doc, merge_primitives, use_parallel, faceDataPtr,
+                       jsonCallback, binaryCallback);
   closeDocument(loaded.doc);
 
   if (glbData.empty()) {
@@ -264,31 +381,11 @@ to_glb_bytes(const std::string &data, FileType file_type,
     return "";
   }
 
-  // Metadata injection only works reliably with merge_primitives=true
+  // Warn if metadata requested without merge_primitives
   if (!merge_primitives && (include_brep || include_materials)) {
     std::cerr << "Warning: include_brep and include_materials require "
                  "merge_primitives=true. Skipping metadata injection."
               << std::endl;
-    return std::string(glbData.begin(), glbData.end());
-  }
-
-  // Inject BREP extension using face data from callback
-  if (include_brep && !faceData.empty()) {
-    glbData = injectBrepExtensionWithFaceData(glbData, faceData, brep_types,
-                                              materialsPtr, lengthUnit);
-    if (glbData.empty()) {
-      std::cerr << "Warning: Failed to inject BREP extension into GLB"
-                << std::endl;
-      return "";
-    }
-  } else if (include_materials && materialsPtr != nullptr) {
-    // Materials only (no BREP) - use old injection method
-    glbData = injectExtrasIntoGlbData(glbData, loaded.shapes, brep_types,
-                                      materialsPtr, lengthUnit);
-    if (glbData.empty()) {
-      std::cerr << "Warning: Failed to inject materials into GLB" << std::endl;
-      return "";
-    }
   }
 
   return std::string(glbData.begin(), glbData.end());
