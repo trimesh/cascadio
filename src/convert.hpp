@@ -437,36 +437,6 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
   return 0;
 }
 
-/// Transcode STEP file to GLB file (backward compatibility wrapper)
-/// LEGACY: Use to_glb_bytes() instead for better performance
-static int step_to_glb(char *input_path, char *output_path,
-                       Standard_Real tol_linear, Standard_Real tol_angle,
-                       Standard_Boolean tol_relative,
-                       Standard_Boolean merge_primitives,
-                       Standard_Boolean use_parallel,
-                       Standard_Boolean include_brep = Standard_False,
-                       std::set<std::string> brep_types = {},
-                       Standard_Boolean include_materials = Standard_False) {
-  return to_glb(input_path, output_path, FileType::STEP, tol_linear, tol_angle,
-                tol_relative, merge_primitives, use_parallel, include_brep,
-                brep_types, include_materials);
-}
-
-/// Transcode STEP bytes to GLB bytes (backward compatibility wrapper)
-/// LEGACY: Use to_glb_bytes() directly instead
-static std::string
-step_to_glb_bytes(const std::string &step_data, Standard_Real tol_linear,
-                  Standard_Real tol_angle, Standard_Boolean tol_relative,
-                  Standard_Boolean merge_primitives,
-                  Standard_Boolean use_parallel,
-                  Standard_Boolean include_brep = Standard_False,
-                  std::set<std::string> brep_types = {},
-                  Standard_Boolean include_materials = Standard_False) {
-  return to_glb_bytes(step_data, FileType::STEP, tol_linear, tol_angle,
-                      tol_relative, merge_primitives, use_parallel,
-                      include_brep, brep_types, include_materials);
-}
-
 /// Transcode STEP file to OBJ file
 /// LEGACY: File-based conversion for backward compatibility only
 static int step_to_obj(char *input_path, char *output_path,

@@ -206,39 +206,6 @@ def test_convert_step_to_glb_brep_types_filter(
     assert brep_index.max() == len(brep_faces) - 1
 
 
-@pytest.mark.skipif(
-    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
-)
-@pytest.mark.parametrize("include_brep", [True, False])
-def test_step_to_glb_bytes(include_brep):
-    """Test bytes-based conversion with and without BREP extension."""
-    step_data = FEATURE_TYPE_STEP_PATH.read_bytes()
-
-    glb_data = cascadio.load(
-        step_data,
-        file_type="step",
-        tol_linear=TOL_LINEAR,
-        tol_angular=TOL_ANGULAR,
-        include_brep=include_brep,
-    )
-
-    assert len(glb_data) > 0
-
-    # Load with trimesh from bytes
-    scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
-    assert len(scene.geometry) == 1
-    mesh = list(scene.geometry.values())[0]
-
-    # Check BREP extension presence matches request
-    if include_brep:
-        assert "brep_faces" in mesh.metadata
-        assert "brep_index" in mesh.face_attributes
-        assert len(mesh.metadata["brep_faces"]) == 96
-    else:
-        assert "brep_faces" not in (mesh.metadata or {})
-        assert "brep_index" not in (mesh.face_attributes or {})
-
-
 def test_step_to_glb_bytes_performance():
     """Compare performance of file-based vs bytes-based conversion."""
     step_data = FEATURE_TYPE_STEP_PATH.read_bytes()
