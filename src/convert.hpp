@@ -243,6 +243,13 @@ to_glb_bytes(const std::string &data, FileType file_type,
              std::set<std::string> brep_types = {},
              Standard_Boolean include_materials = Standard_False) {
 
+  // Warn early if metadata requested without merge_primitives
+  if (!merge_primitives && (include_brep || include_materials)) {
+    std::cerr << "Warning: include_brep and include_materials require "
+                 "merge_primitives=true. Skipping metadata injection."
+              << std::endl;
+  }
+
   LoadResult loaded = loadBytes(data, file_type, tol_linear, tol_angle,
                                 tol_relative, use_parallel);
   if (!loaded.success) {
@@ -252,11 +259,11 @@ to_glb_bytes(const std::string &data, FileType file_type,
   // Get length unit (scale factor to meters for glTF output)
   Standard_Real lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
 
-  // Extract materials before closing document
+  // Extract materials only if needed and conditions are met
   rapidjson::Document matDoc;
   matDoc.SetArray();
   rapidjson::Value *materialsPtr = nullptr;
-  if (include_materials) {
+  if (include_materials && merge_primitives) {
     rapidjson::Value materials =
         extractMaterials(loaded.doc, matDoc.GetAllocator());
     matDoc.Swap(materials);
@@ -306,8 +313,6 @@ to_glb_bytes(const std::string &data, FileType file_type,
     if (include_brep && faceDataPtr) {
       // BREP extension: inject face data and optional materials
       jsonCallback = [&](const std::string &jsonStr) -> std::string {
-        buildFaceIndices(); // Build face->triangle mapping
-
         // Early exit if no face data collected
         if (faceData.empty()) {
           // Still inject materials if requested
@@ -317,6 +322,8 @@ to_glb_bytes(const std::string &data, FileType file_type,
           }
           return jsonStr;
         }
+
+        buildFaceIndices(); // Build face->triangle mapping only if we have data
 
         // Parse JSON to get existing binary chunk size
         rapidjson::Document doc;
@@ -343,11 +350,6 @@ to_glb_bytes(const std::string &data, FileType file_type,
       // Binary callback: append faceIndices array to GLB binary chunk
       binaryCallback = [&](std::ostream &stream,
                            uint32_t currentBinLength) -> uint32_t {
-        // Defensive: should never happen if jsonCallback succeeded
-        if (faceIndices.empty()) {
-          return 0;
-        }
-
         uint32_t bytesToWrite =
             static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
         stream.write(reinterpret_cast<const char *>(faceIndices.data()),
@@ -379,13 +381,6 @@ to_glb_bytes(const std::string &data, FileType file_type,
   if (glbData.empty()) {
     std::cerr << "Error: Failed to export GLB" << std::endl;
     return "";
-  }
-
-  // Warn if metadata requested without merge_primitives
-  if (!merge_primitives && (include_brep || include_materials)) {
-    std::cerr << "Warning: include_brep and include_materials require "
-                 "merge_primitives=true. Skipping metadata injection."
-              << std::endl;
   }
 
   return std::string(glbData.begin(), glbData.end());
