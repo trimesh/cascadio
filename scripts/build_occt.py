@@ -193,6 +193,9 @@ def main():
         marker = get_lib_marker(LOCAL_CACHE_DIR, system, in_tree=False)
         print(f"Local development build, using cache at {LOCAL_CACHE_DIR}")
 
+    # Apply patches BEFORE checking cache (patches may add new headers)
+    apply_patches(occt_src, patches_dir)
+
     # Check cache (skip if --force)
     if os.path.exists(marker) and not args.force:
         print(f"Using cached OCCT ({marker} exists)")
@@ -213,9 +216,6 @@ def main():
         os.makedirs(install_prefix, exist_ok=True)
 
     os.chdir(occt_src)
-
-    # Apply patches before building
-    apply_patches(occt_src, patches_dir)
 
     # Clean build if requested (removes CMake cache but keeps source changes)
     if args.clean:
