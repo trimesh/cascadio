@@ -183,6 +183,9 @@ def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:
 
     # Get face definitions if present
     faces = data.get("faces")
+    
+    # Get materials if present (may be included alongside BREP data)
+    materials = data.get("materials")
 
     # Process into cascadio primitives
     if faces is not None:
@@ -190,9 +193,17 @@ def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:
         for i, face in enumerate(faces):
             prim = _parse_face_to_primitive(face, face_index=i)
             primitives.append(prim)
-        result["metadata"]["brep_primitives"] = primitives
-        # Also store raw faces for direct access
-        result["metadata"]["brep_faces"] = faces
+        
+        # Put everything under cascadio namespace for consistency
+        # Use setdefault to preserve any existing cascadio data (e.g., materials)
+        cascadio_meta = result["metadata"].setdefault("cascadio", {})
+        cascadio_meta["brep_primitives"] = primitives
+        cascadio_meta["brep_faces"] = faces
+    
+    # Add materials if present
+    if materials is not None:
+        cascadio_meta = result["metadata"].setdefault("cascadio", {})
+        cascadio_meta["materials"] = materials
 
     # Only return if we have something
     if result["face_attributes"] or result["metadata"]:

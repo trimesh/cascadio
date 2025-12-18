@@ -188,6 +188,13 @@ static std::string injectBrepExtensionIntoJson(
         rapidjson::Value ext(rapidjson::kObjectType);
         ext.AddMember("faceIndices", faceIndicesAccessorId, doc.GetAllocator());
         ext.AddMember("faces", facesArray, doc.GetAllocator());
+        
+        // Add materials to extension if provided (so both BREP and materials
+        // are processed together by the same extension handler)
+        if (materials != nullptr) {
+          rapidjson::Value matCopy(*materials, doc.GetAllocator());
+          ext.AddMember("materials", matCopy, doc.GetAllocator());
+        }
 
         prim["extensions"].AddMember(rapidjson::StringRef(EXTENSION_NAME), ext,
                                      doc.GetAllocator());

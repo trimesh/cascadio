@@ -118,9 +118,10 @@ def test_convert_step_to_glb_with_brep():
     # Get the mesh
     mesh = list(scene.geometry.values())[0]
 
-    # Should have brep_faces in mesh metadata from TM_brep_faces extension
-    assert "brep_faces" in mesh.metadata
-    brep_faces = mesh.metadata["brep_faces"]
+    # Should have brep_faces in mesh.metadata.cascadio from TM_brep_faces extension
+    assert "cascadio" in mesh.metadata
+    assert "brep_faces" in mesh.metadata["cascadio"]
+    brep_faces = mesh.metadata["cascadio"]["brep_faces"]
 
     # Check brep_faces content
     assert len(brep_faces) == 96  # featuretype.STEP has 96 faces
@@ -191,7 +192,7 @@ def test_convert_step_to_glb_brep_types_filter(
 
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
     mesh = list(scene.geometry.values())[0]
-    brep_faces = mesh.metadata["brep_faces"]
+    brep_faces = mesh.metadata["cascadio"]["brep_faces"]
     brep_index = mesh.face_attributes["brep_index"]
 
     # Total primitives should match total face count (preserves alignment)
@@ -316,6 +317,44 @@ def test_convert_step_to_glb_with_materials():
     assert "density" in mat
     assert 0.007 < mat["density"] < 0.008  # ~0.00785 g/mm³ for steel
 
+    # Test with both materials and BREP data (plane filter)
+    glb_data_with_brep = cascadio.load(
+        step_path.read_bytes(),
+        file_type="step",
+        tol_linear=TOL_LINEAR,
+        tol_angular=TOL_ANGULAR,
+        include_materials=True,
+        include_brep=True,
+        brep_types={"plane"},
+    )
+
+    assert len(glb_data_with_brep) > 0
+
+    scene_brep = trimesh.load(
+        io.BytesIO(glb_data_with_brep), file_type="glb", merge_primitives=True
+    )
+    mesh_brep = list(scene_brep.geometry.values())[0]
+
+    # Materials should still be present
+    assert "cascadio" in mesh_brep.metadata
+    assert "materials" in mesh_brep.metadata["cascadio"]
+    assert len(mesh_brep.metadata["cascadio"]["materials"]) == 1
+    assert mesh_brep.metadata["cascadio"]["materials"][0]["name"] == "Steel"
+
+    # BREP data should be present with only planes
+    assert "brep_faces" in mesh_brep.metadata["cascadio"]
+    assert "brep_index" in mesh_brep.face_attributes
+    brep_faces = mesh_brep.metadata["cascadio"]["brep_faces"]
+    primitives = cascadio.primitives.parse_brep_faces(brep_faces)
+    planes = [p for p in primitives if isinstance(p, cascadio.primitives.Plane)]
+    non_planes = [
+        p
+        for p in primitives
+        if p is not None and not isinstance(p, cascadio.primitives.Plane)
+    ]
+    assert len(planes) > 0
+    assert len(non_planes) == 0  # Only planes should be present
+
 
 @pytest.fixture
 def brep_mesh():
@@ -338,7 +377,7 @@ def brep_mesh():
 )
 def test_cylinder_parameters(brep_mesh):
     """Validate cylinder primitive parameters (unit axis, positive radius, valid bounds)."""
-    brep_faces = brep_mesh.metadata["brep_faces"]
+    brep_faces = brep_mesh.metadata["cascadio"]["brep_faces"]
     primitives = cascadio.primitives.parse_brep_faces(brep_faces)
     cylinders = [p for p in primitives if isinstance(p, cascadio.primitives.Cylinder)]
 
@@ -357,7 +396,7 @@ def test_cylinder_parameters(brep_mesh):
 )
 def test_cylinder_units_match_mesh(brep_mesh):
     """Verify cylinders and mesh use consistent units (meters)."""
-    brep_faces = brep_mesh.metadata["brep_faces"]
+    brep_faces = brep_mesh.metadata["cascadio"]["brep_faces"]
     primitives = cascadio.primitives.parse_brep_faces(brep_faces)
     cylinders = [p for p in primitives if isinstance(p, cascadio.primitives.Cylinder)]
 
@@ -382,7 +421,7 @@ def test_cylinder_vertices_on_surface(brep_mesh, tolerance: float = 1e-8):
         pytest.skip("brep_index not available")
 
     brep_index = np.asarray(brep_index).flatten()
-    primitives = cascadio.primitives.parse_brep_faces(brep_mesh.metadata["brep_faces"])
+    primitives = cascadio.primitives.parse_brep_faces(brep_mesh.metadata["cascadio"]["brep_faces"])
 
     errors = []
     for idx, prim in enumerate(primitives):

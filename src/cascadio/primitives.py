@@ -122,14 +122,18 @@ def parse_primitive(data: dict) -> Optional[BrepPrimitive]:
 
     Parameters
     ----------
-    data : dict
-        A single primitive dict from mesh.metadata['brep_faces']
+    data : dict or None
+        A single primitive dict from mesh.metadata['brep_faces'],
+        or None if the face was filtered out
 
     Returns
     -------
     BrepPrimitive or None
-        The parsed primitive, or None if type is not recognized.
+        The parsed primitive, or None if type is not recognized or data is None.
     """
+    if data is None:
+        return None
+    
     ptype = data.get("type")
     if ptype is None:
         return None
