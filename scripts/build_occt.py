@@ -193,25 +193,11 @@ def main():
     if IN_CIBUILDWHEEL:
         # In CI: build in-tree
         install_prefix = occt_src
-        marker = get_lib_marker(occt_src, system, in_tree=True)
         print("Running in cibuildwheel, building OCCT in-tree")
     else:
         # Local dev: build to cache directory
         install_prefix = LOCAL_CACHE_DIR
-        marker = get_lib_marker(LOCAL_CACHE_DIR, system, in_tree=False)
         print(f"Local development build, using cache at {LOCAL_CACHE_DIR}")
-
-    # Apply patches BEFORE checking cache (patches may add new headers)
-    patches_were_applied = apply_patches(occt_src, patches_dir)
-
-    # Check cache (skip if --force, or if patches were just applied)
-    if os.path.exists(marker) and not args.force and not patches_were_applied:
-        print(f"Using cached OCCT ({marker} exists)")
-        print("Use --force to rebuild, or --clean for full rebuild")
-        if not IN_CIBUILDWHEEL:
-            lib_dir = os.path.dirname(marker)
-            write_env_file(lib_dir)
-        return 0
 
     print(f"Building OCCT for {system}...")
 
@@ -224,6 +210,9 @@ def main():
         os.makedirs(install_prefix, exist_ok=True)
 
     os.chdir(occt_src)
+
+    # Apply patches (CMake will detect header changes and ninja will rebuild)
+    apply_patches(occt_src, patches_dir)
 
     # Clean build if requested (removes CMake cache but keeps source changes)
     if args.clean:
@@ -254,33 +243,28 @@ def main():
 
     cmake_args.append(".")
 
-    # Only run cmake configure if needed (no build.ninja or --clean was used)
-    build_ninja_path = os.path.join(occt_src, "build.ninja")
-    needs_configure = not os.path.exists(build_ninja_path) or args.clean
+    # Always run cmake configure to pick up any source changes (patches, etc.)
+    # CMake is fast when nothing changed, and ninja handles incremental builds
+    print("Configuring with CMake...")
+    run(["cmake"] + cmake_args)
 
-    if needs_configure:
-        print("Configuring with CMake...")
-        run(["cmake"] + cmake_args)
-
-        # Patch build.ninja to remove GL/EGL linking on Linux
-        if system == "Linux" and os.path.exists("build.ninja"):
-            with open("build.ninja", "r") as f:
-                content = f.read()
-            content = content.replace(" -lGL ", " ").replace(" -lEGL ", " ")
-            with open("build.ninja", "w") as f:
-                f.write(content)
-            print("Patched build.ninja to remove GL/EGL")
-    else:
-        print("Using existing CMake configuration (use --clean to reconfigure)")
+    # Patch build.ninja to remove GL/EGL linking on Linux
+    if system == "Linux" and os.path.exists("build.ninja"):
+        with open("build.ninja", "r") as f:
+            content = f.read()
+        content = content.replace(" -lGL ", " ").replace(" -lEGL ", " ")
+        with open("build.ninja", "w") as f:
+            f.write(content)
+        print("Patched build.ninja to remove GL/EGL")
 
     # Build (ninja handles incremental builds automatically)
-    print("Building with ninja (incremental)...")
+    print("Building with ninja...")
     run(["ninja"])
 
     # For local builds, also install to get libs in the cache dir
     if not IN_CIBUILDWHEEL:
         run(["ninja", "install"])
-        lib_dir = os.path.dirname(get_lib_marker(install_prefix, system, in_tree=False))
+        lib_dir = os.path.join(install_prefix, "lib")
         print("\nOCCT built successfully!")
         write_env_file(lib_dir)
     else:
