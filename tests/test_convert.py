@@ -284,6 +284,9 @@ def test_step_to_glb_bytes_performance():
     assert len(bytes_based()) > 0
 
 
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
 def test_convert_step_to_glb_with_materials():
     """Test that include_materials=True extracts material data from STEP."""
     step_path = MATERIAL_STEP_PATH
