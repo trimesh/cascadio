@@ -85,16 +85,21 @@ def build_patch(occt_src, patches_dir):
 
 
 def apply_patches(occt_src, patches_dir):
-    """Apply patches from patches/ directory if they haven't been applied."""
+    """Apply patches from patches/ directory if they haven't been applied.
+    
+    Returns:
+        bool: True if any patches were applied (source modified), False otherwise
+    """
     if not os.path.isdir(patches_dir):
-        return
+        return False
 
     patches = sorted(glob.glob(os.path.join(patches_dir, "*.patch")))
     if not patches:
-        return
+        return False
 
     print(f"Found {len(patches)} patch(es) to check...")
 
+    patches_applied = False
     for patch_path in patches:
         patch_name = os.path.basename(patch_path)
         abs_patch_path = os.path.abspath(patch_path)
@@ -126,6 +131,9 @@ def apply_patches(occt_src, patches_dir):
             cwd=occt_src,
             check=True,
         )
+        patches_applied = True
+
+    return patches_applied
 
 
 def get_lib_marker(base_path, system, in_tree=False):
@@ -194,10 +202,10 @@ def main():
         print(f"Local development build, using cache at {LOCAL_CACHE_DIR}")
 
     # Apply patches BEFORE checking cache (patches may add new headers)
-    apply_patches(occt_src, patches_dir)
+    patches_were_applied = apply_patches(occt_src, patches_dir)
 
-    # Check cache (skip if --force)
-    if os.path.exists(marker) and not args.force:
+    # Check cache (skip if --force, or if patches were just applied)
+    if os.path.exists(marker) and not args.force and not patches_were_applied:
         print(f"Using cached OCCT ({marker} exists)")
         print("Use --force to rebuild, or --clean for full rebuild")
         if not IN_CIBUILDWHEEL:
