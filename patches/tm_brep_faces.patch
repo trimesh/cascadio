@@ -1,0 +1,198 @@
+diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
+index f5f50d0fa4..ee68e9e77c 100644
+--- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
++++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
+@@ -247,7 +247,8 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile,
+       myToMergeFaces(false),
+       myToSplitIndices16(false),
+       myBinDataLen64(0),
+-      myToParallel(false)
++      myToParallel(false),
++      myFaceIndex(0)
+ {
+   myCSTrsf.SetOutputLengthUnit(1.0); // meters
+   myCSTrsf.SetOutputCoordinateSystem(RWMesh_CoordinateSystem_glTF);
+@@ -480,6 +481,13 @@ void RWGltf_CafWriter::saveTriangleIndices(RWGltf_GltfFace&           theGltfFac
+                                            const RWMesh_FaceIterator& theFaceIter,
+                                            const std::shared_ptr<RWGltf_CafWriter::Mesh>& theMesh)
+ {
++  // Invoke callback with face data before processing (triangle start = current count / 3)
++  if (myFaceDataCallback)
++  {
++    const Standard_Integer aTriStart = theGltfFace.Indices.Count / 3;
++    myFaceDataCallback(myFaceIndex++, aTriStart, theFaceIter.NbTriangles(), theFaceIter.Face());
++  }
++
+   const Standard_Integer aNodeFirst = theGltfFace.NbIndexedNodes - theFaceIter.ElemLower();
+   theGltfFace.NbIndexedNodes += theFaceIter.NbNodes();
+   theGltfFace.Indices.Count += theFaceIter.NbTriangles() * 3;
+@@ -840,6 +848,7 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+ 
+   myBinDataMap.Clear();
+   myBinDataLen64 = 0;
++  myFaceIndex = 0;
+ 
+   Message_ProgressScope aScope(theProgress,
+                                "Write binary data",
+@@ -1219,6 +1228,15 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+     Message::SendFail(TCollection_AsciiString("File '") + aFileNameGltf + "' can not be created");
+     return false;
+   }
++  
++  // Use stringstream for JSON if callback is set in binary mode
++  std::ostringstream aJsonStream;
++  std::ostream* aJsonOutput = aGltfContentFile.get();
++  if (myIsBinary && myJsonPostProcessCallback)
++  {
++    aJsonOutput = &aJsonStream;
++  }
++  
+   if (myIsBinary)
+   {
+     const char* aMagic         = "glTF";
+@@ -1292,7 +1310,7 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+     }
+   }
+ 
+-  rapidjson::OStreamWrapper aFileStream(*aGltfContentFile);
++  rapidjson::OStreamWrapper aFileStream(*aJsonOutput);
+   myWriter.reset(new RWGltf_GltfOStreamWriter(aFileStream));
+ 
+   myWriter->StartObject();
+@@ -1324,6 +1342,15 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+   writeTextures(aSceneNodeMap);
+ 
+   myWriter->EndObject();
++  myWriter.reset(); // Release writer before post-processing
++
++  // Post-process JSON through callback if set (binary mode only)
++  if (myIsBinary && myJsonPostProcessCallback)
++  {
++    std::string aJsonString = aJsonStream.str();
++    aJsonString = myJsonPostProcessCallback(aJsonString);
++    aGltfContentFile->write(aJsonString.c_str(), aJsonString.size());
++  }
+ 
+   if (!myIsBinary)
+   {
+@@ -1344,12 +1371,15 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+     ++aContentLen64;
+   }
+ 
+-  const uint32_t aBinLength = (uint32_t)myBinDataLen64;
++  // Calculate binary length (may include appended data from callback)
++  uint32_t aAppendedBytes = 0;
++  uint32_t aBinLength = (uint32_t)myBinDataLen64;
++  
+   const uint32_t aBinType   = 0x004E4942;
+   aGltfContentFile->write((const char*)&aBinLength, 4);
+   aGltfContentFile->write((const char*)&aBinType, 4);
+ 
+-  const int64_t aFullLen64 = aContentLen64 + 20 + myBinDataLen64 + 8;
++  int64_t aFullLen64 = aContentLen64 + 20 + myBinDataLen64 + 8;
+   if (aFullLen64 < std::numeric_limits<uint32_t>::max())
+   {
+     {
+@@ -1373,6 +1403,35 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+         aGltfContentFile->write(aBuffer, aReadLen);
+       }
+     }
++    
++    // Invoke binary append callback if set
++    if (myBinaryAppendCallback)
++    {
++      // Pad to 4-byte alignment before appending
++      while (aGltfContentFile->tellp() % 4 != 0)
++      {
++        aGltfContentFile->write("\0", 1);
++      }
++      
++      aAppendedBytes = myBinaryAppendCallback(*aGltfContentFile, (uint32_t)myBinDataLen64);
++      
++      // Pad appended data to 4-byte alignment
++      while (aGltfContentFile->tellp() % 4 != 0)
++      {
++        aGltfContentFile->write("\0", 1);
++        aAppendedBytes++;
++      }
++      
++      // Update binary length and total length
++      aBinLength = (uint32_t)myBinDataLen64 + aAppendedBytes;
++      aFullLen64 = aContentLen64 + 20 + aBinLength + 8;
++      
++      // Seek back and update binary chunk length
++      aGltfContentFile->seekp(aContentLen64 + 20);
++      aGltfContentFile->write((const char*)&aBinLength, 4);
++      aGltfContentFile->seekp(0, std::ios::end);
++    }
++    
+     OSD_Path aBinFilePath(myBinFileNameFull);
+     OSD_File(aBinFilePath).Remove();
+     if (OSD_File(aBinFilePath).Exists())
+diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
+index 5c4f8e0be6..69c5254ddc 100644
+--- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
++++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
+@@ -30,7 +30,9 @@
+ #include <XCAFPrs_DocumentNode.hxx>
+ #include <XCAFPrs_Style.hxx>
+ #include <Poly_Triangle.hxx>
++#include <TopoDS_Face.hxx>
+ 
++#include <functional>
+ #include <memory>
+ 
+ class Message_ProgressRange;
+@@ -154,6 +156,39 @@ public:
+     myDracoParameters = theDracoParameters;
+   }
+ 
++  //! Callback type for receiving per-face triangle data during mesh export.
++  //! Called for each TopoDS_Face with its face index, triangle start index, triangle count, and the face itself.
++  using FaceDataCallback = std::function<void(Standard_Integer theFaceIndex,
++                                              Standard_Integer theTriStart,
++                                              Standard_Integer theTriCount,
++                                              const TopoDS_Face& theFace)>;
++
++  //! Set callback for receiving per-face triangle mapping data.
++  //! When set, the callback is invoked during binary data export for each face.
++  void SetFaceDataCallback(const FaceDataCallback& theCallback) { myFaceDataCallback = theCallback; }
++
++  //! Callback type for post-processing the JSON header before it's written to GLB.
++  //! Called with the JSON string; callback can modify and return the modified string.
++  //! Only invoked for binary GLB format.
++  //! Note: The callback can modify JSON to reference additional binary data,
++  //! but cannot easily append that binary data (which is written from temp file).
++  //! Best used for JSON-only modifications (metadata, extensions without new binary).
++  using JsonPostProcessCallback = std::function<std::string(const std::string& theJson)>;
++
++  //! Set callback for post-processing the JSON header in binary GLB mode.
++  //! When set, the callback receives the complete JSON string before it's written to the GLB file.
++  void SetJsonPostProcessCallback(const JsonPostProcessCallback& theCallback) { myJsonPostProcessCallback = theCallback; }
++
++  //! Callback type for appending additional binary data to the GLB binary chunk.
++  //! Called with output stream and existing binary length; callback can write additional data.
++  //! Should return the total number of bytes written.
++  using BinaryAppendCallback = std::function<uint32_t(std::ostream& theStream, uint32_t theExistingLength)>;
++
++  //! Set callback for appending binary data after the main binary chunk.
++  //! When set, allows adding custom binary data (e.g., face indices) to the GLB.
++  //! The JSON callback should reference this data with appropriate offsets.
++  void SetBinaryAppendCallback(const BinaryAppendCallback& theCallback) { myBinaryAppendCallback = theCallback; }
++
+   //! Write glTF file and associated binary file.
+   //! Triangulation data should be precomputed within shapes!
+   //! @param[in] theDocument     input document
+@@ -530,7 +565,11 @@ protected:
+   std::vector<RWGltf_GltfBufferView>            myBuffViewsDraco;    //!< vector of buffers view with compression data
+   Standard_Boolean                              myToParallel;        //!< flag to use multithreading; FALSE by default
+                                             // clang-format on
+-  RWGltf_DracoParameters myDracoParameters; //!< Draco parameters
++  RWGltf_DracoParameters myDracoParameters;         //!< Draco parameters
++  FaceDataCallback       myFaceDataCallback;        //!< optional callback for per-face triangle data
++  Standard_Integer       myFaceIndex;               //!< current face index for callback
++  JsonPostProcessCallback myJsonPostProcessCallback; //!< optional callback for JSON post-processing
++  BinaryAppendCallback   myBinaryAppendCallback;    //!< optional callback for appending binary data
+ };
+ 
+ #endif // _RWGltf_CafWriter_HeaderFiler

@@ -5,15 +5,14 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cascadio"
-version = "0.0.17"
-requires-python = ">=3.7"
+version = "0.0.18rc0"
+requires-python = ">=3.8"
 authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
 license = {file = "LICENSE/LICENSE-cascadio.md"}
 description = "Convert STEP files to GLB using OpenCASCADE"
 keywords = ["graphics", "STEP", "GLTF"]
 classifiers = [
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -33,29 +32,28 @@ content-type = "text/markdown"
 [project.optional-dependencies]
 tests = ["pytest", "trimesh", "chardet"]
 
+[tool.scikit-build]
+wheel.packages = ["src/cascadio"]
+
 [tool.cibuildwheel]
 # `yum` would need to be replaced in the `before-all`
 # script before the musl linux can build OpenCASCADE
 skip = "*musl* *win32*"
 
-# pypy compiles numpy for every test
-test-skip = "pp* *i686"
+# Use manylinux_2_28 for GCC 12+ (needed for OCCT 8.x constexpr)
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
 
-# build OCCT using only platform-independant commands
-before-all = [
-'pip install ninja',
-'cd upstream/OCCT',
-'git clean -xdf',
-'cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_RAPIDJSON:BOOL="ON" -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="../rapidjson/include" -DUSE_OPENGL:BOOL="OFF" -DUSE_TK:BOOL="OFF" -DUSE_FREETYPE:BOOL="OFF" -DUSE_VTK:BOOL="OFF" -DUSE_XLIB:BOOL="OFF" -DUSE_GLES2:BOOL="OFF" -DUSE_OPENVR:BOOL="OFF" -DBUILD_Inspector:BOOL="OFF" -DUSE_FREEIMAGE:BOOL="OFF" -DBUILD_SAMPLES_QT:BOOL="OFF" -DBUILD_MODULE_Draw:BOOL="OFF" -DBUILD_MODULE_Visualization:BOOL="OFF" -DBUILD_MODULE_ApplicationFramework:BOOL="OFF" .',
-"python -c \"mod = open('build.ninja').read().replace(' -lGL ', ' ').replace(' -lEGL ', ' '); open('build.ninja', 'w').write(mod)\"",
-'ninja',
-]
+# Skip testing on i686 (32-bit is not supported)
+test-skip = "*i686"
+
+# Build OCCT (skips automatically if cached)
+before-all = "pip install ninja cmake && python scripts/build_occt.py"
 
 test-extras = "tests"
 test-command = "pytest {project}/tests"
 
 [tool.cibuildwheel.linux]
-# point auditwheel at the OCCT libraries
 repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib:/project/upstream/OCCT/lin32/gcc/lib auditwheel repair --exclude libGL.so.1 --lib-sdir . -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
@@ -63,4 +61,6 @@ before-build = "pip install delvewheel"
 repair-wheel-command = "delvewheel repair --add-path upstream/OCCT/win64/vc14/bin -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
+# Require macOS 10.15+ for std::filesystem support
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 repair-wheel-command = "DYLD_LIBRARY_PATH=upstream/OCCT/mac64/clang/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"

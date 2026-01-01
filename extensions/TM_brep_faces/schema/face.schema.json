@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "face.schema.json",
+  "title": "BREP Face",
+  "type": "object",
+  "description": "A BREP face with optional analytic surface definition",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["plane", "cylinder", "cone", "sphere", "torus", "bspline", "other"],
+      "description": "The analytic surface type"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"type": {"const": "plane"}}
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "A point on the plane"
+          },
+          "normal": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "Unit normal vector"
+          }
+        },
+        "required": ["origin", "normal"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"type": {"const": "cylinder"}}
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "A point on the cylinder axis"
+          },
+          "axis": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "Unit direction vector of cylinder axis"
+          },
+          "radius": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Cylinder radius in meters"
+          }
+        },
+        "required": ["origin", "axis", "radius"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"type": {"const": "cone"}}
+      },
+      "then": {
+        "properties": {
+          "apex": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "The apex point of the cone"
+          },
+          "axis": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "Unit direction vector from apex"
+          },
+          "halfAngle": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1.5707963267948966,
+            "description": "Half-angle of the cone in radians"
+          }
+        },
+        "required": ["apex", "axis", "halfAngle"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"type": {"const": "sphere"}}
+      },
+      "then": {
+        "properties": {
+          "center": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "Center point of the sphere"
+          },
+          "radius": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Sphere radius in meters"
+          }
+        },
+        "required": ["center", "radius"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"type": {"const": "torus"}}
+      },
+      "then": {
+        "properties": {
+          "center": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "Center point of the torus"
+          },
+          "axis": {
+            "$ref": "definitions.schema.json#/$defs/vec3",
+            "description": "Unit normal to the torus plane"
+          },
+          "majorRadius": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Distance from center to tube center"
+          },
+          "minorRadius": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Radius of the tube"
+          }
+        },
+        "required": ["center", "axis", "majorRadius", "minorRadius"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"type": {"const": "bspline"}}
+      },
+      "then": {
+        "properties": {
+          "controlPoints": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Accessor index for control point grid (VEC3 or VEC4 for rational)"
+          },
+          "controlPointsU": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Number of control points in U direction"
+          },
+          "controlPointsV": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Number of control points in V direction"
+          },
+          "degreeU": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Degree in U direction"
+          },
+          "degreeV": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Degree in V direction"
+          },
+          "knotsU": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Accessor index for U knot vector"
+          },
+          "knotsV": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Accessor index for V knot vector"
+          }
+        },
+        "required": ["controlPoints", "controlPointsU", "controlPointsV", "degreeU", "degreeV", "knotsU", "knotsV"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"type": {"const": "other"}}
+      },
+      "then": {
+        "properties": {
+          "surfaceType": {
+            "type": "string",
+            "description": "Original surface type name if known"
+          }
+        }
+      }
+    }
+  ]
+}
