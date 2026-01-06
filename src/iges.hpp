@@ -79,12 +79,11 @@ static TopoDS_Shape stitchShapes(const std::vector<TopoDS_Shape> &shapes,
 /// Load an IGES file from disk and mesh the shapes
 /// Note: use_colors parameter is accepted for API consistency but IGES
 /// color handling is limited compared to STEP
-static IgesLoadResult
-loadIgesFile(const char *input_path, Standard_Real tol_linear,
-             Standard_Real tol_angle, Standard_Boolean tol_relative,
-             Standard_Boolean use_parallel,
-             Standard_Boolean /*use_colors*/ = Standard_True,
-             Standard_Boolean stitch_shapes = Standard_True) {
+static IgesLoadResult loadIgesFile(const char *input_path,
+                                   Standard_Real tol_linear,
+                                   Standard_Real tol_angle, bool tol_relative,
+                                   bool use_parallel, bool /*use_colors*/ = true,
+                                   bool stitch_shapes = true) {
   IgesLoadResult result;
 
   IGESControl_Reader igesReader;
@@ -138,7 +137,7 @@ loadIgesFile(const char *input_path, Standard_Real tol_linear,
                                   use_parallel);
     mesh.Perform();
     // Add stitched shape to the document
-    shapeTool->AddShape(stitched, Standard_False);
+    shapeTool->AddShape(stitched, false);
   } else {
     // No stitching, mesh each shape individually
     for (const auto &shape : rawShapes) {
@@ -147,7 +146,7 @@ loadIgesFile(const char *input_path, Standard_Real tol_linear,
                                     use_parallel);
       mesh.Perform();
       // Add each shape to the document
-      shapeTool->AddShape(shape, Standard_False);
+      shapeTool->AddShape(shape, false);
     }
   }
 
@@ -158,12 +157,11 @@ loadIgesFile(const char *input_path, Standard_Real tol_linear,
 /// Load an IGES file from memory (bytes) and mesh the shapes
 /// NOTE: IGES does not support stream reading, so this function
 /// writes to a temp file first
-static IgesLoadResult
-loadIgesBytes(const std::string &igesData, Standard_Real tol_linear,
-              Standard_Real tol_angle, Standard_Boolean tol_relative,
-              Standard_Boolean use_parallel,
-              Standard_Boolean use_colors = Standard_True,
-              Standard_Boolean stitch_shapes = Standard_True) {
+static IgesLoadResult loadIgesBytes(const std::string &igesData,
+                                    Standard_Real tol_linear,
+                                    Standard_Real tol_angle, bool tol_relative,
+                                    bool use_parallel, bool use_colors = true,
+                                    bool stitch_shapes = true) {
   IgesLoadResult result;
 
   // IGES doesn't support ReadStream, so we need to use a temp file

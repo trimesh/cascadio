@@ -7,6 +7,8 @@
 #include "tempfile.hpp"
 
 #include <Message_ProgressRange.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <TCollection_AsciiString.hxx>
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -46,9 +48,8 @@ struct LoadResult {
 /// Load a BREP file (STEP or IGES) from disk
 static LoadResult loadFile(const char *input_path, FileType file_type,
                            Standard_Real tol_linear, Standard_Real tol_angle,
-                           Standard_Boolean tol_relative,
-                           Standard_Boolean use_parallel,
-                           Standard_Boolean use_colors = Standard_True) {
+                           bool tol_relative, bool use_parallel,
+                           bool use_colors = true) {
   LoadResult result;
 
   if (file_type == FileType::STEP) {
@@ -75,9 +76,8 @@ static LoadResult loadFile(const char *input_path, FileType file_type,
 /// Load a BREP file (STEP or IGES) from memory
 static LoadResult loadBytes(const std::string &data, FileType file_type,
                             Standard_Real tol_linear, Standard_Real tol_angle,
-                            Standard_Boolean tol_relative,
-                            Standard_Boolean use_parallel,
-                            Standard_Boolean use_colors = Standard_True) {
+                            bool tol_relative, bool use_parallel,
+                            bool use_colors = true) {
   LoadResult result;
 
   if (file_type == FileType::STEP) {
@@ -146,11 +146,11 @@ static Standard_Real detectLengthUnit(Handle(TDocStd_Document) doc,
 /// appending
 static bool exportToGlbFile(
     Handle(TDocStd_Document) doc, const char *output_path,
-    Standard_Boolean merge_primitives, Standard_Boolean use_parallel,
+    bool merge_primitives, bool use_parallel,
     std::vector<FaceTriangleData> *faceData = nullptr,
     RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
     RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
-  RWGltf_CafWriter cafWriter(output_path, Standard_True);
+  RWGltf_CafWriter cafWriter(output_path, true);
   cafWriter.SetMergeFaces(merge_primitives);
   cafWriter.SetParallel(use_parallel);
   cafWriter.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
@@ -159,8 +159,8 @@ static bool exportToGlbFile(
   if (faceData != nullptr) {
     faceData->clear();
     cafWriter.SetFaceDataCallback(
-        [faceData](Standard_Integer faceIndex, Standard_Integer triStart,
-                   Standard_Integer triCount, const TopoDS_Face &face) {
+        [faceData](int faceIndex, int triStart, int triCount,
+                   const TopoDS_Face &face) {
           faceData->push_back({faceIndex, triStart, triCount, face});
         });
   }
@@ -176,14 +176,14 @@ static bool exportToGlbFile(
   }
 
   Message_ProgressRange progress;
-  TColStd_IndexedDataMapOfStringString fileInfo;
+  NCollection_IndexedDataMap<TCollection_AsciiString, TCollection_AsciiString>
+      fileInfo;
   return cafWriter.Perform(doc, fileInfo, progress);
 }
 
 /// Export document to GLB in memory with callbacks
 static std::vector<char> exportToGlbBytes(
-    Handle(TDocStd_Document) doc, Standard_Boolean merge_primitives,
-    Standard_Boolean use_parallel,
+    Handle(TDocStd_Document) doc, bool merge_primitives, bool use_parallel,
     std::vector<FaceTriangleData> *faceData = nullptr,
     RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
     RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
@@ -234,14 +234,13 @@ static std::vector<char> exportToGlbBytes(
 
 /// Transcode BREP bytes (STEP or IGES) to GLB bytes
 /// This is the main API - one-shot conversion with no disk round-trips
-static std::string
-to_glb_bytes(const std::string &data, FileType file_type,
-             Standard_Real tol_linear, Standard_Real tol_angle,
-             Standard_Boolean tol_relative, Standard_Boolean merge_primitives,
-             Standard_Boolean use_parallel,
-             Standard_Boolean include_brep = Standard_False,
-             std::set<std::string> brep_types = {},
-             Standard_Boolean include_materials = Standard_False) {
+static std::string to_glb_bytes(const std::string &data, FileType file_type,
+                                Standard_Real tol_linear,
+                                Standard_Real tol_angle, bool tol_relative,
+                                bool merge_primitives, bool use_parallel,
+                                bool include_brep = false,
+                                std::set<std::string> brep_types = {},
+                                bool include_materials = false) {
 
   // Warn early if metadata requested without merge_primitives
   if (!merge_primitives && (include_brep || include_materials)) {
@@ -284,7 +283,7 @@ to_glb_bytes(const std::string &data, FileType file_type,
     }
 
     // Find max triangle index to determine array size
-    Standard_Integer totalTriangles = 0;
+    int totalTriangles = 0;
     for (const auto &fd : faceData) {
       totalTriangles = std::max(totalTriangles, fd.triStart + fd.triCount);
     }
@@ -296,8 +295,8 @@ to_glb_bytes(const std::string &data, FileType file_type,
     // Build mapping array: triangle index -> face index
     faceIndices.resize(totalTriangles, 0);
     for (const auto &fd : faceData) {
-      for (Standard_Integer t = 0; t < fd.triCount; ++t) {
-        Standard_Integer idx = fd.triStart + t;
+      for (int t = 0; t < fd.triCount; ++t) {
+        int idx = fd.triStart + t;
         if (idx >= 0 && idx < totalTriangles) {
           faceIndices[idx] = static_cast<uint32_t>(fd.faceIndex);
         }
@@ -398,12 +397,9 @@ to_glb_bytes(const std::string &data, FileType file_type,
 /// LEGACY: Use to_glb_bytes() instead for better performance
 static int to_glb(char *input_path, char *output_path, FileType file_type,
                   Standard_Real tol_linear, Standard_Real tol_angle,
-                  Standard_Boolean tol_relative,
-                  Standard_Boolean merge_primitives,
-                  Standard_Boolean use_parallel,
-                  Standard_Boolean include_brep = Standard_False,
-                  std::set<std::string> brep_types = {},
-                  Standard_Boolean include_materials = Standard_False) {
+                  bool tol_relative, bool merge_primitives, bool use_parallel,
+                  bool include_brep = false, std::set<std::string> brep_types = {},
+                  bool include_materials = false) {
 
   // Read input file
   std::ifstream inFile(input_path, std::ios::binary);
@@ -441,9 +437,7 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
 /// LEGACY: File-based conversion for backward compatibility only
 static int step_to_obj(char *input_path, char *output_path,
                        Standard_Real tol_linear, Standard_Real tol_angle,
-                       Standard_Boolean tol_relative,
-                       Standard_Boolean use_parallel,
-                       Standard_Boolean use_colors) {
+                       bool tol_relative, bool use_parallel, bool use_colors) {
 
   StepLoadResult loaded = loadStepFile(input_path, tol_linear, tol_angle,
                                        tol_relative, use_parallel, use_colors);
@@ -454,7 +448,8 @@ static int step_to_obj(char *input_path, char *output_path,
   RWObj_CafWriter cafWriter(output_path);
 
   Message_ProgressRange progress;
-  TColStd_IndexedDataMapOfStringString fileInfo;
+  NCollection_IndexedDataMap<TCollection_AsciiString, TCollection_AsciiString>
+      fileInfo;
   if (!cafWriter.Perform(loaded.doc, fileInfo, progress)) {
     std::cerr << "Error: Failed to write OBJ to file" << std::endl;
     loaded.shapes.clear();

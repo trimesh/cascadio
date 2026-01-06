@@ -39,11 +39,10 @@ static void closeDocument(Handle(TDocStd_Document) & doc) {
 }
 
 /// Load a STEP file from disk and mesh the shapes
-static StepLoadResult
-loadStepFile(const char *input_path, Standard_Real tol_linear,
-             Standard_Real tol_angle, Standard_Boolean tol_relative,
-             Standard_Boolean use_parallel,
-             Standard_Boolean use_colors = Standard_True) {
+static StepLoadResult loadStepFile(const char *input_path,
+                                   Standard_Real tol_linear,
+                                   Standard_Real tol_angle, bool tol_relative,
+                                   bool use_parallel, bool use_colors = true) {
   StepLoadResult result;
 
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
@@ -86,11 +85,10 @@ loadStepFile(const char *input_path, Standard_Real tol_linear,
 }
 
 /// Load a STEP file from memory (bytes) and mesh the shapes
-static StepLoadResult
-loadStepBytes(const std::string &stepData, Standard_Real tol_linear,
-              Standard_Real tol_angle, Standard_Boolean tol_relative,
-              Standard_Boolean use_parallel,
-              Standard_Boolean use_colors = Standard_True) {
+static StepLoadResult loadStepBytes(const std::string &stepData,
+                                    Standard_Real tol_linear,
+                                    Standard_Real tol_angle, bool tol_relative,
+                                    bool use_parallel, bool use_colors = true) {
   StepLoadResult result;
 
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();

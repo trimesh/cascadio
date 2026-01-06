@@ -1,8 +1,8 @@
 diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
-index f5f50d0fa4..ee68e9e77c 100644
+index 0eb46b0348..4daef928bf 100644
 --- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
 +++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
-@@ -247,7 +247,8 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile,
+@@ -247,7 +247,8 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile, bool
        myToMergeFaces(false),
        myToSplitIndices16(false),
        myBinDataLen64(0),
@@ -12,7 +12,7 @@ index f5f50d0fa4..ee68e9e77c 100644
  {
    myCSTrsf.SetOutputLengthUnit(1.0); // meters
    myCSTrsf.SetOutputCoordinateSystem(RWMesh_CoordinateSystem_glTF);
-@@ -480,6 +481,13 @@ void RWGltf_CafWriter::saveTriangleIndices(RWGltf_GltfFace&           theGltfFac
+@@ -481,6 +482,13 @@ void RWGltf_CafWriter::saveTriangleIndices(RWGltf_GltfFace&           theGltfFac
                                             const RWMesh_FaceIterator& theFaceIter,
                                             const std::shared_ptr<RWGltf_CafWriter::Mesh>& theMesh)
  {
@@ -23,10 +23,10 @@ index f5f50d0fa4..ee68e9e77c 100644
 +    myFaceDataCallback(myFaceIndex++, aTriStart, theFaceIter.NbTriangles(), theFaceIter.Face());
 +  }
 +
-   const Standard_Integer aNodeFirst = theGltfFace.NbIndexedNodes - theFaceIter.ElemLower();
+   const int aNodeFirst = theGltfFace.NbIndexedNodes - theFaceIter.ElemLower();
    theGltfFace.NbIndexedNodes += theFaceIter.NbNodes();
    theGltfFace.Indices.Count += theFaceIter.NbTriangles() * 3;
-@@ -840,6 +848,7 @@ bool RWGltf_CafWriter::writeBinData(const Handle(TDocStd_Document)& theDocument,
+@@ -843,6 +851,7 @@ bool RWGltf_CafWriter::writeBinData(const occ::handle<TDocStd_Document>&
  
    myBinDataMap.Clear();
    myBinDataLen64 = 0;
@@ -34,7 +34,7 @@ index f5f50d0fa4..ee68e9e77c 100644
  
    Message_ProgressScope aScope(theProgress,
                                 "Write binary data",
-@@ -1219,6 +1228,15 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+@@ -1226,6 +1235,15 @@ bool RWGltf_CafWriter::writeJson(
      Message::SendFail(TCollection_AsciiString("File '") + aFileNameGltf + "' can not be created");
      return false;
    }
@@ -50,7 +50,7 @@ index f5f50d0fa4..ee68e9e77c 100644
    if (myIsBinary)
    {
      const char* aMagic         = "glTF";
-@@ -1292,7 +1310,7 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+@@ -1299,7 +1317,7 @@ bool RWGltf_CafWriter::writeJson(
      }
    }
  
@@ -59,7 +59,7 @@ index f5f50d0fa4..ee68e9e77c 100644
    myWriter.reset(new RWGltf_GltfOStreamWriter(aFileStream));
  
    myWriter->StartObject();
-@@ -1324,6 +1342,15 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+@@ -1331,6 +1349,15 @@ bool RWGltf_CafWriter::writeJson(
    writeTextures(aSceneNodeMap);
  
    myWriter->EndObject();
@@ -75,7 +75,7 @@ index f5f50d0fa4..ee68e9e77c 100644
  
    if (!myIsBinary)
    {
-@@ -1344,12 +1371,15 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+@@ -1351,12 +1378,15 @@ bool RWGltf_CafWriter::writeJson(
      ++aContentLen64;
    }
  
@@ -93,7 +93,7 @@ index f5f50d0fa4..ee68e9e77c 100644
    if (aFullLen64 < std::numeric_limits<uint32_t>::max())
    {
      {
-@@ -1373,6 +1403,35 @@ bool RWGltf_CafWriter::writeJson(const Handle(TDocStd_Document)&             the
+@@ -1380,6 +1410,35 @@ bool RWGltf_CafWriter::writeJson(
          aGltfContentFile->write(aBuffer, aReadLen);
        }
      }
@@ -130,10 +130,10 @@ index f5f50d0fa4..ee68e9e77c 100644
      OSD_File(aBinFilePath).Remove();
      if (OSD_File(aBinFilePath).Exists())
 diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
-index 5c4f8e0be6..69c5254ddc 100644
+index 8ecae86bfa..2e5ab59096 100644
 --- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
 +++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
-@@ -30,7 +30,9 @@
+@@ -32,7 +32,9 @@
  #include <XCAFPrs_DocumentNode.hxx>
  #include <XCAFPrs_Style.hxx>
  #include <Poly_Triangle.hxx>
@@ -143,7 +143,7 @@ index 5c4f8e0be6..69c5254ddc 100644
  #include <memory>
  
  class Message_ProgressRange;
-@@ -154,6 +156,39 @@ public:
+@@ -155,6 +157,39 @@ public:
      myDracoParameters = theDracoParameters;
    }
  
@@ -183,9 +183,9 @@ index 5c4f8e0be6..69c5254ddc 100644
    //! Write glTF file and associated binary file.
    //! Triangulation data should be precomputed within shapes!
    //! @param[in] theDocument     input document
-@@ -530,7 +565,11 @@ protected:
+@@ -540,7 +575,11 @@ protected:
    std::vector<RWGltf_GltfBufferView>            myBuffViewsDraco;    //!< vector of buffers view with compression data
-   Standard_Boolean                              myToParallel;        //!< flag to use multithreading; FALSE by default
+   bool                              myToParallel;        //!< flag to use multithreading; FALSE by default
                                              // clang-format on
 -  RWGltf_DracoParameters myDracoParameters; //!< Draco parameters
 +  RWGltf_DracoParameters myDracoParameters;         //!< Draco parameters

@@ -20,6 +20,15 @@
       "minItems": 4,
       "maxItems": 4,
       "description": "A 4-component vector [x, y, z, w]"
+    },
+    "bounds": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "A 2-component bounds array [min, max]"
     }
   }
 }

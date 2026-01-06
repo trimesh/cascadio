@@ -23,10 +23,9 @@ PYBIND11_MODULE(_core, m) {
   m.def(
       "to_glb_bytes",
       [](py::bytes data, FileType file_type, Standard_Real tol_linear,
-         Standard_Real tol_angle, Standard_Boolean tol_relative,
-         Standard_Boolean merge_primitives, Standard_Boolean use_parallel,
-         Standard_Boolean include_brep, std::set<std::string> brep_types,
-         Standard_Boolean include_materials) -> py::bytes {
+         Standard_Real tol_angle, bool tol_relative, bool merge_primitives,
+         bool use_parallel, bool include_brep, std::set<std::string> brep_types,
+         bool include_materials) -> py::bytes {
         std::string input_data = data;
         std::string result =
             to_glb_bytes(input_data, file_type, tol_linear, tol_angle,
@@ -77,10 +76,9 @@ bytes
   m.def(
       "step_to_glb",
       [](char *input_path, char *output_path, Standard_Real tol_linear,
-         Standard_Real tol_angle, Standard_Boolean tol_relative,
-         Standard_Boolean merge_primitives, Standard_Boolean use_parallel,
-         Standard_Boolean include_brep, std::set<std::string> brep_types,
-         Standard_Boolean include_materials) -> int {
+         Standard_Real tol_angle, bool tol_relative, bool merge_primitives,
+         bool use_parallel, bool include_brep, std::set<std::string> brep_types,
+         bool include_materials) -> int {
         return to_glb(input_path, output_path, FileType::STEP, tol_linear,
                       tol_angle, tol_relative, merge_primitives, use_parallel,
                       include_brep, brep_types, include_materials);
