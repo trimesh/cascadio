@@ -24,8 +24,10 @@ jobs:
         id: occt-key
         shell: bash
         run: |
-          echo "hash=${{ runner.os }}-${{ hashFiles('upstream/OCCT/CMakeLists.txt', 'pyproject.toml') }}" >> $GITHUB_OUTPUT
-      
+          # Cache key includes: OS, OCCT commit, patches, and build script
+          OCCT_COMMIT=$(git rev-parse HEAD:upstream/OCCT)
+          echo "hash=${{ runner.os }}-${OCCT_COMMIT}-${{ hashFiles('patches/*.patch', 'scripts/build_occt.py') }}" >> $GITHUB_OUTPUT
+
       - name: Cache OCCT build
         id: cache-occt
         uses: actions/cache@v4
@@ -36,6 +38,7 @@ jobs:
             upstream/OCCT/win64
             upstream/OCCT/mac64
           key: occt-${{ steps.occt-key.outputs.hash }}
+          save-always: true
       
       - uses: ilammy/msvc-dev-cmd@v1.13.0
       

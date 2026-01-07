@@ -2,7 +2,6 @@
 
 #include <Quantity_Color.hxx>
 #include <Quantity_ColorRGBA.hxx>
-#include <Standard_Integer.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -23,9 +22,9 @@
 
 /// Data collected for each face during GLB export via callback
 struct FaceTriangleData {
-  Standard_Integer faceIndex;
-  Standard_Integer triStart;
-  Standard_Integer triCount;
+  int faceIndex;
+  int triStart;
+  int triCount;
   TopoDS_Face face;
 };
 
@@ -115,7 +114,8 @@ static std::string injectBrepExtensionIntoJson(
 
     // Update buffers[0].byteLength
     if (doc.HasMember("buffers") && doc["buffers"].IsArray() &&
-        doc["buffers"].Size() > 0) {
+        doc["buffers"].Size() > 0 &&
+        doc["buffers"][0].HasMember("byteLength")) {
       doc["buffers"][0]["byteLength"].SetUint(newBinLength);
     }
 

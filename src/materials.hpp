@@ -2,8 +2,9 @@
 
 #include "extras.hpp"
 
+#include <NCollection_Sequence.hxx>
 #include <TCollection_HAsciiString.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <TDocStd_Document.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_MaterialTool.hxx>
@@ -26,10 +27,10 @@ extractMaterials(Handle(TDocStd_Document) doc,
   Handle(XCAFDoc_MaterialTool) matTool =
       XCAFDoc_DocumentTool::MaterialTool(mainLabel);
   if (!matTool.IsNull()) {
-    TDF_LabelSequence matLabels;
+    NCollection_Sequence<TDF_Label> matLabels;
     matTool->GetMaterialLabels(matLabels);
 
-    for (Standard_Integer i = 1; i <= matLabels.Length(); i++) {
+    for (int i = 1; i <= matLabels.Length(); i++) {
       Handle(TCollection_HAsciiString) name, description, densName, densValType;
       Standard_Real density = 0.0;
 
@@ -67,10 +68,10 @@ extractMaterials(Handle(TDocStd_Document) doc,
   Handle(XCAFDoc_VisMaterialTool) visMatTool =
       XCAFDoc_DocumentTool::VisMaterialTool(mainLabel);
   if (!visMatTool.IsNull()) {
-    TDF_LabelSequence visMatLabels;
+    NCollection_Sequence<TDF_Label> visMatLabels;
     visMatTool->GetMaterials(visMatLabels);
 
-    for (Standard_Integer i = 1; i <= visMatLabels.Length(); i++) {
+    for (int i = 1; i <= visMatLabels.Length(); i++) {
       Handle(XCAFDoc_VisMaterial) visMat =
           XCAFDoc_VisMaterialTool::GetMaterial(visMatLabels.Value(i));
       if (visMat.IsNull() || visMat->IsEmpty()) {

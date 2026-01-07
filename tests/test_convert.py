@@ -147,8 +147,8 @@ def test_convert_step_to_glb_with_brep():
     assert len(cyl.origin) == 3
     assert len(cyl.axis) == 3
     assert isinstance(cyl.radius, float)
-    assert len(cyl.u_bounds) == 2
-    assert len(cyl.v_bounds) == 2
+    assert len(cyl.extent_angle) == 2
+    assert len(cyl.extent_height) == 2
 
     # Verify plane dataclass structure
     plane = planes[0]
@@ -390,8 +390,8 @@ def test_cylinder_parameters(brep_mesh):
         axis = np.array(cyl.axis)
         assert np.isclose(np.linalg.norm(axis), 1.0, atol=1e-6)
         assert cyl.radius > 0
-        assert cyl.u_bounds[1] > cyl.u_bounds[0]
-        assert np.isfinite(cyl.v_bounds[0]) and np.isfinite(cyl.v_bounds[1])
+        assert cyl.extent_angle[1] > cyl.extent_angle[0]
+        assert np.isfinite(cyl.extent_height[0]) and np.isfinite(cyl.extent_height[1])
 
 
 @pytest.mark.skipif(

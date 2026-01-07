@@ -21,10 +21,10 @@ class Plane:
     normal: Tuple[float, float, float]
     # Unit X direction in the plane
     x_dir: Tuple[float, float, float]
-    # Parametric U bounds
-    u_bounds: Tuple[float, float]
-    # Parametric V bounds
-    v_bounds: Tuple[float, float]
+    # Extent along X direction in meters [min, max]
+    extent_x: Tuple[float, float]
+    # Extent along Y direction in meters [min, max]
+    extent_y: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -33,16 +33,16 @@ class Cylinder:
 
     # Index of this face in the BREP shape
     face_index: int
-    # Point on axis at V=0
+    # Point on axis
     origin: Tuple[float, float, float]
     # Unit axis direction
     axis: Tuple[float, float, float]
-    # Cylinder radius
+    # Cylinder radius in meters
     radius: float
-    # Angular bounds in radians
-    u_bounds: Tuple[float, float]
-    # Height extent along axis
-    v_bounds: Tuple[float, float]
+    # Angular extent around axis in radians [min, max]
+    extent_angle: Tuple[float, float]
+    # Height extent along axis in meters [min, max]
+    extent_height: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -53,16 +53,16 @@ class Cone:
     face_index: int
     # Apex point of the cone
     apex: Tuple[float, float, float]
-    # Unit axis direction
+    # Unit axis direction from apex
     axis: Tuple[float, float, float]
     # Half-angle at apex in radians
-    semi_angle: float
-    # Radius at the reference plane
+    half_angle: float
+    # Reference radius at the origin plane in meters
     ref_radius: float
-    # Angular bounds in radians
-    u_bounds: Tuple[float, float]
-    # Distance along axis from apex
-    v_bounds: Tuple[float, float]
+    # Angular extent around axis in radians [min, max]
+    extent_angle: Tuple[float, float]
+    # Distance extent from apex in meters [min, max]
+    extent_distance: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -73,12 +73,12 @@ class Sphere:
     face_index: int
     # Center point
     center: Tuple[float, float, float]
-    # Sphere radius
+    # Sphere radius in meters
     radius: float
-    # Longitude bounds in radians
-    u_bounds: Tuple[float, float]
-    # Latitude bounds in radians [-π/2, π/2]
-    v_bounds: Tuple[float, float]
+    # Longitude extent in radians [min, max]
+    extent_longitude: Tuple[float, float]
+    # Latitude extent in radians [min, max], range [-π/2, π/2]
+    extent_latitude: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -89,16 +89,16 @@ class Torus:
     face_index: int
     # Center point
     center: Tuple[float, float, float]
-    # Unit axis direction
+    # Unit axis direction (normal to torus plane)
     axis: Tuple[float, float, float]
-    # Distance from center to tube center
+    # Distance from center to tube center in meters
     major_radius: float
-    # Tube radius
+    # Tube radius in meters
     minor_radius: float
-    # Angular bounds around axis in radians
-    u_bounds: Tuple[float, float]
-    # Angular bounds around tube in radians
-    v_bounds: Tuple[float, float]
+    # Angular extent around main axis in radians [min, max]
+    extent_major_angle: Tuple[float, float]
+    # Angular extent around tube in radians [min, max]
+    extent_minor_angle: Tuple[float, float]
 
 
 # Union type for any primitive
@@ -116,15 +116,17 @@ __all__ = [
 ]
 
 
-def parse_primitive(data: dict) -> Optional[BrepPrimitive]:
+def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     """
-    Parse a primitive dict from GLTF extras into a typed dataclass.
+    Parse a primitive dict from GLTF extension into a typed dataclass.
 
     Parameters
     ----------
     data : dict or None
-        A single primitive dict from mesh.metadata['brep_faces'],
+        A single primitive dict from the TM_brep_faces extension,
         or None if the face was filtered out
+    face_index : int
+        The index of this face in the faces array (since it's not stored in the JSON)
 
     Returns
     -------
@@ -133,14 +135,10 @@ def parse_primitive(data: dict) -> Optional[BrepPrimitive]:
     """
     if data is None:
         return None
-    
+
     ptype = data.get("type")
     if ptype is None:
         return None
-
-    face_index = data["face_index"]
-    u_bounds = tuple(data["u_bounds"])
-    v_bounds = tuple(data["v_bounds"])
 
     if ptype == "plane":
         return Plane(
@@ -148,8 +146,8 @@ def parse_primitive(data: dict) -> Optional[BrepPrimitive]:
             origin=tuple(data["origin"]),
             normal=tuple(data["normal"]),
             x_dir=tuple(data["x_dir"]),
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            extent_x=tuple(data["extent_x"]),
+            extent_y=tuple(data["extent_y"]),
         )
     elif ptype == "cylinder":
         return Cylinder(
@@ -157,26 +155,26 @@ def parse_primitive(data: dict) -> Optional[BrepPrimitive]:
             origin=tuple(data["origin"]),
             axis=tuple(data["axis"]),
             radius=data["radius"],
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            extent_angle=tuple(data["extent_angle"]),
+            extent_height=tuple(data["extent_height"]),
         )
     elif ptype == "cone":
         return Cone(
             face_index=face_index,
             apex=tuple(data["apex"]),
             axis=tuple(data["axis"]),
-            semi_angle=data["semi_angle"],
+            half_angle=data["half_angle"],
             ref_radius=data["ref_radius"],
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            extent_angle=tuple(data["extent_angle"]),
+            extent_distance=tuple(data["extent_distance"]),
         )
     elif ptype == "sphere":
         return Sphere(
             face_index=face_index,
             center=tuple(data["center"]),
             radius=data["radius"],
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            extent_longitude=tuple(data["extent_longitude"]),
+            extent_latitude=tuple(data["extent_latitude"]),
         )
     elif ptype == "torus":
         return Torus(
@@ -185,8 +183,8 @@ def parse_primitive(data: dict) -> Optional[BrepPrimitive]:
             axis=tuple(data["axis"]),
             major_radius=data["major_radius"],
             minor_radius=data["minor_radius"],
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            extent_major_angle=tuple(data["extent_major_angle"]),
+            extent_minor_angle=tuple(data["extent_minor_angle"]),
         )
 
     return None
@@ -199,7 +197,7 @@ def parse_brep_faces(brep_faces: List[dict]) -> List[Optional[BrepPrimitive]]:
     Parameters
     ----------
     brep_faces : list of dict
-        The brep_faces list from mesh.metadata['brep_faces']
+        The faces list from the TM_brep_faces extension
 
     Returns
     -------
@@ -207,4 +205,4 @@ def parse_brep_faces(brep_faces: List[dict]) -> List[Optional[BrepPrimitive]]:
         List of parsed primitives, with None for non-analytical faces.
         Maintains the same indexing as the input list.
     """
-    return [parse_primitive(face) for face in brep_faces]
+    return [parse_primitive(face, face_index=i) for i, face in enumerate(brep_faces)]

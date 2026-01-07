@@ -1,16 +1,16 @@
 """
-trimesh_ext.py
---------------
+extension.py
+------------
 
 Trimesh extension integration for cascadio.
 
 This module registers handlers for the TM_brep_faces glTF extension,
 populating trimesh meshes with:
 - mesh.face_attributes['brep_index']: numpy array of per-triangle face indices
-- mesh.brep_primitives: list of cascadio.primitives dataclasses
+- mesh.metadata['cascadio']['brep_primitives']: list of cascadio.primitives dataclasses
 
 Usage:
-    import cascadio.trimesh_ext  # registers the handler on import
+    import cascadio  # registers the handler on import
     import trimesh
     scene = trimesh.load("model.glb")
 """
@@ -65,18 +65,14 @@ def _parse_face_to_primitive(
     if face_type is None:
         return None
 
-    # Default bounds if not specified
-    u_bounds = tuple(face.get("uBounds", (0.0, 1.0)))
-    v_bounds = tuple(face.get("vBounds", (0.0, 1.0)))
-
     if face_type == "plane":
         return Plane(
             face_index=face_index,
             origin=tuple(face["origin"]),
             normal=tuple(face["normal"]),
-            x_dir=tuple(face.get("xDir", (1.0, 0.0, 0.0))),
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            x_dir=tuple(face["x_dir"]),
+            extent_x=tuple(face["extent_x"]),
+            extent_y=tuple(face["extent_y"]),
         )
     elif face_type == "cylinder":
         return Cylinder(
@@ -84,36 +80,36 @@ def _parse_face_to_primitive(
             origin=tuple(face["origin"]),
             axis=tuple(face["axis"]),
             radius=face["radius"],
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            extent_angle=tuple(face["extent_angle"]),
+            extent_height=tuple(face["extent_height"]),
         )
     elif face_type == "cone":
         return Cone(
             face_index=face_index,
             apex=tuple(face["apex"]),
             axis=tuple(face["axis"]),
-            semi_angle=face["halfAngle"],
-            ref_radius=face.get("refRadius", 0.0),
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            half_angle=face["half_angle"],
+            ref_radius=face["ref_radius"],
+            extent_angle=tuple(face["extent_angle"]),
+            extent_distance=tuple(face["extent_distance"]),
         )
     elif face_type == "sphere":
         return Sphere(
             face_index=face_index,
             center=tuple(face["center"]),
             radius=face["radius"],
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            extent_longitude=tuple(face["extent_longitude"]),
+            extent_latitude=tuple(face["extent_latitude"]),
         )
     elif face_type == "torus":
         return Torus(
             face_index=face_index,
             center=tuple(face["center"]),
             axis=tuple(face["axis"]),
-            major_radius=face["majorRadius"],
-            minor_radius=face["minorRadius"],
-            u_bounds=u_bounds,
-            v_bounds=v_bounds,
+            major_radius=face["major_radius"],
+            minor_radius=face["minor_radius"],
+            extent_major_angle=tuple(face["extent_major_angle"]),
+            extent_minor_angle=tuple(face["extent_minor_angle"]),
         )
 
     # "bspline", "other", or unknown types
@@ -156,7 +152,7 @@ def process_brep_faces(
 
 
 @register_handler("TM_brep_faces", "primitive")
-def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:
+def _import_brep_faces_cascadio(ctx: Dict) -> Optional[Dict]:
     """
     Handle TM_brep_faces extension during import (cascadio version).
 
@@ -164,6 +160,7 @@ def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:
     - face_attributes: dict of per-face arrays (e.g., brep_index)
     - metadata: dict of additional data (e.g., brep_primitives)
     """
+    data = ctx.get("data")
     if data is None:
         return None
 
@@ -176,14 +173,14 @@ def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:
     face_indices = None
     if "faceIndices" in data:
         accessor_idx = data["faceIndices"]
-        accessors = kwargs.get("accessors")
+        accessors = ctx.get("accessors")
         if accessors is not None and accessor_idx < len(accessors):
             face_indices = np.asarray(accessors[accessor_idx])
             result["face_attributes"]["brep_index"] = face_indices
 
     # Get face definitions if present
     faces = data.get("faces")
-    
+
     # Get materials if present (may be included alongside BREP data)
     materials = data.get("materials")
 
@@ -193,13 +190,12 @@ def _import_brep_faces_cascadio(data: Dict, **kwargs) -> Optional[Dict]:
         for i, face in enumerate(faces):
             prim = _parse_face_to_primitive(face, face_index=i)
             primitives.append(prim)
-        
+
         # Put everything under cascadio namespace for consistency
-        # Use setdefault to preserve any existing cascadio data (e.g., materials)
         cascadio_meta = result["metadata"].setdefault("cascadio", {})
         cascadio_meta["brep_primitives"] = primitives
         cascadio_meta["brep_faces"] = faces
-    
+
     # Add materials if present
     if materials is not None:
         cascadio_meta = result["metadata"].setdefault("cascadio", {})

@@ -1,8 +1,10 @@
 import os
-import cascadio
-import trimesh
+import sys
 import tempfile
 from io import BytesIO
+
+import cascadio
+import trimesh
 
 cwd = os.path.abspath(os.path.dirname(__file__))
 

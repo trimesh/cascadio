@@ -63,7 +63,6 @@ CMAKE_ARGS = [
     "-DBUILD_SAMPLES_QT:BOOL=OFF",
     "-DBUILD_MODULE_Draw:BOOL=OFF",
     "-DBUILD_MODULE_Visualization:BOOL=OFF",
-    "-DBUILD_MODULE_ApplicationFramework:BOOL=OFF",
 ]
 
 
