@@ -79,6 +79,9 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
 
   rapidjson::Value obj(rapidjson::kObjectType);
 
+  // Add face_index first (required by schema)
+  obj.AddMember("face_index", faceIndex, alloc);
+
   switch (surfType) {
   case GeomAbs_Plane: {
     gp_Pln pln = surf.Plane();
@@ -92,8 +95,8 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     addVec3(obj, "x_dir", pos.XDirection().X(), pos.XDirection().Y(),
             pos.XDirection().Z(), alloc);
     // For planes, u and v are both lengths in the plane's local coordinates
-    addBounds(obj, "extent_x", uMin * lengthUnit, uMax * lengthUnit, alloc);
-    addBounds(obj, "extent_y", vMin * lengthUnit, vMax * lengthUnit, alloc);
+    addBounds(obj, "u_bounds", uMin * lengthUnit, uMax * lengthUnit, alloc);
+    addBounds(obj, "v_bounds", vMin * lengthUnit, vMax * lengthUnit, alloc);
     break;
   }
   case GeomAbs_Cylinder: {
@@ -107,8 +110,8 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
             pos.Direction().Z(), alloc);
     obj.AddMember("radius", cyl.Radius() * lengthUnit, alloc);
     // u is angle around axis (radians), v is height along axis (length)
-    addBounds(obj, "extent_angle", uMin, uMax, alloc);
-    addBounds(obj, "extent_height", vMin * lengthUnit, vMax * lengthUnit, alloc);
+    addBounds(obj, "u_bounds", uMin, uMax, alloc);
+    addBounds(obj, "v_bounds", vMin * lengthUnit, vMax * lengthUnit, alloc);
     break;
   }
   case GeomAbs_Cone: {
@@ -120,11 +123,11 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
             apex.Z() * lengthUnit, alloc);
     addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
             pos.Direction().Z(), alloc);
-    obj.AddMember("half_angle", cone.SemiAngle(), alloc);
+    obj.AddMember("semi_angle", cone.SemiAngle(), alloc);
     obj.AddMember("ref_radius", cone.RefRadius() * lengthUnit, alloc);
     // u is angle around axis (radians), v is distance from apex (length)
-    addBounds(obj, "extent_angle", uMin, uMax, alloc);
-    addBounds(obj, "extent_distance", vMin * lengthUnit, vMax * lengthUnit, alloc);
+    addBounds(obj, "u_bounds", uMin, uMax, alloc);
+    addBounds(obj, "v_bounds", vMin * lengthUnit, vMax * lengthUnit, alloc);
     break;
   }
   case GeomAbs_Sphere: {
@@ -135,8 +138,8 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
             alloc);
     obj.AddMember("radius", sph.Radius() * lengthUnit, alloc);
     // u is longitude (radians), v is latitude (radians)
-    addBounds(obj, "extent_longitude", uMin, uMax, alloc);
-    addBounds(obj, "extent_latitude", vMin, vMax, alloc);
+    addBounds(obj, "u_bounds", uMin, uMax, alloc);
+    addBounds(obj, "v_bounds", vMin, vMax, alloc);
     break;
   }
   case GeomAbs_Torus: {
@@ -151,8 +154,8 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     obj.AddMember("major_radius", tor.MajorRadius() * lengthUnit, alloc);
     obj.AddMember("minor_radius", tor.MinorRadius() * lengthUnit, alloc);
     // u is angle around main axis (radians), v is angle around tube (radians)
-    addBounds(obj, "extent_major_angle", uMin, uMax, alloc);
-    addBounds(obj, "extent_minor_angle", vMin, vMax, alloc);
+    addBounds(obj, "u_bounds", uMin, uMax, alloc);
+    addBounds(obj, "v_bounds", vMin, vMax, alloc);
     break;
   }
   default:

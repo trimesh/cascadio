@@ -19,7 +19,7 @@ glb = cascadio.load(open("../../models/featuretype.STEP", "rb").read(), include_
 scene = trimesh.load_scene(trimesh.util.wrap_as_stream(glb), file_type="glb")
 for mesh in scene.geometry.values():
     prims = mesh.metadata.get("cascadio", {}).get("brep_primitives", [])
-    idx = mesh.face_attributes.get("brep_index", [])
+    idx = mesh.face_attributes.get("brep_index", []).flatten()
     colors = [
         COLORS.get(type(prims[i]) if 0 <= i < len(prims) else None, COLORS[type(None)])
         for i in idx
