@@ -79,8 +79,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         plane = {
             "type": "plane",
             "face_index": 0,
-            "u_bounds": [-0.5, 0.5],
-            "v_bounds": [-0.5, 0.5],
+            "extent_x": [-0.5, 0.5],
+            "extent_y": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
             "normal": [0.0, 0.0, 1.0],
             "x_dir": [1.0, 0.0, 0.0],
@@ -93,8 +93,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         cylinder = {
             "type": "cylinder",
             "face_index": 1,
-            "u_bounds": [0.0, 6.283],
-            "v_bounds": [-0.5, 0.5],
+            "extent_angle": [0.0, 6.283],
+            "extent_height": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
             "axis": [0.0, 0.0, 1.0],
             "radius": 0.5,
@@ -107,8 +107,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         cone = {
             "type": "cone",
             "face_index": 2,
-            "u_bounds": [0.0, 6.283],
-            "v_bounds": [0.1, 1.0],
+            "extent_angle": [0.0, 6.283],
+            "extent_distance": [0.1, 1.0],
             "apex": [0.0, 0.0, 0.0],
             "axis": [0.0, 0.0, 1.0],
             "semi_angle": 0.785,
@@ -122,8 +122,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         sphere = {
             "type": "sphere",
             "face_index": 3,
-            "u_bounds": [0.0, 6.283],
-            "v_bounds": [-1.57, 1.57],
+            "extent_longitude": [0.0, 6.283],
+            "extent_latitude": [-1.57, 1.57],
             "center": [0.0, 0.0, 0.0],
             "radius": 0.5,
         }
@@ -135,8 +135,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         torus = {
             "type": "torus",
             "face_index": 4,
-            "u_bounds": [0.0, 6.283],
-            "v_bounds": [0.0, 6.283],
+            "extent_major_angle": [0.0, 6.283],
+            "extent_minor_angle": [0.0, 6.283],
             "center": [0.0, 0.0, 0.0],
             "axis": [0.0, 0.0, 1.0],
             "major_radius": 1.0,
@@ -153,8 +153,8 @@ class TestBrepFacesSchema(unittest.TestCase):
                 {
                     "type": "cylinder",
                     "face_index": 0,
-                    "u_bounds": [0.0, 6.283],
-                    "v_bounds": [0.0, 0.01],
+                    "extent_angle": [0.0, 6.283],
+                    "extent_height": [0.0, 0.01],
                     "origin": [0.0, 0.0, 0.0],
                     "axis": [0.0, 0.0, 1.0],
                     "radius": 0.005,
@@ -162,8 +162,8 @@ class TestBrepFacesSchema(unittest.TestCase):
                 {
                     "type": "plane",
                     "face_index": 1,
-                    "u_bounds": [-0.005, 0.005],
-                    "v_bounds": [-0.005, 0.005],
+                    "extent_x": [-0.005, 0.005],
+                    "extent_y": [-0.005, 0.005],
                     "origin": [0.0, 0.0, 0.0],
                     "normal": [0.0, 0.0, -1.0],
                     "x_dir": [1.0, 0.0, 0.0],
@@ -178,8 +178,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         invalid_plane = {
             "type": "plane",
             "face_index": 0,
-            "u_bounds": [-0.5, 0.5],
-            "v_bounds": [-0.5, 0.5],
+            "extent_x": [-0.5, 0.5],
+            "extent_y": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
             # missing normal, x_dir
         }
@@ -192,8 +192,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         invalid_cylinder = {
             "type": "cylinder",
             "face_index": 0,
-            "u_bounds": [0.0, 6.283],
-            "v_bounds": [-0.5, 0.5],
+            "extent_angle": [0.0, 6.283],
+            "extent_height": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
             "axis": [0.0, 0.0, 1.0],
             "radius": 0,  # Invalid: must be > 0
@@ -207,8 +207,8 @@ class TestBrepFacesSchema(unittest.TestCase):
         invalid_plane = {
             "type": "plane",
             "face_index": 0,
-            "u_bounds": [-0.5, 0.5],
-            "v_bounds": [-0.5, 0.5],
+            "extent_x": [-0.5, 0.5],
+            "extent_y": [-0.5, 0.5],
             "origin": [0.0, 0.0],  # Invalid: should be 3 elements
             "normal": [0.0, 0.0, 1.0],
             "x_dir": [1.0, 0.0, 0.0],

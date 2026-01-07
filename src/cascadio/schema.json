@@ -20,9 +20,7 @@
         "type": "object",
         "required": [
           "type",
-          "face_index",
-          "u_bounds",
-          "v_bounds"
+          "face_index"
         ],
         "properties": {
           "type": {
@@ -39,24 +37,6 @@
             "type": "integer",
             "minimum": 0,
             "description": "Index of this face in the BREP model"
-          },
-          "u_bounds": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 2,
-            "maxItems": 2,
-            "description": "A 2-component bounds array [min, max]"
-          },
-          "v_bounds": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 2,
-            "maxItems": 2,
-            "description": "A 2-component bounds array [min, max]"
           }
         },
         "allOf": [
@@ -96,12 +76,32 @@
                   "minItems": 3,
                   "maxItems": 3,
                   "description": "A 3-component vector [x, y, z]"
+                },
+                "extent_x": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_y": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
                 }
               },
               "required": [
                 "origin",
                 "normal",
-                "x_dir"
+                "x_dir",
+                "extent_x",
+                "extent_y"
               ]
             }
           },
@@ -136,12 +136,32 @@
                 "radius": {
                   "type": "number",
                   "exclusiveMinimum": 0
+                },
+                "extent_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_height": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
                 }
               },
               "required": [
                 "origin",
                 "axis",
-                "radius"
+                "radius",
+                "extent_angle",
+                "extent_height"
               ]
             }
           },
@@ -181,13 +201,33 @@
                 "ref_radius": {
                   "type": "number",
                   "minimum": 0
+                },
+                "extent_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_distance": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
                 }
               },
               "required": [
                 "apex",
                 "axis",
                 "semi_angle",
-                "ref_radius"
+                "ref_radius",
+                "extent_angle",
+                "extent_distance"
               ]
             }
           },
@@ -213,11 +253,31 @@
                 "radius": {
                   "type": "number",
                   "exclusiveMinimum": 0
+                },
+                "extent_longitude": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_latitude": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
                 }
               },
               "required": [
                 "center",
-                "radius"
+                "radius",
+                "extent_longitude",
+                "extent_latitude"
               ]
             }
           },
@@ -256,13 +316,33 @@
                 "minor_radius": {
                   "type": "number",
                   "exclusiveMinimum": 0
+                },
+                "extent_major_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_minor_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
                 }
               },
               "required": [
                 "center",
                 "axis",
                 "major_radius",
-                "minor_radius"
+                "minor_radius",
+                "extent_major_angle",
+                "extent_minor_angle"
               ]
             }
           }

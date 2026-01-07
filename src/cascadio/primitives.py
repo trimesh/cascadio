@@ -147,8 +147,8 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     if ptype == "plane":
         return Plane(
             face_index=idx,
-            u_bounds=tuple(data["u_bounds"]),
-            v_bounds=tuple(data["v_bounds"]),
+            u_bounds=tuple(data["extent_x"]),
+            v_bounds=tuple(data["extent_y"]),
             origin=tuple(data["origin"]),
             normal=tuple(data["normal"]),
             x_dir=tuple(data["x_dir"]),
@@ -156,8 +156,8 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     elif ptype == "cylinder":
         return Cylinder(
             face_index=idx,
-            u_bounds=tuple(data["u_bounds"]),
-            v_bounds=tuple(data["v_bounds"]),
+            u_bounds=tuple(data["extent_angle"]),
+            v_bounds=tuple(data["extent_height"]),
             origin=tuple(data["origin"]),
             axis=tuple(data["axis"]),
             radius=data["radius"],
@@ -165,8 +165,8 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     elif ptype == "cone":
         return Cone(
             face_index=idx,
-            u_bounds=tuple(data["u_bounds"]),
-            v_bounds=tuple(data["v_bounds"]),
+            u_bounds=tuple(data["extent_angle"]),
+            v_bounds=tuple(data["extent_distance"]),
             apex=tuple(data["apex"]),
             axis=tuple(data["axis"]),
             semi_angle=data["semi_angle"],
@@ -175,16 +175,16 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     elif ptype == "sphere":
         return Sphere(
             face_index=idx,
-            u_bounds=tuple(data["u_bounds"]),
-            v_bounds=tuple(data["v_bounds"]),
+            u_bounds=tuple(data["extent_longitude"]),
+            v_bounds=tuple(data["extent_latitude"]),
             center=tuple(data["center"]),
             radius=data["radius"],
         )
     elif ptype == "torus":
         return Torus(
             face_index=idx,
-            u_bounds=tuple(data["u_bounds"]),
-            v_bounds=tuple(data["v_bounds"]),
+            u_bounds=tuple(data["extent_major_angle"]),
+            v_bounds=tuple(data["extent_minor_angle"]),
             center=tuple(data["center"]),
             axis=tuple(data["axis"]),
             major_radius=data["major_radius"],
