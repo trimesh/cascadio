@@ -10,6 +10,7 @@ It verifies:
 import os
 import sys
 
+
 def main():
     # Verify multiple locations are read-only
     test_paths = [
@@ -58,6 +59,7 @@ def main():
 
     print("All read-only filesystem tests passed!")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

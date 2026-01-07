@@ -140,7 +140,7 @@ def process_brep_faces(
         - 'brep_primitives': list of primitive dataclasses
     """
     result = {
-        "brep_index": np.asarray(face_indices),
+        "brep_index": np.asarray(face_indices).flatten(),
         "brep_primitives": [],
     }
 
@@ -178,7 +178,7 @@ def _import_brep_faces_cascadio(ctx: Dict) -> Optional[Dict]:
         accessor_idx = data["faceIndices"]
         accessors = ctx.get("accessors")
         if accessors is not None and accessor_idx < len(accessors):
-            face_indices = np.asarray(accessors[accessor_idx])
+            face_indices = np.asarray(accessors[accessor_idx]).flatten()
             result["face_attributes"]["brep_index"] = face_indices
 
     # Get face definitions if present
