@@ -65,51 +65,54 @@ def _parse_face_to_primitive(
     if face_type is None:
         return None
 
+    # Use face_index from data if present, otherwise use parameter
+    idx = face.get("face_index", face_index)
+
     if face_type == "plane":
         return Plane(
-            face_index=face_index,
+            face_index=idx,
+            u_bounds=tuple(face["u_bounds"]),
+            v_bounds=tuple(face["v_bounds"]),
             origin=tuple(face["origin"]),
             normal=tuple(face["normal"]),
             x_dir=tuple(face["x_dir"]),
-            extent_x=tuple(face["extent_x"]),
-            extent_y=tuple(face["extent_y"]),
         )
     elif face_type == "cylinder":
         return Cylinder(
-            face_index=face_index,
+            face_index=idx,
+            u_bounds=tuple(face["u_bounds"]),
+            v_bounds=tuple(face["v_bounds"]),
             origin=tuple(face["origin"]),
             axis=tuple(face["axis"]),
             radius=face["radius"],
-            extent_angle=tuple(face["extent_angle"]),
-            extent_height=tuple(face["extent_height"]),
         )
     elif face_type == "cone":
         return Cone(
-            face_index=face_index,
+            face_index=idx,
+            u_bounds=tuple(face["u_bounds"]),
+            v_bounds=tuple(face["v_bounds"]),
             apex=tuple(face["apex"]),
             axis=tuple(face["axis"]),
-            half_angle=face["half_angle"],
+            semi_angle=face["semi_angle"],
             ref_radius=face["ref_radius"],
-            extent_angle=tuple(face["extent_angle"]),
-            extent_distance=tuple(face["extent_distance"]),
         )
     elif face_type == "sphere":
         return Sphere(
-            face_index=face_index,
+            face_index=idx,
+            u_bounds=tuple(face["u_bounds"]),
+            v_bounds=tuple(face["v_bounds"]),
             center=tuple(face["center"]),
             radius=face["radius"],
-            extent_longitude=tuple(face["extent_longitude"]),
-            extent_latitude=tuple(face["extent_latitude"]),
         )
     elif face_type == "torus":
         return Torus(
-            face_index=face_index,
+            face_index=idx,
+            u_bounds=tuple(face["u_bounds"]),
+            v_bounds=tuple(face["v_bounds"]),
             center=tuple(face["center"]),
             axis=tuple(face["axis"]),
             major_radius=face["major_radius"],
             minor_radius=face["minor_radius"],
-            extent_major_angle=tuple(face["extent_major_angle"]),
-            extent_minor_angle=tuple(face["extent_minor_angle"]),
         )
 
     # "bspline", "other", or unknown types
