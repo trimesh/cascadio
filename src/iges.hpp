@@ -1,7 +1,7 @@
 #pragma once
 
+#include "filehandle.hpp"
 #include "step.hpp" // for closeDocument helper
-#include "tempfile.hpp"
 
 #include <IGESControl_Reader.hxx>
 #include <Message_ProgressRange.hxx>
@@ -155,8 +155,8 @@ static IgesLoadResult loadIgesFile(const char *input_path,
 }
 
 /// Load an IGES file from memory (bytes) and mesh the shapes
-/// NOTE: IGES does not support stream reading, so this function
-/// writes to a temp file first
+/// NOTE: IGES does not support stream reading, so this function uses a
+/// FileHandle (memfd on Linux, temp file elsewhere)
 static IgesLoadResult loadIgesBytes(const std::string &igesData,
                                     Standard_Real tol_linear,
                                     Standard_Real tol_angle, bool tol_relative,
@@ -164,22 +164,23 @@ static IgesLoadResult loadIgesBytes(const std::string &igesData,
                                     bool stitch_shapes = true) {
   IgesLoadResult result;
 
-  // IGES doesn't support ReadStream, so we need to use a temp file
-  TempFile tempFile(".igs");
-  if (!tempFile.valid()) {
-    std::cerr << "Error: Failed to create temp file for IGES loading"
+  // IGES doesn't support ReadStream, use FileHandle (memfd on Linux)
+  FileHandle handle(".igs");
+  if (!handle.valid()) {
+    std::cerr << "Error: Failed to create file handle for IGES loading"
               << std::endl;
     return result;
   }
 
-  // Write data to temp file and close fd
-  if (!tempFile.write_and_close(igesData.data(), igesData.size())) {
-    std::cerr << "Error: Failed to write IGES data to temp file" << std::endl;
+  // Write IGES data to handle
+  if (!handle.write_data(igesData.data(), igesData.size())) {
+    std::cerr << "Error: Failed to write IGES data" << std::endl;
     return result;
   }
 
-  // Load from temp file (TempFile destructor will clean up after)
-  result = loadIgesFile(tempFile.path(), tol_linear, tol_angle, tol_relative,
+  // Prepare for reading and load
+  handle.prepare_for_read();
+  result = loadIgesFile(handle.path(), tol_linear, tol_angle, tol_relative,
                         use_parallel, use_colors, stitch_shapes);
 
   return result;

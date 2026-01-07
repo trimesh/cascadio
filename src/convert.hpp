@@ -1,10 +1,10 @@
 #pragma once
 
+#include "filehandle.hpp"
 #include "iges.hpp"
 #include "materials.hpp"
 #include "primitives.hpp"
 #include "step.hpp"
-#include "tempfile.hpp"
 
 #include <Message_ProgressRange.hxx>
 #include <NCollection_IndexedDataMap.hxx>
@@ -187,45 +187,25 @@ static std::vector<char> exportToGlbBytes(
     std::vector<FaceTriangleData> *faceData = nullptr,
     RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
     RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
-  // OCCT's RWGltf_CafWriter requires a file path, so we use a temp file
-  // approach but encapsulate it here.
-
-  // Create a unique temp file
-  TempFile tempFile(".glb");
-  if (!tempFile.valid()) {
-    std::cerr << "Error: Failed to create temp file for GLB export"
+  // OCCT's RWGltf_CafWriter requires a file path. With our memfd patch,
+  // both the output and internal .bin.tmp use memfd on Linux - zero filesystem
+  // writes. Falls back to temp files on other platforms.
+  FileHandle handle(".glb");
+  if (!handle.valid()) {
+    std::cerr << "Error: Failed to create file handle for GLB export"
               << std::endl;
     return {};
   }
-  // Close fd so exportToGlbFile can write to it
-  tempFile.close_fd();
 
-  // Export to temp file with callbacks
-  if (!exportToGlbFile(doc, tempFile.path(), merge_primitives, use_parallel,
+  // Export to the handle's path
+  if (!exportToGlbFile(doc, handle.path(), merge_primitives, use_parallel,
                        faceData, jsonCallback, binaryCallback)) {
-    return {}; // TempFile destructor handles cleanup
-  }
-
-  // Read temp file into memory
-  std::ifstream file(tempFile.path(), std::ios::binary | std::ios::ate);
-  if (!file) {
     return {};
   }
 
-  std::streampos pos = file.tellg();
-  if (pos == std::streampos(-1) || pos < 0) {
-    return {};
-  }
-  std::streamsize size = pos;
-  file.seekg(0, std::ios::beg);
-
-  std::vector<char> result(static_cast<size_t>(size));
-  if (!file.read(result.data(), size)) {
-    return {};
-  }
-
-  return result;
-  // TempFile destructor automatically cleans up
+  // Read result back
+  handle.prepare_for_read();
+  return handle.read_all();
 }
 
 // ============================================================================

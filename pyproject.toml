@@ -55,6 +55,9 @@ test-command = "pytest {project}/tests"
 
 [tool.cibuildwheel.linux]
 repair-wheel-command = "LD_LIBRARY_PATH=/project/upstream/OCCT/lin64/gcc/lib:/project/upstream/OCCT/lin32/gcc/lib auditwheel repair --exclude libGL.so.1 --lib-sdir . -w {dest_dir} {wheel}"
+# Run normal tests, then test with read-only root filesystem via unshare
+# Remount / as read-only (keeps /proc writeable for memfd)
+test-command = "pytest {project}/tests && unshare --user --map-root-user --mount sh -c 'mount --make-rprivate / && mount -o remount,ro / && python {project}/scripts/test_readonly_fs.py'"
 
 [tool.cibuildwheel.windows]
 before-build = "pip install delvewheel"
