@@ -1,0 +1,44 @@
+# Docker ignore for cibuildwheel builds
+# Prevents local build artifacts from being copied into container
+
+# Local OCCT build cache (not needed in container, will rebuild)
+occt_cache/
+
+# CMake build directory
+build/
+
+# OCCT in-tree build artifacts (from previous cibuildwheel or local builds)
+upstream/OCCT/lin64/
+upstream/OCCT/mac64/
+upstream/OCCT/win64/
+upstream/OCCT/CMakeCache.txt
+upstream/OCCT/CMakeFiles/
+upstream/OCCT/build.ninja
+upstream/OCCT/.ninja_*
+upstream/OCCT/compile_commands.json
+
+# Built wheels
+wheelhouse/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Git
+.git/
+.gitignore
+.gitmodules
+
+# Editor/IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Test artifacts
+*.glb
+*.obj

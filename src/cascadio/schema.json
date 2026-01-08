@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mesh.primitive.TM_brep_faces.schema.json",
+  "title": "TM_brep_faces mesh primitive extension",
+  "type": "object",
+  "description": "Per-triangle BREP face indices and optional analytic surface definitions",
+  "properties": {
+    "faceIndices": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index of accessor containing per-triangle face indices. Accessor must be SCALAR with unsigned integer component type. Count must equal number of triangles."
+    },
+    "faces": {
+      "type": "array",
+      "description": "Array of face definitions with analytic surface geometry",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "face.schema.json",
+        "title": "BREP Face",
+        "type": "object",
+        "required": [
+          "type",
+          "face_index"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "plane",
+              "cylinder",
+              "cone",
+              "sphere",
+              "torus"
+            ]
+          },
+          "face_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index of this face in the BREP model"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "plane"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "origin": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "normal": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "x_dir": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "extent_x": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_y": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                }
+              },
+              "required": [
+                "origin",
+                "normal",
+                "x_dir",
+                "extent_x",
+                "extent_y"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "cylinder"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "origin": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "axis": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "extent_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_height": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                }
+              },
+              "required": [
+                "origin",
+                "axis",
+                "radius",
+                "extent_angle",
+                "extent_height"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "cone"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "apex": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "axis": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "semi_angle": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "exclusiveMaximum": 1.5707963267948966
+                },
+                "ref_radius": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "extent_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_distance": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                }
+              },
+              "required": [
+                "apex",
+                "axis",
+                "semi_angle",
+                "ref_radius",
+                "extent_angle",
+                "extent_distance"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "sphere"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "center": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "extent_longitude": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_latitude": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                }
+              },
+              "required": [
+                "center",
+                "radius",
+                "extent_longitude",
+                "extent_latitude"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "torus"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "center": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "axis": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "A 3-component vector [x, y, z]"
+                },
+                "major_radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "minor_radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "extent_major_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                },
+                "extent_minor_angle": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "description": "A 2-component bounds array [min, max]"
+                }
+              },
+              "required": [
+                "center",
+                "axis",
+                "major_radius",
+                "minor_radius",
+                "extent_major_angle",
+                "extent_minor_angle"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "faceIndices"
+  ]
+}

@@ -3,11 +3,16 @@
   "$id": "face.schema.json",
   "title": "BREP Face",
   "type": "object",
-  "required": ["type"],
+  "required": ["type", "face_index"],
   "properties": {
     "type": {
       "type": "string",
       "enum": ["plane", "cylinder", "cone", "sphere", "torus"]
+    },
+    "face_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index of this face in the BREP model"
     }
   },
   "allOf": [
@@ -18,8 +23,8 @@
           "origin": {"$ref": "definitions.schema.json#/$defs/vec3"},
           "normal": {"$ref": "definitions.schema.json#/$defs/vec3"},
           "x_dir": {"$ref": "definitions.schema.json#/$defs/vec3"},
-          "extent_x": {"$ref": "definitions.schema.json#/$defs/bounds"},
-          "extent_y": {"$ref": "definitions.schema.json#/$defs/bounds"}
+          "extent_x": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Extent in local X direction (meters)"},
+          "extent_y": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Extent in local Y direction (meters)"}
         },
         "required": ["origin", "normal", "x_dir", "extent_x", "extent_y"]
       }
@@ -31,8 +36,8 @@
           "origin": {"$ref": "definitions.schema.json#/$defs/vec3"},
           "axis": {"$ref": "definitions.schema.json#/$defs/vec3"},
           "radius": {"type": "number", "exclusiveMinimum": 0},
-          "extent_angle": {"$ref": "definitions.schema.json#/$defs/bounds"},
-          "extent_height": {"$ref": "definitions.schema.json#/$defs/bounds"}
+          "extent_angle": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Angular extent around axis (radians)"},
+          "extent_height": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Height extent along axis (meters)"}
         },
         "required": ["origin", "axis", "radius", "extent_angle", "extent_height"]
       }
@@ -43,12 +48,12 @@
         "properties": {
           "apex": {"$ref": "definitions.schema.json#/$defs/vec3"},
           "axis": {"$ref": "definitions.schema.json#/$defs/vec3"},
-          "half_angle": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1.5707963267948966},
+          "semi_angle": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1.5707963267948966},
           "ref_radius": {"type": "number", "minimum": 0},
-          "extent_angle": {"$ref": "definitions.schema.json#/$defs/bounds"},
-          "extent_distance": {"$ref": "definitions.schema.json#/$defs/bounds"}
+          "extent_angle": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Angular extent around axis (radians)"},
+          "extent_distance": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Distance extent from apex (meters)"}
         },
-        "required": ["apex", "axis", "half_angle", "ref_radius", "extent_angle", "extent_distance"]
+        "required": ["apex", "axis", "semi_angle", "ref_radius", "extent_angle", "extent_distance"]
       }
     },
     {
@@ -57,8 +62,8 @@
         "properties": {
           "center": {"$ref": "definitions.schema.json#/$defs/vec3"},
           "radius": {"type": "number", "exclusiveMinimum": 0},
-          "extent_longitude": {"$ref": "definitions.schema.json#/$defs/bounds"},
-          "extent_latitude": {"$ref": "definitions.schema.json#/$defs/bounds"}
+          "extent_longitude": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Longitude extent (radians)"},
+          "extent_latitude": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Latitude extent (radians)"}
         },
         "required": ["center", "radius", "extent_longitude", "extent_latitude"]
       }
@@ -71,8 +76,8 @@
           "axis": {"$ref": "definitions.schema.json#/$defs/vec3"},
           "major_radius": {"type": "number", "exclusiveMinimum": 0},
           "minor_radius": {"type": "number", "exclusiveMinimum": 0},
-          "extent_major_angle": {"$ref": "definitions.schema.json#/$defs/bounds"},
-          "extent_minor_angle": {"$ref": "definitions.schema.json#/$defs/bounds"}
+          "extent_major_angle": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Angle extent around main axis (radians)"},
+          "extent_minor_angle": {"$ref": "definitions.schema.json#/$defs/bounds", "description": "Angle extent around tube (radians)"}
         },
         "required": ["center", "axis", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle"]
       }

@@ -78,11 +78,12 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that a plane face validates against schema."""
         plane = {
             "type": "plane",
+            "face_index": 0,
+            "extent_x": [-0.5, 0.5],
+            "extent_y": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
             "normal": [0.0, 0.0, 1.0],
             "x_dir": [1.0, 0.0, 0.0],
-            "extent_x": [-0.5, 0.5],
-            "extent_y": [-0.5, 0.5],
         }
         validator = self.get_validator(self.face_schema)
         validator.validate(plane)
@@ -91,11 +92,12 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that a cylinder face validates against schema."""
         cylinder = {
             "type": "cylinder",
+            "face_index": 1,
+            "extent_angle": [0.0, 6.283],
+            "extent_height": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
             "axis": [0.0, 0.0, 1.0],
             "radius": 0.5,
-            "extent_angle": [0.0, 6.283],
-            "extent_height": [-0.5, 0.5],
         }
         validator = self.get_validator(self.face_schema)
         validator.validate(cylinder)
@@ -104,12 +106,13 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that a cone face validates against schema."""
         cone = {
             "type": "cone",
-            "apex": [0.0, 0.0, 0.0],
-            "axis": [0.0, 0.0, 1.0],
-            "half_angle": 0.785,
-            "ref_radius": 0.5,
+            "face_index": 2,
             "extent_angle": [0.0, 6.283],
             "extent_distance": [0.1, 1.0],
+            "apex": [0.0, 0.0, 0.0],
+            "axis": [0.0, 0.0, 1.0],
+            "semi_angle": 0.785,
+            "ref_radius": 0.5,
         }
         validator = self.get_validator(self.face_schema)
         validator.validate(cone)
@@ -118,10 +121,11 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that a sphere face validates against schema."""
         sphere = {
             "type": "sphere",
-            "center": [0.0, 0.0, 0.0],
-            "radius": 0.5,
+            "face_index": 3,
             "extent_longitude": [0.0, 6.283],
             "extent_latitude": [-1.57, 1.57],
+            "center": [0.0, 0.0, 0.0],
+            "radius": 0.5,
         }
         validator = self.get_validator(self.face_schema)
         validator.validate(sphere)
@@ -130,12 +134,13 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that a torus face validates against schema."""
         torus = {
             "type": "torus",
+            "face_index": 4,
+            "extent_major_angle": [0.0, 6.283],
+            "extent_minor_angle": [0.0, 6.283],
             "center": [0.0, 0.0, 0.0],
             "axis": [0.0, 0.0, 1.0],
             "major_radius": 1.0,
             "minor_radius": 0.25,
-            "extent_major_angle": [0.0, 6.283],
-            "extent_minor_angle": [0.0, 6.283],
         }
         validator = self.get_validator(self.face_schema)
         validator.validate(torus)
@@ -147,19 +152,21 @@ class TestBrepFacesSchema(unittest.TestCase):
             "faces": [
                 {
                     "type": "cylinder",
+                    "face_index": 0,
+                    "extent_angle": [0.0, 6.283],
+                    "extent_height": [0.0, 0.01],
                     "origin": [0.0, 0.0, 0.0],
                     "axis": [0.0, 0.0, 1.0],
                     "radius": 0.005,
-                    "extent_angle": [0.0, 6.283],
-                    "extent_height": [0.0, 0.01],
                 },
                 {
                     "type": "plane",
+                    "face_index": 1,
+                    "extent_x": [-0.005, 0.005],
+                    "extent_y": [-0.005, 0.005],
                     "origin": [0.0, 0.0, 0.0],
                     "normal": [0.0, 0.0, -1.0],
                     "x_dir": [1.0, 0.0, 0.0],
-                    "extent_x": [-0.005, 0.005],
-                    "extent_y": [-0.005, 0.005],
                 },
             ],
         }
@@ -170,8 +177,11 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that a plane missing required fields fails validation."""
         invalid_plane = {
             "type": "plane",
+            "face_index": 0,
+            "extent_x": [-0.5, 0.5],
+            "extent_y": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
-            # missing normal, x_dir, extent_x, extent_y
+            # missing normal, x_dir
         }
         validator = self.get_validator(self.face_schema)
         with self.assertRaises(jsonschema.ValidationError):
@@ -181,11 +191,12 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that zero radius fails validation."""
         invalid_cylinder = {
             "type": "cylinder",
+            "face_index": 0,
+            "extent_angle": [0.0, 6.283],
+            "extent_height": [-0.5, 0.5],
             "origin": [0.0, 0.0, 0.0],
             "axis": [0.0, 0.0, 1.0],
             "radius": 0,  # Invalid: must be > 0
-            "extent_angle": [0.0, 6.283],
-            "extent_height": [-0.5, 0.5],
         }
         validator = self.get_validator(self.face_schema)
         with self.assertRaises(jsonschema.ValidationError):
@@ -195,11 +206,12 @@ class TestBrepFacesSchema(unittest.TestCase):
         """Test that a vec3 with wrong length fails validation."""
         invalid_plane = {
             "type": "plane",
+            "face_index": 0,
+            "extent_x": [-0.5, 0.5],
+            "extent_y": [-0.5, 0.5],
             "origin": [0.0, 0.0],  # Invalid: should be 3 elements
             "normal": [0.0, 0.0, 1.0],
             "x_dir": [1.0, 0.0, 0.0],
-            "extent_x": [-0.5, 0.5],
-            "extent_y": [-0.5, 0.5],
         }
         validator = self.get_validator(self.face_schema)
         with self.assertRaises(jsonschema.ValidationError):
@@ -278,6 +290,89 @@ class TestCascadioOutputSchema(unittest.TestCase):
         finally:
             if os.path.exists(output_path):
                 os.unlink(output_path)
+
+
+def resolve_ref(ref_path, schemas):
+    """
+    Resolve a $ref path to its actual schema content.
+
+    Handles two forms:
+    - "face.schema.json" (whole file)
+    - "definitions.schema.json#/$defs/vec3" (file + JSON pointer)
+    """
+    if "#" in ref_path:
+        file_name, pointer = ref_path.split("#", 1)
+        schema = schemas[file_name]
+        # Navigate JSON pointer (e.g., "/$defs/vec3")
+        parts = pointer.strip("/").split("/")
+        result = schema
+        for part in parts:
+            result = result[part]
+        return result
+    else:
+        # Whole file reference
+        return schemas[ref_path]
+
+
+def resolve_refs(obj, schemas):
+    """
+    Recursively resolve all $ref references in a schema object.
+
+    Returns a new object with all references inlined.
+    """
+    if isinstance(obj, dict):
+        if "$ref" in obj:
+            # Resolve the reference
+            resolved = resolve_ref(obj["$ref"], schemas)
+            # Recursively resolve any refs in the resolved content
+            return resolve_refs(resolved, schemas)
+        # Recursively process all values
+        return {k: resolve_refs(v, schemas) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [resolve_refs(item, schemas) for item in obj]
+    return obj
+
+
+def build_resolved_schema():
+    """Build and return the fully resolved schema from source files."""
+    schemas = load_schemas()
+    root_schema = schemas["mesh.primitive.TM_brep_faces.schema.json"]
+    return resolve_refs(root_schema, schemas)
+
+
+class TestBakedSchemaMatch(unittest.TestCase):
+    """Ensure baked schema matches dynamically resolved source schemas."""
+
+    def test_baked_schema_matches_source(self):
+        """Test that packaged schema.json matches dynamically resolved source."""
+        # Try to load baked schema from package or source directory
+        import cascadio
+
+        # First try installed package location
+        baked_path = Path(cascadio.__file__).parent / "schema.json"
+
+        # Fall back to source directory (for development)
+        if not baked_path.exists():
+            baked_path = Path(__file__).parent.parent / "src" / "cascadio" / "schema.json"
+
+        if not baked_path.exists():
+            self.fail(
+                "schema.json not found. Run: python scripts/build_schema.py"
+            )
+
+        with open(baked_path) as f:
+            baked = json.load(f)
+
+        # Dynamically resolve source schemas
+        resolved = build_resolved_schema()
+
+        # Compare - fail if different
+        self.assertEqual(
+            baked,
+            resolved,
+            "Baked schema.json doesn't match source schemas. "
+            "Run: python scripts/build_schema.py",
+        )
 
 
 if __name__ == "__main__":

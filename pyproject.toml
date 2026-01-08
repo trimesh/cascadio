@@ -34,6 +34,11 @@ tests = ["pytest", "trimesh", "chardet"]
 
 [tool.scikit-build]
 wheel.packages = ["src/cascadio"]
+wheel.exclude = ["**/__pycache__"]
+
+# Include schema.json in the wheel
+[tool.setuptools.package-data]
+cascadio = ["schema.json"]
 
 [tool.cibuildwheel]
 # `yum` would need to be replaced in the `before-all`

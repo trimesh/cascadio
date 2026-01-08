@@ -85,7 +85,7 @@ def build_patch(occt_src, patches_dir):
 
 def apply_patches(occt_src, patches_dir):
     """Apply patches from patches/ directory if they haven't been applied.
-    
+
     Returns:
         bool: True if any patches were applied (source modified), False otherwise
     """
@@ -249,7 +249,7 @@ def main():
 
     # Patch build.ninja to remove GL/EGL linking on Linux
     if system == "Linux" and os.path.exists("build.ninja"):
-        with open("build.ninja", "r") as f:
+        with open("build.ninja") as f:
             content = f.read()
         content = content.replace(" -lGL ", " ").replace(" -lEGL ", " ")
         with open("build.ninja", "w") as f:

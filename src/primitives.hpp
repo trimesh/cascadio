@@ -79,6 +79,9 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
 
   rapidjson::Value obj(rapidjson::kObjectType);
 
+  // Add face_index first (required by schema)
+  obj.AddMember("face_index", faceIndex, alloc);
+
   switch (surfType) {
   case GeomAbs_Plane: {
     gp_Pln pln = surf.Plane();
@@ -120,7 +123,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
             apex.Z() * lengthUnit, alloc);
     addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
             pos.Direction().Z(), alloc);
-    obj.AddMember("half_angle", cone.SemiAngle(), alloc);
+    obj.AddMember("semi_angle", cone.SemiAngle(), alloc);
     obj.AddMember("ref_radius", cone.RefRadius() * lengthUnit, alloc);
     // u is angle around axis (radians), v is distance from apex (length)
     addBounds(obj, "extent_angle", uMin, uMax, alloc);

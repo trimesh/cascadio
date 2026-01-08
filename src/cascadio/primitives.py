@@ -15,16 +15,16 @@ class Plane:
 
     # Index of this face in the BREP shape
     face_index: int
+    # Extent in local X direction (meters)
+    extent_x: Tuple[float, float]
+    # Extent in local Y direction (meters)
+    extent_y: Tuple[float, float]
     # A point on the plane
     origin: Tuple[float, float, float]
     # Unit normal vector
     normal: Tuple[float, float, float]
     # Unit X direction in the plane
     x_dir: Tuple[float, float, float]
-    # Extent along X direction in meters [min, max]
-    extent_x: Tuple[float, float]
-    # Extent along Y direction in meters [min, max]
-    extent_y: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -33,16 +33,16 @@ class Cylinder:
 
     # Index of this face in the BREP shape
     face_index: int
+    # Angular extent around axis (radians)
+    extent_angle: Tuple[float, float]
+    # Height extent along axis (meters)
+    extent_height: Tuple[float, float]
     # Point on axis
     origin: Tuple[float, float, float]
     # Unit axis direction
     axis: Tuple[float, float, float]
     # Cylinder radius in meters
     radius: float
-    # Angular extent around axis in radians [min, max]
-    extent_angle: Tuple[float, float]
-    # Height extent along axis in meters [min, max]
-    extent_height: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -51,18 +51,18 @@ class Cone:
 
     # Index of this face in the BREP shape
     face_index: int
+    # Angular extent around axis (radians)
+    extent_angle: Tuple[float, float]
+    # Distance extent from apex (meters)
+    extent_distance: Tuple[float, float]
     # Apex point of the cone
     apex: Tuple[float, float, float]
     # Unit axis direction from apex
     axis: Tuple[float, float, float]
-    # Half-angle at apex in radians
-    half_angle: float
+    # Semi-angle at apex in radians
+    semi_angle: float
     # Reference radius at the origin plane in meters
     ref_radius: float
-    # Angular extent around axis in radians [min, max]
-    extent_angle: Tuple[float, float]
-    # Distance extent from apex in meters [min, max]
-    extent_distance: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -71,14 +71,14 @@ class Sphere:
 
     # Index of this face in the BREP shape
     face_index: int
+    # Longitude extent (radians)
+    extent_longitude: Tuple[float, float]
+    # Latitude extent (radians)
+    extent_latitude: Tuple[float, float]
     # Center point
     center: Tuple[float, float, float]
     # Sphere radius in meters
     radius: float
-    # Longitude extent in radians [min, max]
-    extent_longitude: Tuple[float, float]
-    # Latitude extent in radians [min, max], range [-π/2, π/2]
-    extent_latitude: Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,10 @@ class Torus:
 
     # Index of this face in the BREP shape
     face_index: int
+    # Angle extent around main axis (radians)
+    extent_major_angle: Tuple[float, float]
+    # Angle extent around tube (radians)
+    extent_minor_angle: Tuple[float, float]
     # Center point
     center: Tuple[float, float, float]
     # Unit axis direction (normal to torus plane)
@@ -95,10 +99,6 @@ class Torus:
     major_radius: float
     # Tube radius in meters
     minor_radius: float
-    # Angular extent around main axis in radians [min, max]
-    extent_major_angle: Tuple[float, float]
-    # Angular extent around tube in radians [min, max]
-    extent_minor_angle: Tuple[float, float]
 
 
 # Union type for any primitive
@@ -126,7 +126,8 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
         A single primitive dict from the TM_brep_faces extension,
         or None if the face was filtered out
     face_index : int
-        The index of this face in the faces array (since it's not stored in the JSON)
+        The index of this face in the faces array (used as fallback
+        if face_index is not in the data)
 
     Returns
     -------
@@ -140,51 +141,54 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     if ptype is None:
         return None
 
+    # Use face_index from data if present, otherwise use parameter
+    idx = data.get("face_index", face_index)
+
     if ptype == "plane":
         return Plane(
-            face_index=face_index,
+            face_index=idx,
+            extent_x=tuple(data["extent_x"]),
+            extent_y=tuple(data["extent_y"]),
             origin=tuple(data["origin"]),
             normal=tuple(data["normal"]),
             x_dir=tuple(data["x_dir"]),
-            extent_x=tuple(data["extent_x"]),
-            extent_y=tuple(data["extent_y"]),
         )
     elif ptype == "cylinder":
         return Cylinder(
-            face_index=face_index,
+            face_index=idx,
+            extent_angle=tuple(data["extent_angle"]),
+            extent_height=tuple(data["extent_height"]),
             origin=tuple(data["origin"]),
             axis=tuple(data["axis"]),
             radius=data["radius"],
-            extent_angle=tuple(data["extent_angle"]),
-            extent_height=tuple(data["extent_height"]),
         )
     elif ptype == "cone":
         return Cone(
-            face_index=face_index,
-            apex=tuple(data["apex"]),
-            axis=tuple(data["axis"]),
-            half_angle=data["half_angle"],
-            ref_radius=data["ref_radius"],
+            face_index=idx,
             extent_angle=tuple(data["extent_angle"]),
             extent_distance=tuple(data["extent_distance"]),
+            apex=tuple(data["apex"]),
+            axis=tuple(data["axis"]),
+            semi_angle=data["semi_angle"],
+            ref_radius=data["ref_radius"],
         )
     elif ptype == "sphere":
         return Sphere(
-            face_index=face_index,
-            center=tuple(data["center"]),
-            radius=data["radius"],
+            face_index=idx,
             extent_longitude=tuple(data["extent_longitude"]),
             extent_latitude=tuple(data["extent_latitude"]),
+            center=tuple(data["center"]),
+            radius=data["radius"],
         )
     elif ptype == "torus":
         return Torus(
-            face_index=face_index,
+            face_index=idx,
+            extent_major_angle=tuple(data["extent_major_angle"]),
+            extent_minor_angle=tuple(data["extent_minor_angle"]),
             center=tuple(data["center"]),
             axis=tuple(data["axis"]),
             major_radius=data["major_radius"],
             minor_radius=data["minor_radius"],
-            extent_major_angle=tuple(data["extent_major_angle"]),
-            extent_minor_angle=tuple(data["extent_minor_angle"]),
         )
 
     return None
