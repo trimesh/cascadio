@@ -15,10 +15,10 @@ class Plane:
 
     # Index of this face in the BREP shape
     face_index: int
-    # Parameter bounds in U direction
-    u_bounds: Tuple[float, float]
-    # Parameter bounds in V direction
-    v_bounds: Tuple[float, float]
+    # Extent in local X direction (meters)
+    extent_x: Tuple[float, float]
+    # Extent in local Y direction (meters)
+    extent_y: Tuple[float, float]
     # A point on the plane
     origin: Tuple[float, float, float]
     # Unit normal vector
@@ -33,10 +33,10 @@ class Cylinder:
 
     # Index of this face in the BREP shape
     face_index: int
-    # Parameter bounds in U direction (angular, radians)
-    u_bounds: Tuple[float, float]
-    # Parameter bounds in V direction (height, meters)
-    v_bounds: Tuple[float, float]
+    # Angular extent around axis (radians)
+    extent_angle: Tuple[float, float]
+    # Height extent along axis (meters)
+    extent_height: Tuple[float, float]
     # Point on axis
     origin: Tuple[float, float, float]
     # Unit axis direction
@@ -51,10 +51,10 @@ class Cone:
 
     # Index of this face in the BREP shape
     face_index: int
-    # Parameter bounds in U direction (angular, radians)
-    u_bounds: Tuple[float, float]
-    # Parameter bounds in V direction (distance from apex, meters)
-    v_bounds: Tuple[float, float]
+    # Angular extent around axis (radians)
+    extent_angle: Tuple[float, float]
+    # Distance extent from apex (meters)
+    extent_distance: Tuple[float, float]
     # Apex point of the cone
     apex: Tuple[float, float, float]
     # Unit axis direction from apex
@@ -71,10 +71,10 @@ class Sphere:
 
     # Index of this face in the BREP shape
     face_index: int
-    # Parameter bounds in U direction (longitude, radians)
-    u_bounds: Tuple[float, float]
-    # Parameter bounds in V direction (latitude, radians)
-    v_bounds: Tuple[float, float]
+    # Longitude extent (radians)
+    extent_longitude: Tuple[float, float]
+    # Latitude extent (radians)
+    extent_latitude: Tuple[float, float]
     # Center point
     center: Tuple[float, float, float]
     # Sphere radius in meters
@@ -87,10 +87,10 @@ class Torus:
 
     # Index of this face in the BREP shape
     face_index: int
-    # Parameter bounds in U direction (major angle, radians)
-    u_bounds: Tuple[float, float]
-    # Parameter bounds in V direction (minor angle, radians)
-    v_bounds: Tuple[float, float]
+    # Angle extent around main axis (radians)
+    extent_major_angle: Tuple[float, float]
+    # Angle extent around tube (radians)
+    extent_minor_angle: Tuple[float, float]
     # Center point
     center: Tuple[float, float, float]
     # Unit axis direction (normal to torus plane)
@@ -147,8 +147,8 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     if ptype == "plane":
         return Plane(
             face_index=idx,
-            u_bounds=tuple(data["extent_x"]),
-            v_bounds=tuple(data["extent_y"]),
+            extent_x=tuple(data["extent_x"]),
+            extent_y=tuple(data["extent_y"]),
             origin=tuple(data["origin"]),
             normal=tuple(data["normal"]),
             x_dir=tuple(data["x_dir"]),
@@ -156,8 +156,8 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     elif ptype == "cylinder":
         return Cylinder(
             face_index=idx,
-            u_bounds=tuple(data["extent_angle"]),
-            v_bounds=tuple(data["extent_height"]),
+            extent_angle=tuple(data["extent_angle"]),
+            extent_height=tuple(data["extent_height"]),
             origin=tuple(data["origin"]),
             axis=tuple(data["axis"]),
             radius=data["radius"],
@@ -165,8 +165,8 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     elif ptype == "cone":
         return Cone(
             face_index=idx,
-            u_bounds=tuple(data["extent_angle"]),
-            v_bounds=tuple(data["extent_distance"]),
+            extent_angle=tuple(data["extent_angle"]),
+            extent_distance=tuple(data["extent_distance"]),
             apex=tuple(data["apex"]),
             axis=tuple(data["axis"]),
             semi_angle=data["semi_angle"],
@@ -175,16 +175,16 @@ def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
     elif ptype == "sphere":
         return Sphere(
             face_index=idx,
-            u_bounds=tuple(data["extent_longitude"]),
-            v_bounds=tuple(data["extent_latitude"]),
+            extent_longitude=tuple(data["extent_longitude"]),
+            extent_latitude=tuple(data["extent_latitude"]),
             center=tuple(data["center"]),
             radius=data["radius"],
         )
     elif ptype == "torus":
         return Torus(
             face_index=idx,
-            u_bounds=tuple(data["extent_major_angle"]),
-            v_bounds=tuple(data["extent_minor_angle"]),
+            extent_major_angle=tuple(data["extent_major_angle"]),
+            extent_minor_angle=tuple(data["extent_minor_angle"]),
             center=tuple(data["center"]),
             axis=tuple(data["axis"]),
             major_radius=data["major_radius"],

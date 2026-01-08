@@ -71,8 +71,8 @@ def _parse_face_to_primitive(
     if face_type == "plane":
         return Plane(
             face_index=idx,
-            u_bounds=tuple(face["extent_x"]),
-            v_bounds=tuple(face["extent_y"]),
+            extent_x=tuple(face["extent_x"]),
+            extent_y=tuple(face["extent_y"]),
             origin=tuple(face["origin"]),
             normal=tuple(face["normal"]),
             x_dir=tuple(face["x_dir"]),
@@ -80,8 +80,8 @@ def _parse_face_to_primitive(
     elif face_type == "cylinder":
         return Cylinder(
             face_index=idx,
-            u_bounds=tuple(face["extent_angle"]),
-            v_bounds=tuple(face["extent_height"]),
+            extent_angle=tuple(face["extent_angle"]),
+            extent_height=tuple(face["extent_height"]),
             origin=tuple(face["origin"]),
             axis=tuple(face["axis"]),
             radius=face["radius"],
@@ -89,8 +89,8 @@ def _parse_face_to_primitive(
     elif face_type == "cone":
         return Cone(
             face_index=idx,
-            u_bounds=tuple(face["extent_angle"]),
-            v_bounds=tuple(face["extent_distance"]),
+            extent_angle=tuple(face["extent_angle"]),
+            extent_distance=tuple(face["extent_distance"]),
             apex=tuple(face["apex"]),
             axis=tuple(face["axis"]),
             semi_angle=face["semi_angle"],
@@ -99,16 +99,16 @@ def _parse_face_to_primitive(
     elif face_type == "sphere":
         return Sphere(
             face_index=idx,
-            u_bounds=tuple(face["extent_longitude"]),
-            v_bounds=tuple(face["extent_latitude"]),
+            extent_longitude=tuple(face["extent_longitude"]),
+            extent_latitude=tuple(face["extent_latitude"]),
             center=tuple(face["center"]),
             radius=face["radius"],
         )
     elif face_type == "torus":
         return Torus(
             face_index=idx,
-            u_bounds=tuple(face["extent_major_angle"]),
-            v_bounds=tuple(face["extent_minor_angle"]),
+            extent_major_angle=tuple(face["extent_major_angle"]),
+            extent_minor_angle=tuple(face["extent_minor_angle"]),
             center=tuple(face["center"]),
             axis=tuple(face["axis"]),
             major_radius=face["major_radius"],
