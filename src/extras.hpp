@@ -5,6 +5,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -95,6 +96,15 @@ static bool hasExtension(const rapidjson::Value &arr, const char *name) {
   return false;
 }
 
+/// Safely get pointer to first primitive of a mesh, or nullptr if unavailable
+static const rapidjson::Value* getFirstPrimitive(const rapidjson::Value &mesh) {
+  if (!mesh.HasMember("primitives") || !mesh["primitives"].IsArray() ||
+      mesh["primitives"].Size() == 0) {
+    return nullptr;
+  }
+  return &mesh["primitives"][0];
+}
+
 // Forward declaration - implemented in primitives.hpp
 static rapidjson::Value extractAllPrimitives(
     const TopoDS_Shape &shape, rapidjson::Document::AllocatorType &alloc,
@@ -145,56 +155,19 @@ static std::string injectBrepExtensionIntoJson(
     std::map<int, ShapeBinaryInfo> shapeBinaryInfo;
     uint32_t currentOffset = 0;
 
-    for (const auto &[shapeIdx, faces] : facesByUniqueShape) {
-      // Find max triangle index for this shape
+    for (const auto &[meshIdx, faces] : facesByUniqueShape) {
+      // Find max triangle index for this mesh
       int maxTriangle = 0;
       for (const auto &fd : faces) {
         maxTriangle = std::max(maxTriangle, fd.triStart + fd.triCount);
       }
       uint32_t byteLen = static_cast<uint32_t>(maxTriangle * sizeof(uint32_t));
-      shapeBinaryInfo[shapeIdx] = {
+      shapeBinaryInfo[meshIdx] = {
         static_cast<uint32_t>(maxTriangle),
         currentOffset,
         byteLen
       };
       currentOffset += byteLen;
-    }
-
-    // Map JSON meshes to BREP shapes via triangle count.
-    // Multiple JSON meshes may share one underlying shape (same indices accessor).
-    // We match by triangle count since shapes have unique triangle counts in practice.
-    // Note: This assumption holds for typical CAD models but could fail for pathological cases.
-    std::map<int, int> triCountToShapeIdx;
-    for (const auto &[shapeIdx, info] : shapeBinaryInfo) {
-      triCountToShapeIdx[info.triangleCount] = shapeIdx;
-    }
-
-    // Build mapping from JSON mesh -> unique shape index via indices accessor
-    std::map<size_t, int> meshToShapeIdx;
-    if (doc.HasMember("meshes") && doc["meshes"].IsArray() &&
-        doc.HasMember("accessors") && doc["accessors"].IsArray()) {
-      for (size_t meshIdx = 0; meshIdx < doc["meshes"].Size(); ++meshIdx) {
-        auto &mesh = doc["meshes"][meshIdx];
-        if (!mesh.HasMember("primitives") || !mesh["primitives"].IsArray() ||
-            mesh["primitives"].Size() == 0) {
-          continue;
-        }
-        auto &prim = mesh["primitives"][0];
-        if (!prim.HasMember("indices")) {
-          continue;
-        }
-        int indicesAccId = prim["indices"].GetInt();
-        if (indicesAccId >= 0 && static_cast<size_t>(indicesAccId) < doc["accessors"].Size()) {
-          auto &indicesAcc = doc["accessors"][indicesAccId];
-          if (indicesAcc.HasMember("count")) {
-            int triCount = indicesAcc["count"].GetInt() / 3;
-            auto it = triCountToShapeIdx.find(triCount);
-            if (it != triCountToShapeIdx.end()) {
-              meshToShapeIdx[meshIdx] = it->second;
-            }
-          }
-        }
-      }
     }
 
     // Calculate new binary data layout (4-byte aligned per glTF spec)
@@ -263,18 +236,52 @@ static std::string injectBrepExtensionIntoJson(
       shapeFacesArrays.emplace(shapeIdx, std::move(facesArray));
     }
 
+    // Build mapping from JSON mesh index to callback meshIndex (shape index).
+    // Multiple JSON meshes may share the same indices accessor (mesh instancing).
+    // Accessor IDs are assigned in binary write order, so lower ID = lower callback meshIndex.
+    std::map<size_t, int> jsonMeshToShapeIdx;
+    if (doc.HasMember("meshes") && doc["meshes"].IsArray()) {
+      // Single pass: collect unique accessor IDs and track which meshes use them
+      std::set<int> seenAccessorIds;
+      std::vector<std::pair<size_t, int>> meshAccessorPairs; // (meshIdx, accessorId)
+
+      for (size_t i = 0; i < doc["meshes"].Size(); ++i) {
+        const auto* prim = getFirstPrimitive(doc["meshes"][i]);
+        if (prim && prim->HasMember("indices")) {
+          int accId = (*prim)["indices"].GetInt();
+          if (accId >= 0) {  // Defensive: skip invalid accessor IDs
+            seenAccessorIds.insert(accId);
+            meshAccessorPairs.emplace_back(i, accId);
+          }
+        }
+      }
+
+      // Build accessor ID -> shape index mapping (std::set iterates in sorted order)
+      std::map<int, int> accessorToShapeIdx;
+      int shapeIdx = 0;
+      for (int accId : seenAccessorIds) {
+        accessorToShapeIdx[accId] = shapeIdx++;
+      }
+
+      // Map each mesh to its shape index
+      for (const auto& [meshIdx, accId] : meshAccessorPairs) {
+        jsonMeshToShapeIdx[meshIdx] = accessorToShapeIdx[accId];
+      }
+    }
+
     // Add BREP extension to each mesh
     if (doc.HasMember("meshes") && doc["meshes"].IsArray()) {
       for (size_t meshIdx = 0; meshIdx < doc["meshes"].Size(); ++meshIdx) {
-        auto shapeIt = meshToShapeIdx.find(meshIdx);
-        if (shapeIt == meshToShapeIdx.end()) {
-          continue; // No BREP data for this mesh
+        // Look up the shape index for this JSON mesh using accessor ID ordering
+        auto shapeIdxIt = jsonMeshToShapeIdx.find(meshIdx);
+        if (shapeIdxIt == jsonMeshToShapeIdx.end()) {
+          continue; // No shape index mapping for this mesh
         }
-        int shapeIdx = shapeIt->second;
+        int shapeIdx = shapeIdxIt->second;
 
         auto accIt = shapeIdxToBrepAccessorId.find(shapeIdx);
         if (accIt == shapeIdxToBrepAccessorId.end()) {
-          continue;
+          continue; // No BREP data for this shape
         }
         int brepAccessorId = accIt->second;
 
