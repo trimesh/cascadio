@@ -3,9 +3,11 @@ import os
 import tempfile
 import timeit
 from pathlib import Path
+from typing import List, Optional
 
 import cascadio
 import cascadio.extension  # Register extension handlers
+import cascadio.primitives
 import numpy as np
 import pytest
 import trimesh
@@ -24,6 +26,136 @@ COLORED_STEP_PATH = MODELS_DIR / "colored.step"
 MATERIAL_STEP_PATH = MODELS_DIR / "material.stp"
 TOL_LINEAR = 0.1
 TOL_ANGULAR = 0.5
+
+
+def check_brep(
+    triangles: np.ndarray,
+    brep_index: np.ndarray,
+    primitives: List[Optional[cascadio.primitives.BrepPrimitive]],
+    tolerance: float = 1e-8,
+) -> None:
+    """
+    Validate that triangle vertices lie on their corresponding BREP surfaces.
+
+    For each primitive, checks that all vertices of triangles assigned to that
+    primitive (via brep_index) are within tolerance of the analytical surface.
+
+    Parameters
+    ----------
+    triangles : (n, 3, 3) float64
+        Triangle vertices, where triangles[i] is a (3, 3) array of 3 vertices.
+    brep_index : (n,) int
+        Index into primitives for each triangle.
+    primitives : list of BrepPrimitive or None
+        Parsed primitives from brep_faces metadata.
+    tolerance : float
+        Maximum allowed distance from surface in meters.
+
+    Raises
+    ------
+    AssertionError
+        If any vertex is further than tolerance from its assigned surface.
+    """
+    brep_index = np.asarray(brep_index).flatten()
+
+    for idx, prim in enumerate(primitives):
+        if prim is None:
+            continue
+
+        tri_mask = brep_index == idx
+        if not tri_mask.any():
+            continue
+
+        # Get all vertices of triangles with this brep_index
+        verts = triangles[tri_mask].reshape(-1, 3)
+
+        if isinstance(prim, cascadio.primitives.Plane):
+            # Distance from plane: |dot(v - origin, normal)|
+            origin = np.array(prim.origin)
+            normal = np.array(prim.normal)
+            dist = np.abs(np.dot(verts - origin, normal))
+            max_err = dist.max()
+            assert max_err <= tolerance, (
+                f"Plane {idx}: vertices {max_err * 1000:.6f}mm off surface"
+            )
+
+        elif isinstance(prim, cascadio.primitives.Cylinder):
+            # Distance from cylinder axis should equal radius
+            origin = np.array(prim.origin)
+            axis = np.array(prim.axis)
+            to_verts = verts - origin
+            # Project out the axis component
+            perp = to_verts - np.outer(np.dot(to_verts, axis), axis)
+            dist = np.linalg.norm(perp, axis=1)
+            max_err = np.abs(dist - prim.radius).max()
+            assert max_err <= tolerance, (
+                f"Cylinder {idx}: vertices {max_err * 1000:.6f}mm off surface"
+            )
+
+        elif isinstance(prim, cascadio.primitives.Sphere):
+            # Distance from center should equal radius
+            center = np.array(prim.center)
+            dist = np.linalg.norm(verts - center, axis=1)
+            max_err = np.abs(dist - prim.radius).max()
+            assert max_err <= tolerance, (
+                f"Sphere {idx}: vertices {max_err * 1000:.6f}mm off surface"
+            )
+
+        elif isinstance(prim, cascadio.primitives.Cone):
+            # For cone: distance from axis at height h should be h * tan(semi_angle)
+            apex = np.array(prim.apex)
+            axis = np.array(prim.axis)
+            to_verts = verts - apex
+            # Height along axis from apex
+            h = np.dot(to_verts, axis)
+            # Perpendicular distance from axis
+            perp = to_verts - np.outer(h, axis)
+            r_actual = np.linalg.norm(perp, axis=1)
+            # Expected radius at this height
+            r_expected = np.abs(h) * np.tan(prim.semi_angle)
+            max_err = np.abs(r_actual - r_expected).max()
+            assert max_err <= tolerance, (
+                f"Cone {idx}: vertices {max_err * 1000:.6f}mm off surface"
+            )
+
+        elif isinstance(prim, cascadio.primitives.Torus):
+            # For torus: project to plane, find distance to major circle,
+            # then that distance from minor circle should equal minor_radius
+            center = np.array(prim.center)
+            axis = np.array(prim.axis)
+            to_verts = verts - center
+            # Project onto the torus plane (perpendicular to axis)
+            h = np.dot(to_verts, axis)
+            in_plane = to_verts - np.outer(h, axis)
+            # Distance from center in plane
+            r_plane = np.linalg.norm(in_plane, axis=1)
+            # Distance from the major circle
+            dist_to_major = np.sqrt((r_plane - prim.major_radius) ** 2 + h ** 2)
+            max_err = np.abs(dist_to_major - prim.minor_radius).max()
+            assert max_err <= tolerance, (
+                f"Torus {idx}: vertices {max_err * 1000:.6f}mm off surface"
+            )
+
+
+def assert_brep_surfaces(mesh, tolerance: float = 1e-8) -> None:
+    """
+    Assert that all mesh faces lie on their assigned BREP surfaces.
+
+    Convenience wrapper around check_brep that extracts data from a trimesh mesh.
+    """
+    brep_index = mesh.face_attributes.get("brep_index")
+
+    # MUST correspond to mesh faces
+    assert len(brep_index) == len(mesh.faces)
+    
+    primitives = cascadio.primitives.parse_brep_faces(
+        mesh.metadata["cascadio"]["brep_faces"]
+    )
+
+    # Get triangles as (n, 3, 3) array
+    triangles = mesh.vertices[mesh.faces]
+
+    check_brep(triangles, brep_index, primitives, tolerance)
 
 
 def test_convert_step_to_glb():
@@ -157,6 +289,9 @@ def test_convert_step_to_glb_with_brep():
     assert len(plane.normal) == 3
     assert len(plane.x_dir) == 3
 
+    # Validate cylinder faces lie on cylinder surfaces
+    assert_brep_surfaces(mesh)
+
 
 @pytest.mark.skipif(
     not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
@@ -206,7 +341,42 @@ def test_convert_step_to_glb_brep_types_filter(
     # brep_index should correctly map to primitives
     assert brep_index.max() == len(brep_faces) - 1
 
+    # Validate cylinder faces when cylinder type is included
+    if "cylinder" in brep_types:
+        assert_brep_surfaces(mesh)
 
+
+@pytest.mark.skipif(
+    not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
+)
+def test_multibody():
+    """Test multibody STEP file with BREP data for each body."""
+    with open(MODELS_DIR / "multibody.step", "rb") as f:
+        step_data = f.read()
+
+    glb_data = cascadio.load(
+        step_data,
+        file_type="step",
+        tol_linear=TOL_LINEAR,
+        tol_angular=TOL_ANGULAR,
+        include_brep=True,
+    )
+
+    scene = trimesh.load(io.BytesIO(glb_data), file_type="glb")
+    assert len(scene.geometry) == 10
+
+    for name, mesh in scene.geometry.items():
+        brep_faces = mesh.metadata["cascadio"]["brep_faces"]
+        brep_index = mesh.face_attributes["brep_index"]
+
+        # Size checks
+        assert len(brep_index) == len(mesh.faces), f"{name}: brep_index/faces mismatch"
+        assert brep_index.max() < len(brep_faces), f"{name}: brep_index out of range"
+
+        # Validate cylinder faces actually lie on cylinder surfaces
+        assert_brep_surfaces(mesh)
+
+    
 def test_step_to_glb_bytes_performance():
     """Compare performance of file-based vs bytes-based conversion."""
     step_data = FEATURE_TYPE_STEP_PATH.read_bytes()
@@ -417,34 +587,10 @@ def test_cylinder_units_match_mesh(brep_mesh):
 @pytest.mark.skipif(
     not _HAS_EXTENSION_REGISTRY, reason="trimesh extension registry not available"
 )
-def test_cylinder_vertices_on_surface(brep_mesh, tolerance: float = 1e-8):
+def test_cylinder_vertices_on_surface(brep_mesh):
     """Verify mesh vertices mapped to cylinders lie on the cylinder surface."""
-    brep_index = brep_mesh.face_attributes.get("brep_index")
-    if brep_index is None:
-        pytest.skip("brep_index not available")
+    assert_brep_surfaces(brep_mesh)
 
-    brep_index = np.asarray(brep_index).flatten()
-    primitives = cascadio.primitives.parse_brep_faces(brep_mesh.metadata["cascadio"]["brep_faces"])
-
-    errors = []
-    for idx, prim in enumerate(primitives):
-        if not isinstance(prim, cascadio.primitives.Cylinder):
-            continue
-
-        tri_indices = np.where(brep_index == idx)[0]
-        if len(tri_indices) == 0:
-            continue
-
-        origin, axis = np.array(prim.origin), np.array(prim.axis)
-        verts = brep_mesh.vertices[np.unique(brep_mesh.faces[tri_indices])]
-
-        # Distance from cylinder axis
-        to_verts = verts - origin
-        perp = to_verts - np.outer(np.dot(to_verts, axis), axis)
-        dist = np.linalg.norm(perp, axis=1)
-
-        max_err = np.abs(dist - prim.radius).max()
-        if max_err > tolerance:
-            errors.append(f"Cylinder {idx}: {max_err * 1000:.4f}mm error")
-
-    assert len(errors) == 0, f"Vertex errors: {errors[:3]}"
+if __name__ == '__main__':
+    test_multibody()
+    

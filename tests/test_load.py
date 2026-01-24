@@ -4,6 +4,7 @@ import tempfile
 from io import BytesIO
 
 import cascadio
+import pytest
 import trimesh
 
 cwd = os.path.abspath(os.path.dirname(__file__))
@@ -52,28 +53,19 @@ def test_load_iges_bytes():
 
     # With stitching and merge_primitives, we should get a single unified mesh
     assert len(scene.geometry) == 1
-    print(f"IGES loaded successfully as {len(scene.geometry)} mesh(es)")
 
 
-def test_load_iges_file_extensions():
-    """Test that both 'igs' and 'iges' file type strings work."""
+@pytest.mark.parametrize("file_type", ["igs", "iges", "IGES"])
+def test_load_iges_file_extensions(file_type):
+    """Test that 'igs', 'iges', and 'IGES' file type strings all work."""
     infile = os.path.join(cwd, "models", "microstrip.igs")
     assert os.path.exists(infile)
 
     with open(infile, "rb") as f:
         iges_data = f.read()
 
-    # Test with 'igs' extension
-    glb_data1 = cascadio.load(iges_data, file_type="igs")
-    assert len(glb_data1) > 0
-
-    # Test with 'iges' extension
-    glb_data2 = cascadio.load(iges_data, file_type="iges")
-    assert len(glb_data2) > 0
-
-    # Test with 'IGES' (uppercase)
-    glb_data3 = cascadio.load(iges_data, file_type="IGES")
-    assert len(glb_data3) > 0
+    glb_data = cascadio.load(iges_data, file_type=file_type)
+    assert len(glb_data) > 0
 
 
 def test_step_to_glb():

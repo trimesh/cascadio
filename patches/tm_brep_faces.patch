@@ -1,5 +1,5 @@
 diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
-index 0eb46b0348..fe09c7da12 100644
+index 0eb46b0348..3648f07ea8 100644
 --- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
 +++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.cxx
 @@ -51,6 +51,14 @@
@@ -17,18 +17,19 @@ index 0eb46b0348..fe09c7da12 100644
  IMPLEMENT_STANDARD_RTTIEXT(RWGltf_CafWriter, Standard_Transient)
  
  namespace
-@@ -247,7 +255,9 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile, bool
+@@ -247,7 +255,10 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile, bool
        myToMergeFaces(false),
        myToSplitIndices16(false),
        myBinDataLen64(0),
 -      myToParallel(false)
 +      myToParallel(false),
 +      myFaceIndex(0),
++      myMeshIndex(0),
 +      myBinFileFd(-1)
  {
    myCSTrsf.SetOutputLengthUnit(1.0); // meters
    myCSTrsf.SetOutputCoordinateSystem(RWMesh_CoordinateSystem_glTF);
-@@ -257,7 +267,25 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile, bool
+@@ -257,7 +268,25 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile, bool
    OSD_Path::FileNameAndExtension(aFileName, aShortFileNameBase, aFileExt);
  
    myBinFileNameShort = aShortFileNameBase + ".bin" + (myIsBinary ? ".tmp" : "");
@@ -55,7 +56,7 @@ index 0eb46b0348..fe09c7da12 100644
  }
  
  //=================================================================================================
-@@ -265,6 +293,13 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile, bool
+@@ -265,6 +294,13 @@ RWGltf_CafWriter::RWGltf_CafWriter(const TCollection_AsciiString& theFile, bool
  RWGltf_CafWriter::~RWGltf_CafWriter()
  {
    myWriter.reset();
@@ -69,7 +70,7 @@ index 0eb46b0348..fe09c7da12 100644
  }
  
  //=================================================================================================
-@@ -481,6 +516,13 @@ void RWGltf_CafWriter::saveTriangleIndices(RWGltf_GltfFace&           theGltfFac
+@@ -481,6 +517,13 @@ void RWGltf_CafWriter::saveTriangleIndices(RWGltf_GltfFace&           theGltfFac
                                             const RWMesh_FaceIterator& theFaceIter,
                                             const std::shared_ptr<RWGltf_CafWriter::Mesh>& theMesh)
  {
@@ -77,13 +78,13 @@ index 0eb46b0348..fe09c7da12 100644
 +  if (myFaceDataCallback)
 +  {
 +    const Standard_Integer aTriStart = theGltfFace.Indices.Count / 3;
-+    myFaceDataCallback(myFaceIndex++, aTriStart, theFaceIter.NbTriangles(), theFaceIter.Face());
++    myFaceDataCallback(myMeshIndex, myFaceIndex++, aTriStart, theFaceIter.NbTriangles(), theFaceIter.Face());
 +  }
 +
    const int aNodeFirst = theGltfFace.NbIndexedNodes - theFaceIter.ElemLower();
    theGltfFace.NbIndexedNodes += theFaceIter.NbNodes();
    theGltfFace.Indices.Count += theFaceIter.NbTriangles() * 3;
-@@ -843,6 +885,7 @@ bool RWGltf_CafWriter::writeBinData(const occ::handle<TDocStd_Document>&
+@@ -843,6 +886,7 @@ bool RWGltf_CafWriter::writeBinData(const occ::handle<TDocStd_Document>&
  
    myBinDataMap.Clear();
    myBinDataLen64 = 0;
@@ -91,11 +92,44 @@ index 0eb46b0348..fe09c7da12 100644
  
    Message_ProgressScope aScope(theProgress,
                                 "Write binary data",
-@@ -1226,6 +1269,15 @@ bool RWGltf_CafWriter::writeJson(
-     Message::SendFail(TCollection_AsciiString("File '") + aFileNameGltf + "' can not be created");
-     return false;
+@@ -924,9 +968,9 @@ bool RWGltf_CafWriter::writeBinData(const occ::handle<TDocStd_Document>&
+     aBuffView->ByteOffset = aBinFile->tellp();
+     aWrittenFaces.Clear(false);
+     aWrittenPrimData.Clear(false);
+-#ifdef HAVE_DRACO
+-    size_t aMeshIndex = 0;
+-#endif
++    size_t aMeshIndex = 0;  // Track mesh index for callback (always, not just DRACO)
++    myMeshIndex = -1;       // Initialize to -1 so first mesh triggers face index reset
++    myFaceIndex = 0;        // Reset face index for this array type pass
+ 
+     bool isFacesOnly = true;
+     for (ShapeToGltfFaceMap::Iterator aBinDataIter(myBinDataMap);
+@@ -947,9 +991,18 @@ bool RWGltf_CafWriter::writeBinData(const occ::handle<TDocStd_Document>&
+       {
+         const occ::handle<RWGltf_GltfFace>& aGltfFace = aGltfFaceIter.Value();
+ 
++        // Update mesh index for callback (0-based) before incrementing for DRACO (1-based)
++        // Reset face index when moving to a new mesh
++        Standard_Integer aNewMeshIndex = static_cast<Standard_Integer>(aMeshIndex);
++        if (aNewMeshIndex != myMeshIndex)
++        {
++          myFaceIndex = 0;
++        }
++        myMeshIndex = aNewMeshIndex;
++        ++aMeshIndex;
++
+         std::shared_ptr<RWGltf_CafWriter::Mesh> aMeshPtr;
+ #ifdef HAVE_DRACO
+-        ++aMeshIndex;
+         if (myDracoParameters.DracoCompression)
+         {
+           if (aMeshIndex <= aMeshes.size())
+@@ -1299,7 +1352,15 @@ bool RWGltf_CafWriter::writeJson(
+     }
    }
-+  
+ 
+-  rapidjson::OStreamWrapper aFileStream(*aGltfContentFile);
 +  // Use stringstream for JSON if callback is set in binary mode
 +  std::ostringstream aJsonStream;
 +  std::ostream* aJsonOutput = aGltfContentFile.get();
@@ -103,20 +137,12 @@ index 0eb46b0348..fe09c7da12 100644
 +  {
 +    aJsonOutput = &aJsonStream;
 +  }
-+  
-   if (myIsBinary)
-   {
-     const char* aMagic         = "glTF";
-@@ -1299,7 +1351,7 @@ bool RWGltf_CafWriter::writeJson(
-     }
-   }
- 
--  rapidjson::OStreamWrapper aFileStream(*aGltfContentFile);
++
 +  rapidjson::OStreamWrapper aFileStream(*aJsonOutput);
    myWriter.reset(new RWGltf_GltfOStreamWriter(aFileStream));
  
    myWriter->StartObject();
-@@ -1331,6 +1383,15 @@ bool RWGltf_CafWriter::writeJson(
+@@ -1331,6 +1392,15 @@ bool RWGltf_CafWriter::writeJson(
    writeTextures(aSceneNodeMap);
  
    myWriter->EndObject();
@@ -132,7 +158,7 @@ index 0eb46b0348..fe09c7da12 100644
  
    if (!myIsBinary)
    {
-@@ -1351,12 +1412,15 @@ bool RWGltf_CafWriter::writeJson(
+@@ -1351,12 +1421,15 @@ bool RWGltf_CafWriter::writeJson(
      ++aContentLen64;
    }
  
@@ -140,7 +166,7 @@ index 0eb46b0348..fe09c7da12 100644
 +  // Calculate binary length (may include appended data from callback)
 +  uint32_t aAppendedBytes = 0;
 +  uint32_t aBinLength = (uint32_t)myBinDataLen64;
-+  
++
    const uint32_t aBinType   = 0x004E4942;
    aGltfContentFile->write((const char*)&aBinLength, 4);
    aGltfContentFile->write((const char*)&aBinType, 4);
@@ -150,49 +176,49 @@ index 0eb46b0348..fe09c7da12 100644
    if (aFullLen64 < std::numeric_limits<uint32_t>::max())
    {
      {
-@@ -1380,12 +1444,47 @@ bool RWGltf_CafWriter::writeJson(
+@@ -1380,12 +1453,47 @@ bool RWGltf_CafWriter::writeJson(
          aGltfContentFile->write(aBuffer, aReadLen);
        }
      }
 -    OSD_Path aBinFilePath(myBinFileNameFull);
 -    OSD_File(aBinFilePath).Remove();
 -    if (OSD_File(aBinFilePath).Exists())
-+    
++
 +    // Invoke binary append callback if set
 +    if (myBinaryAppendCallback)
-     {
--      Message::SendFail(TCollection_AsciiString("Unable to remove temporary glTF content file '")
--                        + myBinFileNameFull + "'");
++    {
 +      // Pad to 4-byte alignment before appending
 +      while (aGltfContentFile->tellp() % 4 != 0)
 +      {
 +        aGltfContentFile->write("\0", 1);
 +      }
-+      
++
 +      aAppendedBytes = myBinaryAppendCallback(*aGltfContentFile, (uint32_t)myBinDataLen64);
-+      
++
 +      // Pad appended data to 4-byte alignment
 +      while (aGltfContentFile->tellp() % 4 != 0)
 +      {
 +        aGltfContentFile->write("\0", 1);
 +        aAppendedBytes++;
 +      }
-+      
++
 +      // Update binary length and total length
 +      aBinLength = (uint32_t)myBinDataLen64 + aAppendedBytes;
 +      aFullLen64 = aContentLen64 + 20 + aBinLength + 8;
-+      
++
 +      // Seek back and update binary chunk length
 +      aGltfContentFile->seekp(aContentLen64 + 20);
 +      aGltfContentFile->write((const char*)&aBinLength, 4);
 +      aGltfContentFile->seekp(0, std::ios::end);
 +    }
-+    
++
 +    // Remove temp file (skip if using memfd - nothing to remove)
 +#ifdef __linux__
 +    if (myBinFileFd < 0)
 +#endif
-+    {
+     {
+-      Message::SendFail(TCollection_AsciiString("Unable to remove temporary glTF content file '")
+-                        + myBinFileNameFull + "'");
 +      OSD_Path aBinFilePath(myBinFileNameFull);
 +      OSD_File(aBinFilePath).Remove();
 +      if (OSD_File(aBinFilePath).Exists())
@@ -203,8 +229,16 @@ index 0eb46b0348..fe09c7da12 100644
      }
    }
    else
+@@ -1407,7 +1515,6 @@ bool RWGltf_CafWriter::writeJson(
+     return false;
+   }
+   aGltfContentFile.reset();
+-  myWriter.reset();
+   return true;
+ #else
+   (void)theDocument;
 diff --git a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
-index 8ecae86bfa..e3bf45e40e 100644
+index 8ecae86bfa..acb21a73b0 100644
 --- a/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
 +++ b/src/DataExchange/TKDEGLTF/RWGltf/RWGltf_CafWriter.hxx
 @@ -32,7 +32,9 @@
@@ -217,13 +251,14 @@ index 8ecae86bfa..e3bf45e40e 100644
  #include <memory>
  
  class Message_ProgressRange;
-@@ -155,6 +157,39 @@ public:
+@@ -155,6 +157,40 @@ public:
      myDracoParameters = theDracoParameters;
    }
  
 +  //! Callback type for receiving per-face triangle data during mesh export.
-+  //! Called for each TopoDS_Face with its face index, triangle start index, triangle count, and the face itself.
-+  using FaceDataCallback = std::function<void(Standard_Integer theFaceIndex,
++  //! Called for each TopoDS_Face with its mesh index, face index, triangle start index, triangle count, and the face itself.
++  using FaceDataCallback = std::function<void(Standard_Integer theMeshIndex,
++                                              Standard_Integer theFaceIndex,
 +                                              Standard_Integer theTriStart,
 +                                              Standard_Integer theTriCount,
 +                                              const TopoDS_Face& theFace)>;
@@ -257,7 +292,7 @@ index 8ecae86bfa..e3bf45e40e 100644
    //! Write glTF file and associated binary file.
    //! Triangulation data should be precomputed within shapes!
    //! @param[in] theDocument     input document
-@@ -540,7 +575,12 @@ protected:
+@@ -540,7 +576,13 @@ protected:
    std::vector<RWGltf_GltfBufferView>            myBuffViewsDraco;    //!< vector of buffers view with compression data
    bool                              myToParallel;        //!< flag to use multithreading; FALSE by default
                                              // clang-format on
@@ -265,6 +300,7 @@ index 8ecae86bfa..e3bf45e40e 100644
 +  RWGltf_DracoParameters myDracoParameters;         //!< Draco parameters
 +  FaceDataCallback       myFaceDataCallback;        //!< optional callback for per-face triangle data
 +  Standard_Integer       myFaceIndex;               //!< current face index for callback
++  Standard_Integer       myMeshIndex;               //!< current mesh index for callback
 +  JsonPostProcessCallback myJsonPostProcessCallback; //!< optional callback for JSON post-processing
 +  BinaryAppendCallback   myBinaryAppendCallback;    //!< optional callback for appending binary data
 +  int                    myBinFileFd;               //!< memfd for binary temp file (Linux), -1 otherwise
