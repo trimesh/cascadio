@@ -12,7 +12,9 @@
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <cstdint>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 // Meshing
@@ -159,9 +161,9 @@ static bool exportToGlbFile(
   if (faceData != nullptr) {
     faceData->clear();
     cafWriter.SetFaceDataCallback(
-        [faceData](int faceIndex, int triStart, int triCount,
+        [faceData](int meshIndex, int faceIndex, int triStart, int triCount,
                    const TopoDS_Face &face) {
-          faceData->push_back({faceIndex, triStart, triCount, face});
+          faceData->push_back({meshIndex, faceIndex, triStart, triCount, face});
         });
   }
 
@@ -222,13 +224,6 @@ static std::string to_glb_bytes(const std::string &data, FileType file_type,
                                 std::set<std::string> brep_types = {},
                                 bool include_materials = false) {
 
-  // Warn early if metadata requested without merge_primitives
-  if (!merge_primitives && (include_brep || include_materials)) {
-    std::cerr << "Warning: include_brep and include_materials require "
-                 "merge_primitives=true. Skipping metadata injection."
-              << std::endl;
-  }
-
   LoadResult loaded = loadBytes(data, file_type, tol_linear, tol_angle,
                                 tol_relative, use_parallel);
   if (!loaded.success) {
@@ -238,11 +233,11 @@ static std::string to_glb_bytes(const std::string &data, FileType file_type,
   // Get length unit (scale factor to meters for glTF output)
   Standard_Real lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
 
-  // Extract materials only if needed and conditions are met
+  // Extract materials only if needed
   rapidjson::Document matDoc;
   matDoc.SetArray();
   rapidjson::Value *materialsPtr = nullptr;
-  if (include_materials && merge_primitives) {
+  if (include_materials) {
     rapidjson::Value materials =
         extractMaterials(loaded.doc, matDoc.GetAllocator());
     matDoc.Swap(materials);
@@ -252,9 +247,12 @@ static std::string to_glb_bytes(const std::string &data, FileType file_type,
   // Collect face data via callback if include_brep is requested
   std::vector<FaceTriangleData> faceData;
   std::vector<FaceTriangleData> *faceDataPtr =
-      (include_brep && merge_primitives) ? &faceData : nullptr;
+      include_brep ? &faceData : nullptr;
 
-  // Create faceIndices binary data if needed (shared between callbacks)
+  // Create faceIndices binary data if needed (shared between callbacks).
+  // Build per-shape faceIndices arrays lazily in callback.
+  // Layout: [shape0 indices...][shape1 indices...][...]
+  // Each index maps triangle N to the face that generated it.
   std::vector<uint32_t> faceIndices;
   auto buildFaceIndices = [&faceData, &faceIndices]() {
     // Early exit if already built or no data
@@ -262,23 +260,35 @@ static std::string to_glb_bytes(const std::string &data, FileType file_type,
       return;
     }
 
-    // Find max triangle index to determine array size
-    int totalTriangles = 0;
+    // Group face data by mesh index
+    std::map<int, std::vector<FaceTriangleData>> facesByMesh;
     for (const auto &fd : faceData) {
-      totalTriangles = std::max(totalTriangles, fd.triStart + fd.triCount);
+      facesByMesh[fd.meshIndex].push_back(fd);
     }
 
-    if (totalTriangles <= 0) {
-      return; // No triangles to map
-    }
+    // Calculate per-mesh triangle counts and build binary data
+    // Meshes are written in order of their indices
+    for (const auto &[meshIdx, faces] : facesByMesh) {
+      // Find max triangle index for this mesh
+      int maxTriangle = 0;
+      for (const auto &fd : faces) {
+        maxTriangle = std::max(maxTriangle, fd.triStart + fd.triCount);
+      }
 
-    // Build mapping array: triangle index -> face index
-    faceIndices.resize(totalTriangles, 0);
-    for (const auto &fd : faceData) {
-      for (int t = 0; t < fd.triCount; ++t) {
-        int idx = fd.triStart + t;
-        if (idx >= 0 && idx < totalTriangles) {
-          faceIndices[idx] = static_cast<uint32_t>(fd.faceIndex);
+      if (maxTriangle <= 0) {
+        continue;
+      }
+
+      // Build this mesh's faceIndices
+      size_t baseOffset = faceIndices.size();
+      faceIndices.resize(baseOffset + maxTriangle, UINT32_MAX);
+
+      for (const auto &fd : faces) {
+        for (int t = 0; t < fd.triCount; ++t) {
+          int idx = fd.triStart + t;
+          if (idx >= 0 && idx < maxTriangle) {
+            faceIndices[baseOffset + idx] = static_cast<uint32_t>(fd.faceIndex);
+          }
         }
       }
     }
@@ -288,7 +298,7 @@ static std::string to_glb_bytes(const std::string &data, FileType file_type,
   RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr;
   RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr;
 
-  if (merge_primitives && (include_brep || include_materials)) {
+  if (include_brep || include_materials) {
     if (include_brep && faceDataPtr) {
       // BREP extension: inject face data and optional materials
       jsonCallback = [&](const std::string &jsonStr) -> std::string {

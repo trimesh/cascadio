@@ -41,14 +41,43 @@ CIBW_BUILD="cp312-manylinux_x86_64" cibuildwheel --platform linux
 
 For local development without docker:
 ```bash
+# install build tools
+uv pip install cmake ninja
+
 # build OCCT to occt_cache/
-python scripts/build_occt.py
+uv run python scripts/build_occt.py
 
 # source the env vars it writes
 source occt_cache/env.sh
 
 # install and test
-pip install -e .
+uv pip install -e .
+pytest tests/
+```
+
+#### Patching OCCT
+
+When modifying OpenCASCADE source files:
+
+```bash
+# 1. Start with clean OCCT (reset any local changes)
+git -C upstream/OCCT checkout -- .
+
+# 2. Build OCCT (applies existing patches from patches/)
+uv run python scripts/build_occt.py
+
+# 3. Make your changes to OCCT source files
+#    Edit files in upstream/OCCT/src/...
+
+# 4. Regenerate the patch file from your changes
+uv run python scripts/build_occt.py --build-patch
+
+# 5. Rebuild OCCT with your changes
+uv run python scripts/build_occt.py
+
+# 6. Source env and test
+source occt_cache/env.sh
+uv pip install -e .
 pytest tests/
 ```
 

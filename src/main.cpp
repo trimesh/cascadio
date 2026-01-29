@@ -26,6 +26,11 @@ PYBIND11_MODULE(_core, m) {
          Standard_Real tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
          bool include_materials) -> py::bytes {
+        // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
+        if ((include_brep || include_materials) && !merge_primitives) {
+          std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
+          merge_primitives = true;
+        }
         std::string input_data = data;
         std::string result =
             to_glb_bytes(input_data, file_type, tol_linear, tol_angle,
@@ -79,6 +84,11 @@ bytes
          Standard_Real tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
          bool include_materials) -> int {
+        // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
+        if ((include_brep || include_materials) && !merge_primitives) {
+          std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
+          merge_primitives = true;
+        }
         return to_glb(input_path, output_path, FileType::STEP, tol_linear,
                       tol_angle, tol_relative, merge_primitives, use_parallel,
                       include_brep, brep_types, include_materials);

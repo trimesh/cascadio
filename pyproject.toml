@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cascadio"
-version = "0.0.18rc3"
+version = "0.0.18rc4"
 requires-python = ">=3.8"
 authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
 license = {file = "LICENSE/LICENSE-cascadio.md"}
@@ -30,7 +30,7 @@ file = "README.md"
 content-type = "text/markdown"
 
 [project.optional-dependencies]
-tests = ["pytest", "trimesh", "chardet"]
+tests = ["pytest", "trimesh", "chardet", "jsonschema"]
 
 [tool.scikit-build]
 wheel.packages = ["src/cascadio"]
