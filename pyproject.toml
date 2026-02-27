@@ -1,6 +1,5 @@
 [build-system]
-requires = ["scikit_build_core >= 0.9.0",
-            "pybind11"]
+requires = ["scikit_build_core >= 0.9.0", "nanobind"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -18,6 +17,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Natural Language :: English",
     "Topic :: Scientific/Engineering",
     "Topic :: Multimedia :: Graphics",
@@ -35,6 +36,7 @@ tests = ["pytest", "trimesh", "chardet", "jsonschema"]
 [tool.scikit-build]
 wheel.packages = ["src/cascadio"]
 wheel.exclude = ["**/__pycache__"]
+wheel.py-api = "cp312"
 
 # Include schema.json in the wheel
 [tool.setuptools.package-data]

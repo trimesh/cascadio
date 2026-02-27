@@ -163,3 +163,11 @@ cython_debug/
 
 # Local OCCT build cache
 occt_cache/
+
+# uv
+uv.lock
+
+# GTAGS
+GPATH
+GRTAGS
+GTAGS

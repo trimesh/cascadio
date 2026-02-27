@@ -22,7 +22,7 @@ find_package(
   COMPONENTS Interpreter Development.Module
   REQUIRED)
 
-find_package(pybind11 CONFIG REQUIRED)
+find_package(nanobind CONFIG REQUIRED)
 
 # Set the C++ standard to C++17 before creating targets
 set(CMAKE_CXX_STANDARD 17)
@@ -55,7 +55,17 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -funroll-loops")
 endif()
 
-pybind11_add_module(_core src/main.cpp)
+nanobind_add_module(
+  _core
+
+  # Target the stable ABI for Python 3.12+, which reduces
+  # the number of binary wheels that must be built. This
+  # does nothing on older Python versions
+  STABLE_ABI
+
+  src/main.cpp
+)
+
 target_compile_definitions(_core
                            PRIVATE VERSION_INFO=${PROJECT_VERSION})
 

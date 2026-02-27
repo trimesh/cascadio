@@ -2,6 +2,7 @@
 
 #include "filehandle.hpp"
 #include "step.hpp" // for closeDocument helper
+#include "imemstream.hpp"
 
 #include <IGESControl_Reader.hxx>
 #include <Message_ProgressRange.hxx>
@@ -157,7 +158,7 @@ static IgesLoadResult loadIgesFile(const char *input_path,
 /// Load an IGES file from memory (bytes) and mesh the shapes
 /// NOTE: IGES does not support stream reading, so this function uses a
 /// FileHandle (memfd on Linux, temp file elsewhere)
-static IgesLoadResult loadIgesBytes(const std::string &igesData,
+static IgesLoadResult loadIgesBytes(const char *data, size_t data_len,
                                     Standard_Real tol_linear,
                                     Standard_Real tol_angle, bool tol_relative,
                                     bool use_parallel, bool use_colors = true,
@@ -173,7 +174,7 @@ static IgesLoadResult loadIgesBytes(const std::string &igesData,
   }
 
   // Write IGES data to handle
-  if (!handle.write_data(igesData.data(), igesData.size())) {
+  if (!handle.write_data(data, data_len)) {
     std::cerr << "Error: Failed to write IGES data" << std::endl;
     return result;
   }

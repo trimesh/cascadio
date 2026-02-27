@@ -1,5 +1,7 @@
 #pragma once
 
+#include "imemstream.hpp"
+
 #include <Message_ProgressRange.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <TDocStd_Document.hxx>
@@ -12,6 +14,9 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <string>
+
+
 
 // ============================================================================
 // STEP Loading
@@ -84,8 +89,10 @@ static StepLoadResult loadStepFile(const char *input_path,
   return result;
 }
 
+
+
 /// Load a STEP file from memory (bytes) and mesh the shapes
-static StepLoadResult loadStepBytes(const std::string &stepData,
+static StepLoadResult loadStepBytes(const char *data, size_t data_len,
                                     Standard_Real tol_linear,
                                     Standard_Real tol_angle, bool tol_relative,
                                     bool use_parallel, bool use_colors = true) {
@@ -97,7 +104,8 @@ static StepLoadResult loadStepBytes(const std::string &stepData,
   STEPCAFControl_Reader stepReader;
 
   // Create an input stream from the string data
-  std::istringstream stepStream(stepData);
+  // std::istringstream stepStream(stepData);
+  imemstream stepStream(data, data_len);
 
   if (IFSelect_RetDone != stepReader.ReadStream("step_data.step", stepStream)) {
     std::cerr << "Error: Failed to read STEP data from memory" << std::endl;
