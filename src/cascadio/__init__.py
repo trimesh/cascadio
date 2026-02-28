@@ -33,7 +33,7 @@ BrepType = Literal["plane", "cylinder", "cone", "sphere", "torus"]
 
 def load(
     data: bytes,
-    file_type: str = "step",
+    file_type: Literal["step", "iges"] = "step",
     tol_linear: float = 0.01,
     tol_angular: float = 0.5,
     tol_relative: bool = False,
