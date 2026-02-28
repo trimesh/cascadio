@@ -9,10 +9,10 @@ from typing import Literal, Optional, Set
 
 # Import the C extension functions and enums
 from cascadio._core import (
+    FileType,
     to_glb_bytes,
     step_to_glb,
     step_to_obj,
-    FileType,
     __version__,
 )
 
