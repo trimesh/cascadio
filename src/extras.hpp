@@ -108,14 +108,14 @@ static const rapidjson::Value* getFirstPrimitive(const rapidjson::Value &mesh) {
 // Forward declaration - implemented in primitives.hpp
 static rapidjson::Value extractAllPrimitives(
     const TopoDS_Shape &shape, rapidjson::Document::AllocatorType &alloc,
-    const std::set<std::string> &allowedTypes, Standard_Real lengthUnit);
+    const std::set<std::string> &allowedTypes, double lengthUnit);
 
 // Forward declaration - defined in primitives.hpp
 static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
                                  rapidjson::Value &facesArray,
                                  rapidjson::Document::AllocatorType &alloc,
                                  const std::set<std::string> &allowedTypes,
-                                 Standard_Real lengthUnit);
+                                 double lengthUnit);
 
 /// Modify JSON to add BREP extension metadata (for use with JSON callback)
 /// Takes JSON string, face data, and pre-calculated faceIndices binary info
@@ -124,7 +124,7 @@ static std::string injectBrepExtensionIntoJson(
     const std::string &jsonString,
     const std::vector<FaceTriangleData> &faceData, uint32_t existingBinLength,
     uint32_t faceIndicesBytes, const std::set<std::string> &allowedTypes,
-    const rapidjson::Value *materials, Standard_Real lengthUnit) {
+    const rapidjson::Value *materials, double lengthUnit) {
 
   // Parse JSON
   rapidjson::Document doc;

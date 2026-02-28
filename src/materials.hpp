@@ -32,7 +32,7 @@ extractMaterials(Handle(TDocStd_Document) doc,
 
     for (int i = 1; i <= matLabels.Length(); i++) {
       Handle(TCollection_HAsciiString) name, description, densName, densValType;
-      Standard_Real density = 0.0;
+      double density = 0.0;
 
       if (XCAFDoc_MaterialTool::GetMaterial(matLabels.Value(i), name,
                                             description, density, densName,

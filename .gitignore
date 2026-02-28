@@ -171,3 +171,7 @@ uv.lock
 GPATH
 GRTAGS
 GTAGS
+
+# CMake
+CMakeCache.txt
+CMakeFiles/

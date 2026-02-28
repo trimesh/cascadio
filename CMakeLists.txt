@@ -17,10 +17,10 @@ project(
   VERSION ${project_version}
   LANGUAGES CXX)
 
-find_package(
-  Python
-  COMPONENTS Interpreter Development.Module
-  REQUIRED)
+# Try to import all Python components potentially needed by nanobind
+find_package(Python
+  REQUIRED COMPONENTS Interpreter Development.Module
+  OPTIONAL_COMPONENTS Development.SABIModule)
 
 find_package(nanobind CONFIG REQUIRED)
 

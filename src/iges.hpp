@@ -39,7 +39,7 @@ struct IgesLoadResult {
 
 /// Stitch/sew faces together to create a unified shape
 static TopoDS_Shape stitchShapes(const std::vector<TopoDS_Shape> &shapes,
-                                 Standard_Real tolerance = 1e-6) {
+                                 double tolerance = 1e-6) {
   if (shapes.empty()) {
     return TopoDS_Shape();
   }
@@ -81,8 +81,8 @@ static TopoDS_Shape stitchShapes(const std::vector<TopoDS_Shape> &shapes,
 /// Note: use_colors parameter is accepted for API consistency but IGES
 /// color handling is limited compared to STEP
 static IgesLoadResult loadIgesFile(const char *input_path,
-                                   Standard_Real tol_linear,
-                                   Standard_Real tol_angle, bool tol_relative,
+                                   double tol_linear,
+                                   double tol_angle, bool tol_relative,
                                    bool use_parallel, bool /*use_colors*/ = true,
                                    bool stitch_shapes = true) {
   IgesLoadResult result;
@@ -126,7 +126,7 @@ static IgesLoadResult loadIgesFile(const char *input_path,
   // Use a small sewing tolerance (1e-6) suitable for joining adjacent surfaces.
   // This is independent of the meshing tolerance (tol_linear).
   if (stitch_shapes && !rawShapes.empty()) {
-    constexpr Standard_Real sewingTolerance = 1e-6;
+    constexpr double sewingTolerance = 1e-6;
     TopoDS_Shape stitched = stitchShapes(rawShapes, sewingTolerance);
     if (stitched.IsNull()) {
       std::cerr << "Error: Failed to stitch IGES shapes" << std::endl;
@@ -159,8 +159,8 @@ static IgesLoadResult loadIgesFile(const char *input_path,
 /// NOTE: IGES does not support stream reading, so this function uses a
 /// FileHandle (memfd on Linux, temp file elsewhere)
 static IgesLoadResult loadIgesBytes(const char *data, size_t data_len,
-                                    Standard_Real tol_linear,
-                                    Standard_Real tol_angle, bool tol_relative,
+                                    double tol_linear,
+                                    double tol_angle, bool tol_relative,
                                     bool use_parallel, bool use_colors = true,
                                     bool stitch_shapes = true) {
   IgesLoadResult result;

@@ -47,7 +47,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
                                  rapidjson::Value &facesArray,
                                  rapidjson::Document::AllocatorType &alloc,
                                  const std::set<std::string> &allowedTypes = {},
-                                 Standard_Real lengthUnit = 1.0) {
+                                 double lengthUnit = 1.0) {
   // Null/empty face -> null entry
   if (face.IsNull()) {
     facesArray.PushBack(rapidjson::Value(), alloc);
@@ -74,7 +74,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
   }
 
   // Get UV bounds
-  Standard_Real uMin, uMax, vMin, vMax;
+  double uMin, uMax, vMin, vMax;
   BRepTools::UVBounds(face, uMin, uMax, vMin, vMax);
 
   rapidjson::Value obj(rapidjson::kObjectType);
@@ -174,7 +174,7 @@ static rapidjson::Value
 extractAllPrimitives(const TopoDS_Shape &shape,
                      rapidjson::Document::AllocatorType &alloc,
                      const std::set<std::string> &allowedTypes = {},
-                     Standard_Real lengthUnit = 1.0) {
+                     double lengthUnit = 1.0) {
   rapidjson::Value facesArray(rapidjson::kArrayType);
   int faceIndex = 0;
 

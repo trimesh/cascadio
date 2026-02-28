@@ -45,8 +45,8 @@ static void closeDocument(Handle(TDocStd_Document) & doc) {
 
 /// Load a STEP file from disk and mesh the shapes
 static StepLoadResult loadStepFile(const char *input_path,
-                                   Standard_Real tol_linear,
-                                   Standard_Real tol_angle, bool tol_relative,
+                                   double tol_linear,
+                                   double tol_angle, bool tol_relative,
                                    bool use_parallel, bool use_colors = true) {
   StepLoadResult result;
 
@@ -93,8 +93,8 @@ static StepLoadResult loadStepFile(const char *input_path,
 
 /// Load a STEP file from memory (bytes) and mesh the shapes
 static StepLoadResult loadStepBytes(const char *data, size_t data_len,
-                                    Standard_Real tol_linear,
-                                    Standard_Real tol_angle, bool tol_relative,
+                                    double tol_linear,
+                                    double tol_angle, bool tol_relative,
                                     bool use_parallel, bool use_colors = true) {
   StepLoadResult result;
 
