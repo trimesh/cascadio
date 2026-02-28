@@ -104,7 +104,6 @@ static StepLoadResult loadStepBytes(const char *data, size_t data_len,
   STEPCAFControl_Reader stepReader;
 
   // Create an input stream from the string data
-  // std::istringstream stepStream(stepData);
   imemstream stepStream(data, data_len);
 
   if (IFSelect_RetDone != stepReader.ReadStream("step_data.step", stepStream)) {
