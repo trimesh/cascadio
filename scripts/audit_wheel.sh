@@ -8,10 +8,9 @@ if [ "$PY_MINOR" -lt 12 ]; then
   exit 0
 fi
 
-# Skip free threaded python (there currently is no stable ABI for free-threaded
+# Skip free-threaded Python (there currently is no stable ABI for free-threaded
 # Python as of 9 Mar 2026)
-ABIFLAGS=$(python -c "import sys; print(getattr(sys, 'abiflags', ''))")
-if [[ "$ABIFLAGS" == *t* ]]; then
+if python -VV 2>&1 | grep -q "free-threading"; then
     echo "Skipping abi3audit for free-threaded Python"
     exit 0
 fi
