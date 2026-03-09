@@ -5,14 +5,13 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "cascadio"
 version = "0.0.18rc5"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
 license = {file = "LICENSE/LICENSE-cascadio.md"}
 description = "Convert STEP files to GLB using OpenCASCADE"
 keywords = ["graphics", "STEP", "GLTF"]
 classifiers = [
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
