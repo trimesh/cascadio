@@ -16,6 +16,8 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <string>
+#include <cstddef>
 
 // Meshing
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -49,7 +51,7 @@ struct LoadResult {
 
 /// Load a BREP file (STEP or IGES) from disk
 static LoadResult loadFile(const char *input_path, FileType file_type,
-                           Standard_Real tol_linear, Standard_Real tol_angle,
+                           double tol_linear, double tol_angle,
                            bool tol_relative, bool use_parallel,
                            bool use_colors = true) {
   LoadResult result;
@@ -76,21 +78,22 @@ static LoadResult loadFile(const char *input_path, FileType file_type,
 }
 
 /// Load a BREP file (STEP or IGES) from memory
-static LoadResult loadBytes(const std::string &data, FileType file_type,
-                            Standard_Real tol_linear, Standard_Real tol_angle,
+static LoadResult loadBytes(const char *data, size_t data_len,
+                            FileType file_type,
+                            double tol_linear, double tol_angle,
                             bool tol_relative, bool use_parallel,
                             bool use_colors = true) {
   LoadResult result;
 
   if (file_type == FileType::STEP) {
     StepLoadResult stepResult = loadStepBytes(
-        data, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
+        data, data_len, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
     result.doc = stepResult.doc;
     result.shapes = stepResult.shapes;
     result.success = stepResult.success;
   } else if (file_type == FileType::IGES) {
     IgesLoadResult igesResult = loadIgesBytes(
-        data, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
+        data, data_len, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
     result.doc = igesResult.doc;
     result.shapes = igesResult.shapes;
     result.success = igesResult.success;
@@ -107,9 +110,9 @@ static LoadResult loadBytes(const std::string &data, FileType file_type,
 
 /// Detect length unit from document or shapes
 /// Returns scale factor to convert to meters (e.g., 0.001 for millimeters)
-static Standard_Real detectLengthUnit(Handle(TDocStd_Document) doc,
+static double detectLengthUnit(Handle(TDocStd_Document) doc,
                                       const std::vector<TopoDS_Shape> &shapes) {
-  Standard_Real lengthUnit = 1.0;
+  double lengthUnit = 1.0;
 
   // Try to get length unit from document first
   if (XCAFDoc_DocumentTool::GetLengthUnit(doc, lengthUnit)) {
@@ -131,9 +134,9 @@ static Standard_Real detectLengthUnit(Handle(TDocStd_Document) doc,
     return lengthUnit;
   }
 
-  Standard_Real xmin, ymin, zmin, xmax, ymax, zmax;
+  double xmin, ymin, zmin, xmax, ymax, zmax;
   bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-  Standard_Real maxExtent = std::max({xmax - xmin, ymax - ymin, zmax - zmin});
+  double maxExtent = std::max({xmax - xmin, ymax - ymin, zmax - zmin});
 
   // If max extent > 1.0, likely in mm (typical CAD parts are 10-1000mm)
   // glTF expects meters, so if extent suggests mm, use 0.001
@@ -216,22 +219,23 @@ static std::vector<char> exportToGlbBytes(
 
 /// Transcode BREP bytes (STEP or IGES) to GLB bytes
 /// This is the main API - one-shot conversion with no disk round-trips
-static std::string to_glb_bytes(const std::string &data, FileType file_type,
-                                Standard_Real tol_linear,
-                                Standard_Real tol_angle, bool tol_relative,
-                                bool merge_primitives, bool use_parallel,
-                                bool include_brep = false,
-                                std::set<std::string> brep_types = {},
-                                bool include_materials = false) {
+std::vector<char> to_glb_bytes(const char *data, size_t data_len,
+                               FileType file_type,
+                               double tol_linear,
+                               double tol_angle, bool tol_relative,
+                               bool merge_primitives, bool use_parallel,
+                               bool include_brep = false,
+                               std::set<std::string> brep_types = {},
+                               bool include_materials = false) {
 
-  LoadResult loaded = loadBytes(data, file_type, tol_linear, tol_angle,
+  LoadResult loaded = loadBytes(data, data_len, file_type, tol_linear, tol_angle,
                                 tol_relative, use_parallel);
   if (!loaded.success) {
-    return "";
+    return {};
   }
 
   // Get length unit (scale factor to meters for glTF output)
-  Standard_Real lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
+  double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
 
   // Extract materials only if needed
   rapidjson::Document matDoc;
@@ -369,10 +373,10 @@ static std::string to_glb_bytes(const std::string &data, FileType file_type,
 
   if (glbData.empty()) {
     std::cerr << "Error: Failed to export GLB" << std::endl;
-    return "";
+    return {};
   }
 
-  return std::string(glbData.begin(), glbData.end());
+  return glbData;
 }
 
 // ============================================================================
@@ -385,25 +389,34 @@ static std::string to_glb_bytes(const std::string &data, FileType file_type,
 
 /// Transcode BREP file (STEP or IGES) to GLB file
 /// LEGACY: Use to_glb_bytes() instead for better performance
-static int to_glb(char *input_path, char *output_path, FileType file_type,
-                  Standard_Real tol_linear, Standard_Real tol_angle,
+static int to_glb(const char *input_path, const char *output_path, FileType file_type,
+                  double tol_linear, double tol_angle,
                   bool tol_relative, bool merge_primitives, bool use_parallel,
                   bool include_brep = false, std::set<std::string> brep_types = {},
                   bool include_materials = false) {
 
   // Read input file
-  std::ifstream inFile(input_path, std::ios::binary);
+  std::ifstream inFile(input_path, std::ios::binary | std::ios::ate);
   if (!inFile) {
-    std::cerr << "Error: Cannot open input file" << std::endl;
+    std::cerr << "Error: Cannot open input file\n";
     return 1;
   }
-  std::string inputData((std::istreambuf_iterator<char>(inFile)),
-                        std::istreambuf_iterator<char>());
+
+  // Determine file size
+  std::streamsize fileSize = inFile.tellg();
+  inFile.seekg(0, std::ios::beg);
+
+  std::vector<char> inputData(fileSize);
+  if (!inFile.read(inputData.data(), fileSize)) {
+    std::cerr << "Error: Failed to read file\n";
+    return 1;
+  }
   inFile.close();
 
   // Use bytes-based API (no disk round-trips)
-  std::string glbData =
-      to_glb_bytes(inputData, file_type, tol_linear, tol_angle, tol_relative,
+  std::vector<char> glbData =
+      to_glb_bytes(inputData.data(), inputData.size(), file_type, tol_linear,
+                   tol_angle, tol_relative,
                    merge_primitives, use_parallel, include_brep, brep_types,
                    include_materials);
 
@@ -425,17 +438,18 @@ static int to_glb(char *input_path, char *output_path, FileType file_type,
 
 /// Transcode STEP file to OBJ file
 /// LEGACY: File-based conversion for backward compatibility only
-static int step_to_obj(char *input_path, char *output_path,
-                       Standard_Real tol_linear, Standard_Real tol_angle,
+static int step_to_obj(const std::string &input_path, const std::string &output_path,
+                       double tol_linear, double tol_angle,
                        bool tol_relative, bool use_parallel, bool use_colors) {
 
-  StepLoadResult loaded = loadStepFile(input_path, tol_linear, tol_angle,
-                                       tol_relative, use_parallel, use_colors);
+    StepLoadResult loaded = loadStepFile(input_path.c_str(),
+                                         tol_linear, tol_angle,
+                                         tol_relative, use_parallel, use_colors);
   if (!loaded.success) {
     return 1;
   }
 
-  RWObj_CafWriter cafWriter(output_path);
+  RWObj_CafWriter cafWriter(output_path.c_str());
 
   Message_ProgressRange progress;
   NCollection_IndexedDataMap<TCollection_AsciiString, TCollection_AsciiString>

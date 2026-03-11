@@ -1,20 +1,24 @@
 #include "convert.hpp"
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/set.h>
+
+#include <cstddef>
+#include <vector>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
-PYBIND11_MODULE(_core, m) {
-  m.doc() = R"pbdoc(
+NB_MODULE(_core, m) {
+  m.doc() = R"doc(
         cascadio._core
         --------------
         C++ core module for converting BREP files into GLB and OBJ.
-    )pbdoc";
+    )doc";
 
-  py::enum_<FileType>(m, "FileType")
+  nb::enum_<FileType>(m, "FileType")
       .value("UNSPECIFIED", FileType::UNSPECIFIED)
       .value("STEP", FileType::STEP)
       .value("IGES", FileType::IGES)
@@ -22,23 +26,26 @@ PYBIND11_MODULE(_core, m) {
 
   m.def(
       "to_glb_bytes",
-      [](py::bytes data, FileType file_type, Standard_Real tol_linear,
-         Standard_Real tol_angle, bool tol_relative, bool merge_primitives,
+      [](nb::bytes data, FileType file_type, double tol_linear,
+         double tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
-         bool include_materials) -> py::bytes {
+         bool include_materials) -> nb::bytes {
         // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
         if ((include_brep || include_materials) && !merge_primitives) {
           std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
           merge_primitives = true;
         }
-        std::string input_data = data;
-        std::string result =
-            to_glb_bytes(input_data, file_type, tol_linear, tol_angle,
+
+        const char* input_data = static_cast<const char*>(data.data());
+        size_t input_data_len = data.size();
+
+        std::vector<char> result =
+            to_glb_bytes(input_data, input_data_len, file_type, tol_linear, tol_angle,
                          tol_relative, merge_primitives, use_parallel,
                          include_brep, brep_types, include_materials);
-        return py::bytes(result);
+        return nb::bytes(result.data(), result.size());
       },
-      R"pbdoc(
+      R"doc(
 Convert BREP data (STEP or IGES bytes) to GLB data (bytes) without temp files.
 
 Parameters
@@ -69,19 +76,19 @@ Returns
 bytes
   The GLB file content as bytes, or empty bytes on error.
 
-)pbdoc",
-      py::arg("data"), py::arg("file_type") = FileType::STEP,
-      py::arg("tol_linear") = 0.01, py::arg("tol_angular") = 0.5,
-      py::arg("tol_relative") = false, py::arg("merge_primitives") = true,
-      py::arg("use_parallel") = true, py::arg("include_brep") = false,
-      py::arg("brep_types") = std::set<std::string>(),
-      py::arg("include_materials") = false);
+)doc",
+      nb::arg("data"), nb::arg("file_type") = FileType::STEP,
+      nb::arg("tol_linear") = 0.01, nb::arg("tol_angular") = 0.5,
+      nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
+      nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
+      nb::arg("brep_types") = std::set<std::string>(),
+      nb::arg("include_materials") = false);
 
   // Backward compatibility wrappers
   m.def(
       "step_to_glb",
-      [](char *input_path, char *output_path, Standard_Real tol_linear,
-         Standard_Real tol_angle, bool tol_relative, bool merge_primitives,
+      [](const std::string &input_path, const std::string &output_path, double tol_linear,
+         double tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
          bool include_materials) -> int {
         // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
@@ -89,11 +96,11 @@ bytes
           std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
           merge_primitives = true;
         }
-        return to_glb(input_path, output_path, FileType::STEP, tol_linear,
+        return to_glb(input_path.c_str(), output_path.c_str(), FileType::STEP, tol_linear,
                       tol_angle, tol_relative, merge_primitives, use_parallel,
                       include_brep, brep_types, include_materials);
       },
-      R"pbdoc(
+      R"doc(
 Convert a step file to a GLB file.
 
 Parameters
@@ -125,16 +132,16 @@ include_materials
   Materials include physical properties (name, density) and
   visual properties (colors, PBR metallic/roughness).
 
-)pbdoc",
-      py::arg("input_path"), py::arg("output_path"),
-      py::arg("tol_linear") = 0.01, py::arg("tol_angular") = 0.5,
-      py::arg("tol_relative") = false, py::arg("merge_primitives") = true,
-      py::arg("use_parallel") = true, py::arg("include_brep") = false,
-      py::arg("brep_types") = std::set<std::string>(),
-      py::arg("include_materials") = false);
+)doc",
+      nb::arg("input_path"), nb::arg("output_path"),
+      nb::arg("tol_linear") = 0.01, nb::arg("tol_angular") = 0.5,
+      nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
+      nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
+      nb::arg("brep_types") = std::set<std::string>(),
+      nb::arg("include_materials") = false);
 
   m.def("step_to_obj", &step_to_obj,
-        R"pbdoc(
+        R"doc(
 Convert a step file to a OBJ ( and if applicable MTL ) file.
 
 Parameters
@@ -157,11 +164,11 @@ use_colors
   If input STEP doesn't use color/material then no MTL will be exported,
   regardless of 'use_colors'.
 
-)pbdoc",
-        py::arg("input_path"), py::arg("output_path"),
-        py::arg("tol_linear") = 0.01, py::arg("tol_angular") = 0.5,
-        py::arg("tol_relative") = false, py::arg("use_parallel") = true,
-        py::arg("use_colors") = true);
+)doc",
+        nb::arg("input_path"), nb::arg("output_path"),
+        nb::arg("tol_linear") = 0.01, nb::arg("tol_angular") = 0.5,
+        nb::arg("tol_relative") = false, nb::arg("use_parallel") = true,
+        nb::arg("use_colors") = true);
 
 #ifdef VERSION_INFO
   m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
