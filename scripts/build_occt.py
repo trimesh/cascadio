@@ -123,10 +123,15 @@ def apply_patches(occt_src, patches_dir):
             print(f"  {patch_name}: already applied")
             continue
 
-        # Apply the patch (patch handles line ending conversion automatically)
+        # Apply the patch (patch handles line ending conversion automatically).
+        # --fuzz=0 forbids fuzzy context matching: if the surrounding context has
+        # drifted (e.g. after an OCCT bump) patch must fail loudly rather than
+        # silently guessing where a hunk belongs. Line-number offsets are still
+        # allowed since those are benign. check=True turns any reject into a hard
+        # failure so the wheel build aborts instead of shipping a bad patch.
         print(f"  {patch_name}: applying...")
         subprocess.run(
-            ["patch", "-p1", "-i", abs_patch_path],
+            ["patch", "-p1", "--fuzz=0", "-i", abs_patch_path],
             cwd=occt_src,
             check=True,
         )

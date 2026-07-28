@@ -15,7 +15,9 @@ COLORS = {
     type(None): [128, 128, 128, 255],
 }
 
-glb = cascadio.load(open("../../models/featuretype.STEP", "rb").read(), include_brep=True)
+glb = cascadio.load(
+    open("../../models/featuretype.STEP", "rb").read(), include_brep=True
+)
 scene = trimesh.load_scene(trimesh.util.wrap_as_stream(glb), file_type="glb")
 for mesh in scene.geometry.values():
     prims = mesh.metadata.get("cascadio", {}).get("brep_primitives", [])
