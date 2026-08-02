@@ -154,11 +154,13 @@ static bool exportToGlbFile(
     bool merge_primitives, bool use_parallel,
     std::vector<FaceTriangleData> *faceData = nullptr,
     RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
-    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
+    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr,
+    RWMesh_NameFormat node_name_format = RWMesh_NameFormat_InstanceOrProduct) {
   RWGltf_CafWriter cafWriter(output_path, true);
   cafWriter.SetMergeFaces(merge_primitives);
   cafWriter.SetParallel(use_parallel);
   cafWriter.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
+  cafWriter.SetNodeNameFormat(node_name_format);
 
   // Set callback to collect face data if requested
   if (faceData != nullptr) {
@@ -191,7 +193,8 @@ static std::vector<char> exportToGlbBytes(
     Handle(TDocStd_Document) doc, bool merge_primitives, bool use_parallel,
     std::vector<FaceTriangleData> *faceData = nullptr,
     RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
-    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
+    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr,
+    RWMesh_NameFormat node_name_format = RWMesh_NameFormat_InstanceOrProduct) {
   // OCCT's RWGltf_CafWriter requires a file path. With our memfd patch,
   // both the output and internal .bin.tmp use memfd on Linux - zero filesystem
   // writes. Falls back to temp files on other platforms.
@@ -204,7 +207,7 @@ static std::vector<char> exportToGlbBytes(
 
   // Export to the handle's path
   if (!exportToGlbFile(doc, handle.path(), merge_primitives, use_parallel,
-                       faceData, jsonCallback, binaryCallback)) {
+                       faceData, jsonCallback, binaryCallback, node_name_format)) {
     return {};
   }
 
@@ -226,7 +229,8 @@ std::vector<char> to_glb_bytes(const char *data, size_t data_len,
                                bool merge_primitives, bool use_parallel,
                                bool include_brep = false,
                                std::set<std::string> brep_types = {},
-                               bool include_materials = false) {
+                               bool include_materials = false,
+                               RWMesh_NameFormat node_name_format = RWMesh_NameFormat_InstanceOrProduct) {
 
   LoadResult loaded = loadBytes(data, data_len, file_type, tol_linear, tol_angle,
                                 tol_relative, use_parallel);
@@ -367,8 +371,8 @@ std::vector<char> to_glb_bytes(const char *data, size_t data_len,
   }
 
   std::vector<char> glbData =
-      exportToGlbBytes(loaded.doc, merge_primitives, use_parallel, faceDataPtr,
-                       jsonCallback, binaryCallback);
+      exportToGlbBytes(loaded.doc, merge_primitives, use_parallel, 
+                       faceDataPtr, jsonCallback, binaryCallback, node_name_format);
   closeDocument(loaded.doc);
 
   if (glbData.empty()) {
@@ -393,7 +397,7 @@ static int to_glb(const char *input_path, const char *output_path, FileType file
                   double tol_linear, double tol_angle,
                   bool tol_relative, bool merge_primitives, bool use_parallel,
                   bool include_brep = false, std::set<std::string> brep_types = {},
-                  bool include_materials = false) {
+                  bool include_materials = false, RWMesh_NameFormat node_name_format = RWMesh_NameFormat_InstanceOrProduct) {
 
   // Read input file
   std::ifstream inFile(input_path, std::ios::binary | std::ios::ate);
@@ -418,7 +422,7 @@ static int to_glb(const char *input_path, const char *output_path, FileType file
       to_glb_bytes(inputData.data(), inputData.size(), file_type, tol_linear,
                    tol_angle, tol_relative,
                    merge_primitives, use_parallel, include_brep, brep_types,
-                   include_materials);
+                   include_materials, node_name_format);
 
   if (glbData.empty()) {
     return 1;
