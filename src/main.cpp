@@ -2,6 +2,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/set.h>
+#include <nanobind/stl/vector.h>
 
 #include <cstddef>
 #include <vector>
@@ -29,7 +30,8 @@ NB_MODULE(_core, m) {
       [](nb::bytes data, FileType file_type, double tol_linear,
          double tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
-         bool include_materials) -> nb::bytes {
+         bool include_materials, bool include_edges,
+         std::vector<float> edge_color) -> nb::bytes {
         // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
         if ((include_brep || include_materials) && !merge_primitives) {
           std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
@@ -42,7 +44,8 @@ NB_MODULE(_core, m) {
         std::vector<char> result =
             to_glb_bytes(input_data, input_data_len, file_type, tol_linear, tol_angle,
                          tol_relative, merge_primitives, use_parallel,
-                         include_brep, brep_types, include_materials);
+                         include_brep, brep_types, include_materials,
+                         include_edges, edge_color);
         return nb::bytes(result.data(), result.size());
       },
       R"doc(
@@ -82,7 +85,9 @@ bytes
       nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
       nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
       nb::arg("brep_types") = std::set<std::string>(),
-      nb::arg("include_materials") = false);
+      nb::arg("include_materials") = false,
+      nb::arg("include_edges") = false,
+      nb::arg("edge_color") = std::vector<float>{0.25f, 0.25f, 0.25f, 1.0f});
 
   // Backward compatibility wrappers
   m.def(
@@ -90,7 +95,8 @@ bytes
       [](const std::string &input_path, const std::string &output_path, double tol_linear,
          double tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
-         bool include_materials) -> int {
+         bool include_materials, bool include_edges,
+         std::vector<float> edge_color) -> int {
         // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
         if ((include_brep || include_materials) && !merge_primitives) {
           std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
@@ -98,7 +104,8 @@ bytes
         }
         return to_glb(input_path.c_str(), output_path.c_str(), FileType::STEP, tol_linear,
                       tol_angle, tol_relative, merge_primitives, use_parallel,
-                      include_brep, brep_types, include_materials);
+                      include_brep, brep_types, include_materials, include_edges,
+                      edge_color);
       },
       R"doc(
 Convert a step file to a GLB file.
@@ -138,7 +145,9 @@ include_materials
       nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
       nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
       nb::arg("brep_types") = std::set<std::string>(),
-      nb::arg("include_materials") = false);
+      nb::arg("include_materials") = false,
+      nb::arg("include_edges") = false,
+      nb::arg("edge_color") = std::vector<float>{0.25f, 0.25f, 0.25f, 1.0f});
 
   m.def("step_to_obj", &step_to_obj,
         R"doc(

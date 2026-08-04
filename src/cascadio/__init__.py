@@ -5,7 +5,7 @@ This module provides functions to convert BREP files (STEP, IGES)
 to triangulated mesh formats (GLB, OBJ).
 """
 
-from typing import Literal, Optional, Set
+from typing import Literal, Optional, Set, Tuple
 
 # Import the C extension functions and enums
 from cascadio._core import (
@@ -42,6 +42,8 @@ def load(
     include_brep: bool = False,
     brep_types: Optional[Set[BrepType]] = None,
     include_materials: bool = False,
+    include_edges: bool = False,
+    edge_color: Tuple[float, float, float, float] = (0.25, 0.25, 0.25, 1.0),
 ) -> bytes:
     """
     Convert BREP data (STEP or IGES) to GLB format.
@@ -73,6 +75,11 @@ def load(
         Valid values: "plane", "cylinder", "cone", "sphere", "torus".
     include_materials : bool, optional
         Include material data in GLB asset.extras.materials. Default is False.
+    include_edges : bool, optional
+        Include edge lines in GLB output. Default is False.
+    edge_color : tuple of 4 floats, optional
+        RGBA color for edge lines when include_edges=True.
+        Each value in [0, 1]. Default is (0.25, 0.25, 0.25, 1.0) (gray).
 
     Returns
     -------
@@ -92,6 +99,9 @@ def load(
     >>> with open("model.igs", "rb") as f:
     ...     iges_data = f.read()
     >>> glb_data = cascadio.load(iges_data, file_type="iges")
+
+    >>> # Load with edges and custom color
+    >>> glb_data = cascadio.load(step_data, include_edges=True, edge_color=(0.25, 0.25, 0.25, 1.0))
     """
     # Convert string file_type to enum
     file_type_lower = file_type.lower()
@@ -116,6 +126,8 @@ def load(
         include_brep=include_brep,
         brep_types=brep_types,
         include_materials=include_materials,
+        include_edges=include_edges,
+        edge_color=edge_color,
     )
 
 

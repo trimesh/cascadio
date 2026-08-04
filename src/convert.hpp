@@ -1,5 +1,6 @@
 #pragma once
 
+#include "edges.hpp"
 #include "filehandle.hpp"
 #include "iges.hpp"
 #include "materials.hpp"
@@ -8,10 +9,15 @@
 
 #include <Message_ProgressRange.hxx>
 #include <NCollection_IndexedDataMap.hxx>
+#include <NCollection_Sequence.hxx>
 #include <TCollection_AsciiString.hxx>
+#include <TDF_Label.hxx>
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFPrs_DocumentExplorer.hxx>
+#include <XCAFPrs_DocumentNode.hxx>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <map>
@@ -29,6 +35,8 @@
 #include <RWGltf_CafWriter.hxx>
 // OBJ Write methods
 #include <RWObj_CafWriter.hxx>
+// Topology explorer for geometry detection
+#include <TopExp_Explorer.hxx>
 
 // ============================================================================
 // File Type Enum
@@ -220,13 +228,15 @@ static std::vector<char> exportToGlbBytes(
 /// Transcode BREP bytes (STEP or IGES) to GLB bytes
 /// This is the main API - one-shot conversion with no disk round-trips
 std::vector<char> to_glb_bytes(const char *data, size_t data_len,
-                               FileType file_type,
-                               double tol_linear,
-                               double tol_angle, bool tol_relative,
-                               bool merge_primitives, bool use_parallel,
-                               bool include_brep = false,
-                               std::set<std::string> brep_types = {},
-                               bool include_materials = false) {
+                                FileType file_type,
+                                double tol_linear,
+                                double tol_angle, bool tol_relative,
+                                bool merge_primitives, bool use_parallel,
+                                bool include_brep = false,
+                                std::set<std::string> brep_types = {},
+                                bool include_materials = false,
+                                bool include_edges = false,
+                                std::vector<float> edgeColor = {0.25f, 0.25f, 0.25f, 1.0f}) {
 
   LoadResult loaded = loadBytes(data, data_len, file_type, tol_linear, tol_angle,
                                 tol_relative, use_parallel);
@@ -236,6 +246,56 @@ std::vector<char> to_glb_bytes(const char *data, size_t data_len,
 
   // Get length unit (scale factor to meters for glTF output)
   double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
+
+  // Extract edges data per-shape using the XCAF document explorer
+  // (same iteration order as RWGltf_CafWriter's myBinDataMap).
+  // Edges use shapes without location for local-coordinate vertex data.
+  std::vector<EdgeData> perShapeEdges;
+  if (include_edges) {
+    Handle(XCAFDoc_ShapeTool) aShapeTool = XCAFDoc_DocumentTool::ShapeTool(loaded.doc->Main());
+    NCollection_Sequence<TDF_Label> aRoots;
+    aShapeTool->GetFreeShapes(aRoots);
+
+    std::vector<TopoDS_Shape> uniqueShapes;
+    for (XCAFPrs_DocumentExplorer aDocExplorer(loaded.doc, aRoots,
+         XCAFPrs_DocumentExplorerFlags_OnlyLeafNodes);
+         aDocExplorer.More(); aDocExplorer.Next())
+    {
+      const XCAFPrs_DocumentNode& aDocNode = aDocExplorer.Current();
+      TopoDS_Shape aShape = XCAFDoc_ShapeTool::GetShape(aDocNode.RefLabel);
+      if (aShape.IsNull()) continue;
+
+      TopoDS_Shape localShape = aShape.Located(TopLoc_Location());
+
+      // Skip shapes without geometry data (matches RWGltf_CafWriter's filter)
+      TopExp_Explorer faceExp(localShape, TopAbs_FACE);
+      if (!faceExp.More()) continue;
+
+      // Deduplicate by TShape handle — instanced parts share edge data
+      bool seen = false;
+      for (const auto& existing : uniqueShapes) {
+        if (existing.IsPartner(localShape)) { seen = true; break; }
+      }
+      if (seen) continue;
+      uniqueShapes.push_back(localShape);
+    }
+
+    for (const auto& shape : uniqueShapes) {
+      Bnd_Box bbox;
+      BRepBndLib::Add(shape, bbox);
+      double diag = 0;
+      if (!bbox.IsVoid()) {
+        double xmin, ymin, zmin, xmax, ymax, zmax;
+        bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+        double dx = xmax - xmin;
+        double dy = ymax - ymin;
+        double dz = zmax - zmin;
+        diag = std::sqrt(dx * dx + dy * dy + dz * dz);
+      }
+      perShapeEdges.push_back(extractEdges(shape, tol_linear, tol_angle,
+                                           tol_relative, diag, lengthUnit));
+    }
+  }
 
   // Extract materials only if needed
   rapidjson::Document matDoc;
@@ -298,72 +358,127 @@ std::vector<char> to_glb_bytes(const char *data, size_t data_len,
     }
   };
 
+  // Check if any shape has edges
+  bool hasEdges = false;
+  for (const auto &e : perShapeEdges) {
+    if (!e.vertices.empty()) { hasEdges = true; break; }
+  }
+
   // Setup callbacks for direct injection (avoids GLB roundtrip)
   RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr;
   RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr;
 
-  if (include_brep || include_materials) {
-    if (include_brep && faceDataPtr) {
-      // BREP extension: inject face data and optional materials
-      jsonCallback = [&](const std::string &jsonStr) -> std::string {
-        // Early exit if no face data collected
+  if (include_brep || include_materials || hasEdges) {
+    // Combined callback that handles BREP + materials + edges
+    jsonCallback = [&](const std::string &jsonStr) -> std::string {
+      std::string result = jsonStr;
+
+      // Step 1: BREP/materials injection (preserves buffer state)
+      if (include_brep && faceDataPtr) {
         if (faceData.empty()) {
-          // Still inject materials if requested
           if (materialsPtr) {
-            return injectBrepExtensionIntoJson(jsonStr, {}, 0, 0, brep_types,
-                                               materialsPtr, lengthUnit);
+            result = injectBrepExtensionIntoJson(result, {}, 0, 0, brep_types,
+                                                 materialsPtr, lengthUnit);
           }
-          return jsonStr;
+        } else {
+          buildFaceIndices();
+
+          rapidjson::Document doc;
+          doc.Parse(result.c_str(), result.size());
+          uint32_t existingBinLength = 0;
+          if (doc.HasMember("buffers") && doc["buffers"].IsArray() &&
+              doc["buffers"].Size() > 0 &&
+              doc["buffers"][0].HasMember("byteLength")) {
+            existingBinLength = doc["buffers"][0]["byteLength"].GetUint();
+          }
+
+          uint32_t faceIndicesBytes =
+              static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
+          result = injectBrepExtensionIntoJson(result, faceData,
+                                               existingBinLength,
+                                               faceIndicesBytes, brep_types,
+                                               materialsPtr, lengthUnit);
         }
+      } else if (include_materials && materialsPtr) {
+        result = injectBrepExtensionIntoJson(result, {}, 0, 0, {},
+                                             materialsPtr, lengthUnit);
+      }
 
-        buildFaceIndices(); // Build face->triangle mapping only if we have data
-
-        // Parse JSON to get existing binary chunk size
+      // Step 2: Edges injection — per-mesh LINES primitives
+      if (hasEdges) {
         rapidjson::Document doc;
-        doc.Parse(jsonStr.c_str(), jsonStr.size());
-        if (doc.HasParseError()) {
-          std::cerr << "Warning: Failed to parse JSON in callback" << std::endl;
-          return jsonStr;
-        }
-
-        uint32_t existingBinLength = 0;
+        doc.Parse(result.c_str(), result.size());
+        uint32_t currentLen = 0;
         if (doc.HasMember("buffers") && doc["buffers"].IsArray() &&
             doc["buffers"].Size() > 0 &&
             doc["buffers"][0].HasMember("byteLength")) {
-          existingBinLength = doc["buffers"][0]["byteLength"].GetUint();
+          currentLen = doc["buffers"][0]["byteLength"].GetUint();
         }
 
-        uint32_t faceIndicesBytes =
-            static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
-        return injectBrepExtensionIntoJson(jsonStr, faceData, existingBinLength,
-                                           faceIndicesBytes, brep_types,
-                                           materialsPtr, lengthUnit);
-      };
+        // Build per-shape vectors for injectEdgeLinesIntoJson
+        std::vector<uint32_t> sVertBytes, sIdxBytes;
+        std::vector<float> sMinX, sMinY, sMinZ, sMaxX, sMaxY, sMaxZ;
+        for (const auto &e : perShapeEdges) {
+          sVertBytes.push_back(static_cast<uint32_t>(e.vertices.size() * sizeof(float)));
+          sIdxBytes.push_back(static_cast<uint32_t>(e.indices.size() * sizeof(uint32_t)));
+          sMinX.push_back(e.minX); sMinY.push_back(e.minY); sMinZ.push_back(e.minZ);
+          sMaxX.push_back(e.maxX); sMaxY.push_back(e.maxY); sMaxZ.push_back(e.maxZ);
+        }
+        result = injectEdgeLinesIntoJson(result, currentLen,
+                                         sVertBytes, sIdxBytes,
+                                         sMinX, sMinY, sMinZ,
+                                         sMaxX, sMaxY, sMaxZ,
+                                         edgeColor);
+      }
 
-      // Binary callback: append faceIndices array to GLB binary chunk
-      binaryCallback = [&](std::ostream &stream,
-                           uint32_t currentBinLength) -> uint32_t {
+      return result;
+    };
+
+    // Combined binary callback
+    binaryCallback = [&](std::ostream &stream,
+                         uint32_t currentBinLength) -> uint32_t {
+      uint32_t total = 0;
+
+      // Write BREP faceIndices if present
+      if (include_brep && !faceIndices.empty()) {
         uint32_t bytesToWrite =
             static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
         stream.write(reinterpret_cast<const char *>(faceIndices.data()),
                      bytesToWrite);
-
-        // Verify write succeeded
         if (!stream.good()) {
           std::cerr << "Error: Failed to write faceIndices to binary chunk"
                     << std::endl;
           return 0;
         }
+        total += bytesToWrite;
+      }
 
-        return bytesToWrite;
-      };
-    } else if (include_materials && materialsPtr) {
-      // Materials-only: inject into mesh.extras.cascadio without BREP extension
-      jsonCallback = [&](const std::string &jsonStr) -> std::string {
-        return injectBrepExtensionIntoJson(jsonStr, {}, 0, 0, {}, materialsPtr,
-                                           lengthUnit);
-      };
-    }
+      // Write per-shape edge data (all vertices, then all indices)
+      if (hasEdges) {
+        for (const auto &e : perShapeEdges) {
+          if (e.vertices.empty()) continue;
+          uint32_t vb = static_cast<uint32_t>(e.vertices.size() * sizeof(float));
+          stream.write(reinterpret_cast<const char *>(e.vertices.data()), vb);
+          if (!stream.good()) {
+            std::cerr << "Error: Failed to write edge vertices" << std::endl;
+            return 0;
+          }
+          total += vb;
+        }
+        for (const auto &e : perShapeEdges) {
+          if (e.indices.empty()) continue;
+          uint32_t ib = static_cast<uint32_t>(e.indices.size() * sizeof(uint32_t));
+          stream.write(reinterpret_cast<const char *>(e.indices.data()), ib);
+          if (!stream.good()) {
+            std::cerr << "Error: Failed to write edge indices" << std::endl;
+            return 0;
+          }
+          total += ib;
+        }
+      }
+
+      return total;
+    };
   }
 
   std::vector<char> glbData =
@@ -393,7 +508,8 @@ static int to_glb(const char *input_path, const char *output_path, FileType file
                   double tol_linear, double tol_angle,
                   bool tol_relative, bool merge_primitives, bool use_parallel,
                   bool include_brep = false, std::set<std::string> brep_types = {},
-                  bool include_materials = false) {
+                  bool include_materials = false, bool include_edges = false,
+                  std::vector<float> edgeColor = {0.25f, 0.25f, 0.25f, 1.0f}) {
 
   // Read input file
   std::ifstream inFile(input_path, std::ios::binary | std::ios::ate);
@@ -418,7 +534,8 @@ static int to_glb(const char *input_path, const char *output_path, FileType file
       to_glb_bytes(inputData.data(), inputData.size(), file_type, tol_linear,
                    tol_angle, tol_relative,
                    merge_primitives, use_parallel, include_brep, brep_types,
-                   include_materials);
+                   include_materials, include_edges,
+                   edgeColor);
 
   if (glbData.empty()) {
     return 1;
