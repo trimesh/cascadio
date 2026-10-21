@@ -65,6 +65,7 @@ static StepLoadResult loadStepFile(const char *input_path,
   stepReader.SetColorMode(use_colors);
   stepReader.SetNameMode(true);
   stepReader.SetLayerMode(true);
+  stepReader.SetExternRefsMode(false);
 
   if (!stepReader.Transfer(result.doc)) {
     std::cerr << "Error: Failed to transfer STEP file \"" << input_path << "\""
@@ -115,6 +116,7 @@ static StepLoadResult loadStepBytes(const char *data, size_t data_len,
   stepReader.SetColorMode(use_colors);
   stepReader.SetNameMode(true);
   stepReader.SetLayerMode(true);
+  stepReader.SetExternRefsMode(false);
 
   if (!stepReader.Transfer(result.doc)) {
     std::cerr << "Error: Failed to transfer STEP data" << std::endl;

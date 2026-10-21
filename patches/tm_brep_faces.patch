@@ -307,3 +307,83 @@ index 6f8fea3..5f5b884 100644
  };
  
  #endif // _RWGltf_CafWriter_HeaderFiler
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+index 1262ea9..4c2daa7 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -285,7 +285,8 @@ STEPCAFControl_Reader::STEPCAFControl_Reader()
+       mySHUOMode(false),
+       myGDTMode(true),
+       myMatMode(true),
+-      myViewMode(true)
++      myViewMode(true),
++      myExternRefsMode(true)
+ {
+   STEPCAFControl_Controller::Init();
+   if (!myReader.WS().IsNull())
+@@ -307,7 +308,8 @@ STEPCAFControl_Reader::STEPCAFControl_Reader(const occ::handle<XSControl_WorkSes
+       mySHUOMode(false),
+       myGDTMode(true),
+       myMatMode(true),
+-      myViewMode(true)
++      myViewMode(true),
++      myExternRefsMode(true)
+ {
+   STEPCAFControl_Controller::Init();
+   Init(WS, scratch);
+@@ -650,7 +652,10 @@ bool STEPCAFControl_Reader::Transfer(STEPControl_Reader&                  reader
+   // Load external references (only for relevant SDRs)
+   // and fill map SDR -> extern file
+   STEPConstruct_ExternRefs ExtRefs(reader.WS());
+-  ExtRefs.LoadExternRefs();
++  if (myExternRefsMode)
++  {
++    ExtRefs.LoadExternRefs();
++  }
+   Message_ProgressScope aPSE(aPSRoot.Next(), nullptr, ExtRefs.NbExternRefs());
+   for (i = 1; i <= ExtRefs.NbExternRefs() && aPSE.More(); i++)
+   {
+@@ -6545,6 +6550,20 @@ bool STEPCAFControl_Reader::GetViewMode() const
+   return myViewMode;
+ }
+ 
++//=================================================================================================
++
++void STEPCAFControl_Reader::SetExternRefsMode(const bool theMode)
++{
++  myExternRefsMode = theMode;
++}
++
++//=================================================================================================
++
++bool STEPCAFControl_Reader::GetExternRefsMode() const
++{
++  return myExternRefsMode;
++}
++
+ //=============================================================================
+ 
+ void STEPCAFControl_Reader::SetShapeFixParameters(
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+index 7cfdecd..eb82737 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+@@ -223,6 +223,10 @@ public:
+   //! Get View mode
+   Standard_EXPORT bool GetViewMode() const;
+ 
++  Standard_EXPORT void SetExternRefsMode(const bool theMode);
++
++  Standard_EXPORT bool GetExternRefsMode() const;
++
+   const NCollection_DataMap<TopoDS_Shape, TDF_Label, TopTools_ShapeMapHasher>& GetShapeLabelMap()
+     const
+   {
+@@ -528,6 +532,7 @@ private:
+   bool                                                            myGDTMode;
+   bool                                                            myMatMode;
+   bool                                                            myViewMode;
++  bool                                                            myExternRefsMode;
+   NCollection_DataMap<occ::handle<Standard_Transient>, TDF_Label> myGDTMap;
+ };
+ 

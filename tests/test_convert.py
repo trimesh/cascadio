@@ -616,5 +616,15 @@ def test_cylinder_vertices_on_surface(brep_mesh):
     assert_brep_surfaces(brep_mesh)
 
 
+@pytest.mark.parametrize(
+    "tol_linear,tol_angular",
+    [(0.0, 0.5), (-0.1, 0.5), (float("nan"), 0.5), (float("inf"), 0.5), (0.1, 0.0)],
+)
+def test_invalid_tolerance(tol_linear, tol_angular):
+    step_data = (MODELS_DIR / "featuretype.STEP").read_bytes()
+    with pytest.raises(ValueError):
+        cascadio.load(step_data, tol_linear=tol_linear, tol_angular=tol_angular)
+
+
 if __name__ == "__main__":
     test_multibody()

@@ -12,10 +12,12 @@
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <cstddef>
 
@@ -48,6 +50,15 @@ struct LoadResult {
 
   LoadResult() : success(false) {}
 };
+
+static void checkTolerances(double tol_linear, double tol_angle) {
+  if (!std::isfinite(tol_linear) || tol_linear <= 0.0) {
+    throw std::invalid_argument("tol_linear must be finite and positive");
+  }
+  if (!std::isfinite(tol_angle) || tol_angle <= 0.0) {
+    throw std::invalid_argument("tol_angular must be finite and positive");
+  }
+}
 
 /// Load a BREP file (STEP or IGES) from disk
 static LoadResult loadFile(const char *input_path, FileType file_type,
@@ -227,6 +238,7 @@ std::vector<char> to_glb_bytes(const char *data, size_t data_len,
                                bool include_brep = false,
                                std::set<std::string> brep_types = {},
                                bool include_materials = false) {
+  checkTolerances(tol_linear, tol_angle);
 
   LoadResult loaded = loadBytes(data, data_len, file_type, tol_linear, tol_angle,
                                 tol_relative, use_parallel);
@@ -441,6 +453,7 @@ static int to_glb(const char *input_path, const char *output_path, FileType file
 static int step_to_obj(const std::string &input_path, const std::string &output_path,
                        double tol_linear, double tol_angle,
                        bool tol_relative, bool use_parallel, bool use_colors) {
+  checkTolerances(tol_linear, tol_angle);
 
     StepLoadResult loaded = loadStepFile(input_path.c_str(),
                                          tol_linear, tol_angle,

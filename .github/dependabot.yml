@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # keep the SHA-pinned actions in `.github/workflows` current
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # wait a week before proposing a new release so a compromised
+    # upstream tag has time to be noticed and yanked
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
