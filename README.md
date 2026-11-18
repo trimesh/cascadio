@@ -55,33 +55,6 @@ uv pip install -e .
 pytest tests/
 ```
 
-#### Patching OCCT
-
-When modifying OpenCASCADE source files:
-
-```bash
-# 1. Start with clean OCCT (reset any local changes)
-git -C upstream/OCCT checkout -- .
-
-# 2. Build OCCT (applies existing patches from patches/)
-uv run python scripts/build_occt.py
-
-# 3. Make your changes to OCCT source files
-#    Edit files in upstream/OCCT/src/...
-
-# 4. Regenerate the patch file from your changes
-uv run python scripts/build_occt.py --build-patch
-
-# 5. Rebuild OCCT with your changes
-uv run python scripts/build_occt.py
-
-# 6. Source env and test
-source occt_cache/env.sh
-uv pip install -e .
-pytest tests/
-```
-
-
 ### Future Work
 
 Pull requests welcome! 

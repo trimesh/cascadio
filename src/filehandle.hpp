@@ -85,6 +85,9 @@ public:
   /// Check if handle was created successfully
   bool valid() const { return valid_; }
 
+  /// True if backed by memfd rather than a file on disk
+  bool is_memfd() const { return is_memfd_; }
+
   /// Get file path for OCCT APIs
   const char *path() const { return path_.c_str(); }
 

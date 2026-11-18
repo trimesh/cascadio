@@ -1,4 +1,7 @@
 #include "convert.hpp"
+#include <Message.hxx>
+#include <Message_Messenger.hxx>
+#include <Message_Printer.hxx>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/set.h>
@@ -17,6 +20,10 @@ NB_MODULE(_core, m) {
         --------------
         C++ core module for converting BREP files into GLB and OBJ.
     )doc";
+
+  // A library should not write to the terminal: drop OCCT's default
+  // console printer. Failures are reported through return values.
+  Message::DefaultMessenger()->RemovePrinters(STANDARD_TYPE(Message_Printer));
 
   nb::enum_<FileType>(m, "FileType")
       .value("UNSPECIFIED", FileType::UNSPECIFIED)

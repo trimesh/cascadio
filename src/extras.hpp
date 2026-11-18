@@ -1,5 +1,8 @@
 #pragma once
 
+#include "glb.hpp"
+#include "gltf_writer.hpp"
+
 #include <Quantity_Color.hxx>
 #include <Quantity_ColorRGBA.hxx>
 #include <TopoDS_Face.hxx>
@@ -8,8 +11,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <fstream>
-#include <iostream>
 #include <map>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -29,20 +30,6 @@ constexpr uint32_t GLTF_ALIGNMENT = 4;
 inline uint32_t alignTo(uint32_t value, uint32_t alignment = GLTF_ALIGNMENT) {
   return (value + (alignment - 1)) & ~(alignment - 1);
 }
-
-// ============================================================================
-// Face Data for BREP Extension
-// ============================================================================
-
-/// Data collected for each BREP face during GLB export via callback.
-/// One entry per TopoDS_Face processed.
-struct FaceTriangleData {
-  int meshIndex;    ///< Unique shape index (0-based), maps to underlying geometry
-  int faceIndex;    ///< Face index within this shape (0-based, resets per shape)
-  int triStart;     ///< First triangle index in shape's triangle list (0-based)
-  int triCount;     ///< Number of triangles generated for this face (>0)
-  TopoDS_Face face; ///< Original BREP face for primitive extraction
-};
 
 // ============================================================================
 // JSON Helper Functions
@@ -87,29 +74,6 @@ static void addBounds(rapidjson::Value &obj, const char *name, double min,
   obj.AddMember(rapidjson::StringRef(name), arr, alloc);
 }
 
-/// Check if a JSON array contains a specific extension name
-static bool hasExtension(const rapidjson::Value &arr, const char *name) {
-  if (!arr.IsArray()) return false;
-  for (const auto &v : arr.GetArray()) {
-    if (v.IsString() && std::strcmp(v.GetString(), name) == 0) return true;
-  }
-  return false;
-}
-
-/// Safely get pointer to first primitive of a mesh, or nullptr if unavailable
-static const rapidjson::Value* getFirstPrimitive(const rapidjson::Value &mesh) {
-  if (!mesh.HasMember("primitives") || !mesh["primitives"].IsArray() ||
-      mesh["primitives"].Size() == 0) {
-    return nullptr;
-  }
-  return &mesh["primitives"][0];
-}
-
-// Forward declaration - implemented in primitives.hpp
-static rapidjson::Value extractAllPrimitives(
-    const TopoDS_Shape &shape, rapidjson::Document::AllocatorType &alloc,
-    const std::set<std::string> &allowedTypes, double lengthUnit);
-
 // Forward declaration - defined in primitives.hpp
 static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
                                  rapidjson::Value &facesArray,
@@ -117,234 +81,147 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
                                  const std::set<std::string> &allowedTypes,
                                  double lengthUnit);
 
-/// Modify JSON to add BREP extension metadata (for use with JSON callback)
-/// Takes JSON string, face data, and pre-calculated faceIndices binary info
-/// Returns modified JSON string
-static std::string injectBrepExtensionIntoJson(
-    const std::string &jsonString,
-    const std::vector<FaceTriangleData> &faceData, uint32_t existingBinLength,
-    uint32_t faceIndicesBytes, const std::set<std::string> &allowedTypes,
-    const rapidjson::Value *materials, double lengthUnit) {
+/// Add the TM_brep_faces extension and/or material metadata to a finished GLB.
+///
+/// For each index accessor the writer recorded faces for, this appends a
+/// uint32 array (one face index per triangle) to the binary buffer and attaches
+/// `{faceIndices, faces}` to every primitive that uses that accessor.
+static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
+                                       const FacesByAccessor &faces,
+                                       const std::set<std::string> &allowedTypes,
+                                       const rapidjson::Value *materials,
+                                       double lengthUnit) {
+  static const char *EXTENSION_NAME = "TM_brep_faces";
 
-  // Parse JSON
+  Glb glb = Glb::parse(glbData);
   rapidjson::Document doc;
-  doc.Parse(jsonString.c_str(), jsonString.size());
-  if (doc.HasParseError()) {
-    std::cerr << "Error: Failed to parse JSON for injection" << std::endl;
-    return jsonString;
+  doc.Parse(glb.json.data(), glb.json.size());
+  if (doc.HasParseError() || !doc.IsObject()) {
+    throw std::runtime_error("GLB contains invalid JSON");
   }
+  auto &alloc = doc.GetAllocator();
+  auto isArray = [&doc](const char *key) {
+    return doc.HasMember(key) && doc[key].IsArray();
+  };
+  const bool hasMeshes = isArray("meshes") && doc["meshes"].Size() > 0;
 
-  const char *EXTENSION_NAME = "TM_brep_faces";
-  const bool hasBrepData = !faceData.empty() && faceIndicesBytes > 0;
+  if (!faces.empty() && hasMeshes && isArray("accessors") &&
+      isArray("bufferViews") && isArray("buffers") &&
+      doc["buffers"].Size() > 0) {
+    glb.bin.resize(alignTo(static_cast<uint32_t>(glb.bin.size())));
 
-  // Only modify buffers/accessors/bufferViews if we have BREP data
-  if (hasBrepData) {
-    // Group face data by meshIndex (which corresponds to unique shapes)
-    std::map<int, std::vector<FaceTriangleData>> facesByUniqueShape;
-    for (const auto &fd : faceData) {
-      facesByUniqueShape[fd.meshIndex].push_back(fd);
-    }
-
-    // Calculate per-unique-shape triangle counts and binary offsets
-    // Binary layout: shape0 faceIndices | shape1 faceIndices | ...
-    struct ShapeBinaryInfo {
-      uint32_t triangleCount;
-      uint32_t byteOffset;  // relative to start of faceIndices binary
-      uint32_t byteLength;
-    };
-    std::map<int, ShapeBinaryInfo> shapeBinaryInfo;
-    uint32_t currentOffset = 0;
-
-    for (const auto &[meshIdx, faces] : facesByUniqueShape) {
-      // Find max triangle index for this mesh
-      int maxTriangle = 0;
-      for (const auto &fd : faces) {
-        maxTriangle = std::max(maxTriangle, fd.triStart + fd.triCount);
-      }
-      uint32_t byteLen = static_cast<uint32_t>(maxTriangle * sizeof(uint32_t));
-      shapeBinaryInfo[meshIdx] = {
-        static_cast<uint32_t>(maxTriangle),
-        currentOffset,
-        byteLen
-      };
-      currentOffset += byteLen;
-    }
-
-    // Calculate new binary data layout (4-byte aligned per glTF spec)
-    uint32_t alignedBinLength = alignTo(existingBinLength);
-    uint32_t faceIndicesBaseOffset = alignedBinLength;
-    uint32_t alignedFaceIndicesBytes = alignTo(faceIndicesBytes);
-    uint32_t newBinLength = faceIndicesBaseOffset + alignedFaceIndicesBytes;
-
-    // Update buffers[0].byteLength
-    if (doc.HasMember("buffers") && doc["buffers"].IsArray() &&
-        doc["buffers"].Size() > 0 &&
-        doc["buffers"][0].HasMember("byteLength")) {
-      doc["buffers"][0]["byteLength"].SetUint(newBinLength);
-    }
-
-    // Ensure extensionsUsed contains our extension
-    if (!doc.HasMember("extensionsUsed")) {
-      doc.AddMember("extensionsUsed", rapidjson::Value(rapidjson::kArrayType),
-                    doc.GetAllocator());
-    }
-    if (!hasExtension(doc["extensionsUsed"], EXTENSION_NAME)) {
-      rapidjson::Value extName;
-      extName.SetString(EXTENSION_NAME, doc.GetAllocator());
-      doc["extensionsUsed"].PushBack(extName, doc.GetAllocator());
-    }
-
-    // Create BREP accessor for each unique shape (once per shape, reused by meshes)
-    std::map<int, int> shapeIdxToBrepAccessorId;
-    for (const auto &[shapeIdx, binInfo] : shapeBinaryInfo) {
-      // Add bufferView for this shape's faceIndices
-      int bufferViewId = doc.HasMember("bufferViews") && doc["bufferViews"].IsArray()
-          ? doc["bufferViews"].Size() : 0;
-      if (doc.HasMember("bufferViews")) {
-        rapidjson::Value bv(rapidjson::kObjectType);
-        bv.AddMember("buffer", 0, doc.GetAllocator());
-        bv.AddMember("byteOffset", faceIndicesBaseOffset + binInfo.byteOffset,
-                     doc.GetAllocator());
-        bv.AddMember("byteLength", binInfo.byteLength, doc.GetAllocator());
-        doc["bufferViews"].PushBack(bv, doc.GetAllocator());
+    // indices accessor id -> {faceIndices accessor id, faces JSON}
+    std::map<int, std::pair<int, rapidjson::Value>> extensions;
+    for (const auto &[indicesId, list] : faces) {
+      std::vector<uint32_t> faceIndices;
+      rapidjson::Value facesJson(rapidjson::kArrayType);
+      for (size_t i = 0; i < list.size(); ++i) {
+        const FaceTriangles &f = list[i];
+        faceIndices.resize(
+            std::max(faceIndices.size(), size_t(f.triStart + f.triCount)),
+            UINT32_MAX);
+        std::fill_n(faceIndices.begin() + f.triStart, f.triCount,
+                    static_cast<uint32_t>(i));
+        extractFacePrimitive(f.face, static_cast<int>(i), facesJson, alloc,
+                             allowedTypes, lengthUnit);
       }
 
-      // Add accessor for this shape's faceIndices
-      int accessorId = doc.HasMember("accessors") && doc["accessors"].IsArray()
-          ? doc["accessors"].Size() : 0;
-      if (doc.HasMember("accessors")) {
-        rapidjson::Value acc(rapidjson::kObjectType);
-        acc.AddMember("bufferView", bufferViewId, doc.GetAllocator());
-        acc.AddMember("byteOffset", 0, doc.GetAllocator());
-        acc.AddMember("componentType", 5125, doc.GetAllocator()); // UNSIGNED_INT
-        acc.AddMember("count", binInfo.triangleCount, doc.GetAllocator());
-        acc.AddMember("type", "SCALAR", doc.GetAllocator());
-        doc["accessors"].PushBack(acc, doc.GetAllocator());
+      const size_t byteOffset = glb.bin.size();
+      const size_t byteLength = faceIndices.size() * sizeof(uint32_t);
+      if (byteOffset + byteLength > UINT32_MAX) {
+        throw std::runtime_error("GLB would exceed the 4 GB format limit");
       }
+      const char *raw = reinterpret_cast<const char *>(faceIndices.data());
+      glb.bin.insert(glb.bin.end(), raw, raw + byteLength);
 
-      shapeIdxToBrepAccessorId[shapeIdx] = accessorId;
+      rapidjson::Value view(rapidjson::kObjectType);
+      view.AddMember("buffer", 0, alloc);
+      view.AddMember("byteOffset", static_cast<uint32_t>(byteOffset), alloc);
+      view.AddMember("byteLength", static_cast<uint32_t>(byteLength), alloc);
+      doc["bufferViews"].PushBack(view, alloc);
+
+      rapidjson::Value accessor(rapidjson::kObjectType);
+      accessor.AddMember("bufferView", doc["bufferViews"].Size() - 1, alloc);
+      accessor.AddMember("byteOffset", 0, alloc);
+      accessor.AddMember("componentType", 5125, alloc); // UNSIGNED_INT
+      accessor.AddMember("count", static_cast<uint32_t>(faceIndices.size()),
+                         alloc);
+      accessor.AddMember("type", "SCALAR", alloc);
+      doc["accessors"].PushBack(accessor, alloc);
+
+      extensions.emplace(
+          indicesId, std::make_pair(static_cast<int>(doc["accessors"].Size()) - 1,
+                                    std::move(facesJson)));
     }
 
-    // Pre-build faces arrays for each unique shape
-    std::map<int, rapidjson::Value> shapeFacesArrays;
-    for (const auto &[shapeIdx, faces] : facesByUniqueShape) {
-      rapidjson::Value facesArray(rapidjson::kArrayType);
-      for (const auto &fd : faces) {
-        extractFacePrimitive(fd.face, fd.faceIndex, facesArray,
-                             doc.GetAllocator(), allowedTypes, lengthUnit);
+    doc["buffers"][0].RemoveMember("byteLength");
+    doc["buffers"][0].AddMember("byteLength",
+                                static_cast<uint32_t>(glb.bin.size()), alloc);
+
+    bool attached = false;
+    for (auto &mesh : doc["meshes"].GetArray()) {
+      if (!mesh.HasMember("primitives") || !mesh["primitives"].IsArray()) {
+        continue;
       }
-      shapeFacesArrays.emplace(shapeIdx, std::move(facesArray));
-    }
-
-    // Build mapping from JSON mesh index to callback meshIndex (shape index).
-    // Multiple JSON meshes may share the same indices accessor (mesh instancing).
-    // Accessor IDs are assigned in binary write order, so lower ID = lower callback meshIndex.
-    std::map<size_t, int> jsonMeshToShapeIdx;
-    if (doc.HasMember("meshes") && doc["meshes"].IsArray()) {
-      // Single pass: collect unique accessor IDs and track which meshes use them
-      std::set<int> seenAccessorIds;
-      std::vector<std::pair<size_t, int>> meshAccessorPairs; // (meshIdx, accessorId)
-
-      for (size_t i = 0; i < doc["meshes"].Size(); ++i) {
-        const auto* prim = getFirstPrimitive(doc["meshes"][i]);
-        if (prim && prim->HasMember("indices")) {
-          int accId = (*prim)["indices"].GetInt();
-          if (accId >= 0) {  // Defensive: skip invalid accessor IDs
-            seenAccessorIds.insert(accId);
-            meshAccessorPairs.emplace_back(i, accId);
-          }
-        }
-      }
-
-      // Build accessor ID -> shape index mapping (std::set iterates in sorted order)
-      std::map<int, int> accessorToShapeIdx;
-      int shapeIdx = 0;
-      for (int accId : seenAccessorIds) {
-        accessorToShapeIdx[accId] = shapeIdx++;
-      }
-
-      // Map each mesh to its shape index
-      for (const auto& [meshIdx, accId] : meshAccessorPairs) {
-        jsonMeshToShapeIdx[meshIdx] = accessorToShapeIdx[accId];
-      }
-    }
-
-    // Add BREP extension to each mesh
-    if (doc.HasMember("meshes") && doc["meshes"].IsArray()) {
-      for (size_t meshIdx = 0; meshIdx < doc["meshes"].Size(); ++meshIdx) {
-        // Look up the shape index for this JSON mesh using accessor ID ordering
-        auto shapeIdxIt = jsonMeshToShapeIdx.find(meshIdx);
-        if (shapeIdxIt == jsonMeshToShapeIdx.end()) {
-          continue; // No shape index mapping for this mesh
-        }
-        int shapeIdx = shapeIdxIt->second;
-
-        auto accIt = shapeIdxToBrepAccessorId.find(shapeIdx);
-        if (accIt == shapeIdxToBrepAccessorId.end()) {
-          continue; // No BREP data for this shape
-        }
-        int brepAccessorId = accIt->second;
-
-        auto facesIt = shapeFacesArrays.find(shapeIdx);
-        if (facesIt == shapeFacesArrays.end()) {
+      for (auto &prim : mesh["primitives"].GetArray()) {
+        if (!prim.HasMember("indices") || !prim["indices"].IsInt()) {
           continue;
         }
-
-        // Add extension to this mesh's primitive
-        auto &mesh = doc["meshes"][meshIdx];
-        if (mesh.HasMember("primitives") && mesh["primitives"].IsArray() &&
-            mesh["primitives"].Size() > 0) {
-          auto &prim = mesh["primitives"][0];
-
-          if (!prim.HasMember("extensions")) {
-            prim.AddMember("extensions", rapidjson::Value(rapidjson::kObjectType),
-                           doc.GetAllocator());
-          }
-
-          rapidjson::Value ext(rapidjson::kObjectType);
-          ext.AddMember("faceIndices", brepAccessorId, doc.GetAllocator());
-
-          // Copy faces array (need to copy since it may be used by multiple meshes)
-          rapidjson::Value facesCopy(facesIt->second, doc.GetAllocator());
-          ext.AddMember("faces", facesCopy, doc.GetAllocator());
-
-          // Add materials to extension if provided (only for first mesh)
-          if (meshIdx == 0 && materials != nullptr) {
-            rapidjson::Value matCopy(*materials, doc.GetAllocator());
-            ext.AddMember("materials", matCopy, doc.GetAllocator());
-          }
-
-          prim["extensions"].AddMember(rapidjson::StringRef(EXTENSION_NAME), ext,
-                                       doc.GetAllocator());
+        auto found = extensions.find(prim["indices"].GetInt());
+        if (found == extensions.end()) {
+          continue;
         }
+        rapidjson::Value ext(rapidjson::kObjectType);
+        ext.AddMember("faceIndices", found->second.first, alloc);
+        // copied because instanced parts share one accessor across meshes
+        ext.AddMember("faces", rapidjson::Value(found->second.second, alloc),
+                      alloc);
+        if (!attached && materials != nullptr) {
+          ext.AddMember("materials", rapidjson::Value(*materials, alloc),
+                        alloc);
+        }
+        if (!prim.HasMember("extensions")) {
+          prim.AddMember("extensions",
+                         rapidjson::Value(rapidjson::kObjectType), alloc);
+        }
+        prim["extensions"].AddMember(rapidjson::StringRef(EXTENSION_NAME), ext,
+                                     alloc);
+        attached = true;
       }
+    }
+
+    if (attached) {
+      if (!isArray("extensionsUsed")) {
+        doc.RemoveMember("extensionsUsed");
+        doc.AddMember("extensionsUsed",
+                      rapidjson::Value(rapidjson::kArrayType), alloc);
+      }
+      doc["extensionsUsed"].PushBack(rapidjson::StringRef(EXTENSION_NAME),
+                                     alloc);
     }
   }
 
-  // Add materials to mesh.extras.cascadio if provided (only for first mesh)
-  if (materials != nullptr) {
-    if (doc.HasMember("meshes") && doc["meshes"].IsArray() &&
-        doc["meshes"].Size() > 0) {
-      auto &mesh = doc["meshes"][0];
-      if (!mesh.HasMember("extras")) {
-        mesh.AddMember("extras", rapidjson::Value(rapidjson::kObjectType),
-                       doc.GetAllocator());
-      }
-      if (!mesh["extras"].HasMember("cascadio")) {
-        mesh["extras"].AddMember("cascadio",
-                                 rapidjson::Value(rapidjson::kObjectType),
-                                 doc.GetAllocator());
-      }
-      rapidjson::Value matCopy(*materials, doc.GetAllocator());
-      mesh["extras"]["cascadio"].AddMember("materials", matCopy,
-                                           doc.GetAllocator());
+  // Materials are also stored on the first mesh's extras so they are
+  // available without BREP data.
+  if (materials != nullptr && hasMeshes && doc["meshes"][0].IsObject()) {
+    auto &mesh = doc["meshes"][0];
+    if (!mesh.HasMember("extras") || !mesh["extras"].IsObject()) {
+      mesh.RemoveMember("extras");
+      mesh.AddMember("extras", rapidjson::Value(rapidjson::kObjectType), alloc);
     }
+    auto &extras = mesh["extras"];
+    if (!extras.HasMember("cascadio") || !extras["cascadio"].IsObject()) {
+      extras.RemoveMember("cascadio");
+      extras.AddMember("cascadio", rapidjson::Value(rapidjson::kObjectType),
+                       alloc);
+    }
+    extras["cascadio"].AddMember("materials",
+                                 rapidjson::Value(*materials, alloc), alloc);
   }
 
-  // Serialize back to string
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   doc.Accept(writer);
-
-  return std::string(buffer.GetString(), buffer.GetSize());
+  glb.json.assign(buffer.GetString(), buffer.GetSize());
+  return glb.serialize();
 }

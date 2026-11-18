@@ -7,7 +7,6 @@ For local development:
 - Builds OCCT to {project}/occt_cache/ to avoid polluting upstream/
 - Set CASCADIO_OCCT_LIB env var to point pip install to the cached libs
 - Headers in upstream/OCCT are still used (they don't have absolute paths)
-- Applies patches from patches/ directory automatically
 - Supports incremental builds (use --clean for full rebuild)
 
 For cibuildwheel:
@@ -17,7 +16,6 @@ For cibuildwheel:
 """
 
 import argparse
-import glob
 import os
 import platform
 import subprocess
@@ -74,72 +72,6 @@ def run(cmd, **kwargs):
         sys.exit(result.returncode)
 
 
-def build_patch(occt_src, patches_dir):
-    """Regenerate patch files from current diff in upstream/OCCT."""
-    os.makedirs(patches_dir, exist_ok=True)
-    patch_file = os.path.join(patches_dir, "tm_brep_faces.patch")
-    with open(patch_file, "w") as f:
-        subprocess.run(["git", "diff", "HEAD"], cwd=occt_src, stdout=f, check=True)
-    print(f"Generated: {patch_file}")
-
-
-def apply_patches(occt_src, patches_dir):
-    """Apply patches from patches/ directory if they haven't been applied.
-
-    Returns:
-        bool: True if any patches were applied (source modified), False otherwise
-    """
-    if not os.path.isdir(patches_dir):
-        return False
-
-    patches = sorted(glob.glob(os.path.join(patches_dir, "*.patch")))
-    if not patches:
-        return False
-
-    print(f"Found {len(patches)} patch(es) to check...")
-
-    patches_applied = False
-    for patch_path in patches:
-        patch_name = os.path.basename(patch_path)
-        abs_patch_path = os.path.abspath(patch_path)
-
-        # Check if patch is already applied by doing a dry-run reverse
-        result = subprocess.run(
-            [
-                "patch",
-                "-p1",
-                "--reverse",
-                "--dry-run",
-                "--force",
-                "--silent",
-                "-i",
-                abs_patch_path,
-            ],
-            cwd=occt_src,
-            capture_output=True,
-        )
-
-        if result.returncode == 0:
-            print(f"  {patch_name}: already applied")
-            continue
-
-        # Apply the patch (patch handles line ending conversion automatically).
-        # --fuzz=0 forbids fuzzy context matching: if the surrounding context has
-        # drifted (e.g. after an OCCT bump) patch must fail loudly rather than
-        # silently guessing where a hunk belongs. Line-number offsets are still
-        # allowed since those are benign. check=True turns any reject into a hard
-        # failure so the wheel build aborts instead of shipping a bad patch.
-        print(f"  {patch_name}: applying...")
-        subprocess.run(
-            ["patch", "-p1", "--fuzz=0", "-i", abs_patch_path],
-            cwd=occt_src,
-            check=True,
-        )
-        patches_applied = True
-
-    return patches_applied
-
-
 def get_lib_marker(base_path, system, in_tree=False):
     """Get the path to the library marker file.
 
@@ -177,22 +109,12 @@ def main():
     parser.add_argument(
         "--force", action="store_true", help="Force rebuild even if libraries exist"
     )
-    parser.add_argument(
-        "--build-patch",
-        action="store_true",
-        help="Regenerate patch files from diff in upstream/OCCT",
-    )
     args = parser.parse_args()
 
     system = platform.system()
 
     # OCCT source is always in upstream/OCCT relative to project root
     occt_src = os.path.join(PROJECT_ROOT, "upstream", "OCCT")
-    patches_dir = os.path.join(PROJECT_ROOT, "patches")
-
-    # Handle --build-patch separately
-    if args.build_patch:
-        return build_patch(occt_src, patches_dir)
 
     if IN_CIBUILDWHEEL:
         # In CI: build in-tree
@@ -214,9 +136,6 @@ def main():
         os.makedirs(install_prefix, exist_ok=True)
 
     os.chdir(occt_src)
-
-    # Apply patches (CMake will detect header changes and ninja will rebuild)
-    apply_patches(occt_src, patches_dir)
 
     # Clean build if requested (removes CMake cache but keeps source changes)
     if args.clean:
@@ -247,7 +166,7 @@ def main():
 
     cmake_args.append(".")
 
-    # Always run cmake configure to pick up any source changes (patches, etc.)
+    # Always run cmake configure to pick up any source changes
     # CMake is fast when nothing changed, and ninja handles incremental builds
     print("Configuring with CMake...")
     run(["cmake"] + cmake_args)

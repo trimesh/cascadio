@@ -24,9 +24,9 @@ jobs:
         id: occt-key
         shell: bash
         run: |
-          # Cache key includes: OS, OCCT commit, patches, and build script
+          # Cache key includes: OS, OCCT commit and build script
           OCCT_COMMIT=$(git rev-parse HEAD:upstream/OCCT)
-          echo "hash=${{ runner.os }}-${OCCT_COMMIT}-${{ hashFiles('patches/*.patch', 'scripts/build_occt.py') }}" >> $GITHUB_OUTPUT
+          echo "hash=${{ runner.os }}-${OCCT_COMMIT}-${{ hashFiles('scripts/build_occt.py') }}" >> $GITHUB_OUTPUT
 
       - name: Cache OCCT build
         id: cache-occt

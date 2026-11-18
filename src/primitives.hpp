@@ -5,10 +5,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepTools.hxx>
 #include <GeomAbs_SurfaceType.hxx>
-#include <TopExp_Explorer.hxx>
-#include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
-#include <TopoDS_Shape.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
@@ -165,26 +162,4 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
   }
 
   facesArray.PushBack(obj, alloc);
-}
-
-/// Extract all BREP primitives from a shape into a JSON array
-/// lengthUnit is the scale factor to convert to meters (from
-/// XCAFDoc_DocumentTool::GetLengthUnit)
-static rapidjson::Value
-extractAllPrimitives(const TopoDS_Shape &shape,
-                     rapidjson::Document::AllocatorType &alloc,
-                     const std::set<std::string> &allowedTypes = {},
-                     double lengthUnit = 1.0) {
-  rapidjson::Value facesArray(rapidjson::kArrayType);
-  int faceIndex = 0;
-
-  for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More();
-       explorer.Next()) {
-    TopoDS_Face face = TopoDS::Face(explorer.Current());
-    extractFacePrimitive(face, faceIndex, facesArray, alloc, allowedTypes,
-                         lengthUnit);
-    faceIndex++;
-  }
-
-  return facesArray;
 }
