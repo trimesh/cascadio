@@ -51,7 +51,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     return;
   }
 
-  BRepAdaptor_Surface surf(face, Standard_True);
+  BRepAdaptor_Surface surf(face, true);
   GeomAbs_SurfaceType surfType = surf.GetType();
 
   // Determine type name for filtering

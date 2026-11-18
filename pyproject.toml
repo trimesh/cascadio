@@ -40,6 +40,9 @@ cmake.version = ">=3.29"
 wheel.packages = ["src/cascadio"]
 wheel.exclude = ["**/__pycache__"]
 wheel.py-api = "cp312"
+# The source distribution leaves out the vendored libraries, so it stays
+# small and builds against the system's OpenCASCADE 7.9+ and RapidJSON.
+sdist.exclude = ["upstream", "occt_install", "build", "wheelhouse", ".github"]
 
 [tool.cibuildwheel]
 # `yum` would need to be replaced in the `before-all`

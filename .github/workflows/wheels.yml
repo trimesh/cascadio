@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      
+
       - name: Get OCCT cache key
         id: occt-key
         shell: bash
@@ -34,7 +34,7 @@ jobs:
           key: occt-${{ runner.os }}-${{ runner.arch }}-${{ steps.occt-key.outputs.commit }}-${{ hashFiles('scripts/build_occt.py', 'cmake/toolchain.cmake') }}
 
       - uses: ilammy/msvc-dev-cmd@v1.13.0
-      
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         with:
@@ -43,7 +43,7 @@ jobs:
           # Linux wheels build in a container that sees the runner's disk
           # at /host. Installing OpenCASCADE there lets the cache step keep it.
           CIBW_ENVIRONMENT_LINUX: CASCADIO_OCCT_PREFIX=/host${{ github.workspace }}/occt_install
-      
+
       - uses: actions/upload-artifact@v4
         with:
           path: ./wheelhouse/*.whl
@@ -57,14 +57,18 @@ jobs:
     permissions:
       id-token: write
     steps:
-    - uses: actions/setup-python@v4
-    - uses: actions/download-artifact@v4
-      with:
-        pattern: wheels-*
-        merge-multiple: true
-        path: dist
-    - name: Publish
-      uses: pypa/gh-action-pypi-publish@v1.8.12
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      # The source distribution leaves out the vendored OpenCASCADE; it is
+      # what Linux and BSD packagers build against their system's copy.
+      - name: Build source distribution
+        run: pipx run build --sdist
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@v1.8.12
 
   release:
     permissions:

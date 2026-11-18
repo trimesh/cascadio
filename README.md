@@ -57,14 +57,30 @@ pytest tests/
 
 OpenCASCADE is built as static libraries with only the pieces cascadio uses, then linked into a single extension module. The linker removes every function that is not reachable, which is what keeps the wheels small.
 
+#### Building against a system OpenCASCADE
+
+The source distribution on PyPI contains no vendored code. It builds against the OpenCASCADE your system provides, which is what Linux and BSD packagers want:
+
+```bash
+# needs the development files of OpenCASCADE 7.9 or newer, and RapidJSON
+pip install --no-binary cascadio cascadio
+```
+
+No patches to OpenCASCADE are needed. If CMake does not find it, point `CMAKE_PREFIX_PATH` at the install.
+
+#### Slower checks
+
+These run in Docker and are kept out of CI on purpose:
+
+```bash
+make wheel         # build and test one Linux wheel exactly like CI
+make system-occt   # build the sdist against OpenCASCADE 7.9.0 and test
+make occt-master   # build and test against the newest OpenCASCADE commit
+```
+
 ### Future Work
 
-Pull requests welcome! 
+Pull requests welcome!
 
 - Add passable parameters for options included in the RWGLTF writer.
-- use in-memory data for input and output, i.e. `stepReader.ReadStream()` instead of a file name. Ideally the Python function signature would be:
-  - `convert_to_glb(data: bytes, file_type: str, **parameters) -> bytes`
-  - Currently using file names because it's easier. 
-- Support IGES 
-  - Investigate using OpenCASCADE "Advanced Data Exchange" for Parasolid `.x_b`/`.x_t` and JT `.jt` support.
-
+- Investigate using OpenCASCADE "Advanced Data Exchange" for Parasolid `.x_b`/`.x_t` and JT `.jt` support.

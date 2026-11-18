@@ -23,7 +23,8 @@ find_package(Python REQUIRED
 find_package(nanobind CONFIG REQUIRED)
 
 # OpenCASCADE: the static build from scripts/build_occt.py when it exists,
-# otherwise whatever the system provides (distribution packages).
+# otherwise whatever the system provides (distribution packages, sdist).
+set(OCCT_MINIMUM 7.9) # first release where our glTF writer hooks exist
 if(DEFINED ENV{CASCADIO_OCCT_PREFIX})
   set(vendored_occt "$ENV{CASCADIO_OCCT_PREFIX}")
 else()
@@ -32,7 +33,18 @@ endif()
 if(EXISTS "${vendored_occt}")
   find_package(OpenCASCADE CONFIG REQUIRED PATHS "${vendored_occt}" NO_DEFAULT_PATH)
 else()
-  find_package(OpenCASCADE CONFIG REQUIRED)
+  find_package(OpenCASCADE CONFIG)
+endif()
+if(NOT OpenCASCADE_FOUND)
+  message(FATAL_ERROR
+    "OpenCASCADE was not found. From a git checkout run "
+    "`python scripts/build_occt.py` first. Otherwise install the "
+    "OpenCASCADE ${OCCT_MINIMUM}+ development files (and RapidJSON) "
+    "and point CMAKE_PREFIX_PATH at them if they are not found.")
+elseif(OpenCASCADE_VERSION VERSION_LESS OCCT_MINIMUM)
+  message(FATAL_ERROR
+    "cascadio needs OpenCASCADE ${OCCT_MINIMUM} or newer, "
+    "found ${OpenCASCADE_VERSION} in ${OpenCASCADE_INSTALL_PREFIX}")
 endif()
 message(STATUS "Using OpenCASCADE ${OpenCASCADE_VERSION} from ${OpenCASCADE_INSTALL_PREFIX}")
 

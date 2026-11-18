@@ -1,25 +1,70 @@
 #include "convert.hpp"
+
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
 #include <Message_Printer.hxx>
 #include <nanobind/nanobind.h>
-#include <nanobind/stl/string.h>
 #include <nanobind/stl/set.h>
+#include <nanobind/stl/string.h>
 
-#include <cstddef>
-#include <vector>
+#include <fstream>
+#include <iostream>
+#include <iterator>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 
 namespace nb = nanobind;
+using namespace nb::literals;
+
+/// Read a whole file, or throw.
+static std::vector<char> readFile(const std::string &path) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    throw std::runtime_error("cannot open input file: " + path);
+  }
+  return std::vector<char>(std::istreambuf_iterator<char>(file), {});
+}
+
+/// Run a conversion, reporting any failure on stderr.
+/// Returns false if it threw.
+template <typename Function> static bool report(Function &&convert) {
+  try {
+    convert();
+    return true;
+  } catch (const std::exception &error) {
+    std::cerr << "cascadio: " << error.what() << std::endl;
+    return false;
+  }
+}
+
+static const char *PARAMETERS = R"doc(
+tol_linear
+  How large should linear deflection be allowed.
+tol_angular
+  How large should angular deflection be allowed.
+tol_relative
+  Is tol_linear relative to edge length, or an absolute distance?
+merge_primitives
+  Produce a GLB with one mesh primitive per part.
+use_parallel
+  Use parallel execution to produce meshes and exports.
+include_brep
+  Include BREP analytical primitive data in the TM_brep_faces extension.
+  Turns merge_primitives on.
+brep_types
+  If non-empty, only include these primitive types in brep_faces.
+  Valid values: "plane", "cylinder", "cone", "sphere", "torus".
+include_materials
+  Include material data (names, density, colors) in the GLB.
+  Turns merge_primitives on.
+node_name_format
+  Name format for GLB nodes and meshes; controls whether instance
+  names, product names, or both are used.
+)doc";
 
 NB_MODULE(_core, m) {
-  m.doc() = R"doc(
-        cascadio._core
-        --------------
-        C++ core module for converting BREP files into GLB and OBJ.
-    )doc";
+  m.doc() = "C++ core of cascadio: converts STEP and IGES to GLB and OBJ.";
 
   // A library should not write to the terminal: drop OCCT's default
   // console printer. Failures are reported through return values.
@@ -42,134 +87,96 @@ NB_MODULE(_core, m) {
   m.def(
       "to_glb_bytes",
       [](nb::bytes data, FileType file_type, double tol_linear,
-         double tol_angle, bool tol_relative, bool merge_primitives,
-         bool use_parallel, bool include_brep, std::set<std::string> brep_types,
-         bool include_materials, RWMesh_NameFormat node_name_format) -> nb::bytes {
-        // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
-        if ((include_brep || include_materials) && !merge_primitives) {
-          std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
-          merge_primitives = true;
-        }
-
-        const char* input_data = static_cast<const char*>(data.data());
-        size_t input_data_len = data.size();
-
-        std::vector<char> result =
-            to_glb_bytes(input_data, input_data_len, file_type, tol_linear, tol_angle,
-                         tol_relative, merge_primitives, use_parallel,
-                         include_brep, brep_types, include_materials, node_name_format);
-        return nb::bytes(result.data(), result.size());
+         double tol_angular, bool tol_relative, bool merge_primitives,
+         bool use_parallel, bool include_brep,
+         std::set<std::string> brep_types, bool include_materials,
+         RWMesh_NameFormat node_name_format) {
+        std::vector<char> glb;
+        report([&] {
+          glb = toGlb(data.c_str(), data.size(), file_type,
+                      {{tol_linear, tol_angular, tol_relative, use_parallel},
+                       merge_primitives, include_brep, std::move(brep_types),
+                       include_materials, node_name_format});
+        });
+        return nb::bytes(glb.data(), glb.size());
       },
-      R"doc(
-Convert BREP data (STEP or IGES bytes) to GLB data (bytes) without temp files.
+      (std::string(R"doc(
+Convert BREP data (STEP or IGES bytes) to GLB bytes without temp files.
+Returns empty bytes on error.
 
-Parameters
-----------
 data
-  The BREP file content as bytes.
+  The STEP or IGES file content.
 file_type
-  The file type: FileType.STEP or FileType.IGES
-tol_linear
-  How large should linear deflection be allowed.
-tol_angular
-  How large should angular deflection be allowed.
-tol_relative
-  Is tol_linear relative to edge length, or an absolute distance?
-merge_primitives
-  Produce a GLB with one mesh primitive per part.
-use_parallel
-  Use parallel execution to produce meshes and exports.
-include_brep
-  Include BREP analytical primitive data in GLB extras.
-brep_types
-  If non-empty, only include these primitive types in brep_faces.
-include_materials
-  Include material data in GLB asset.extras.materials.
-node_name_format
-  Name format for GLB nodes and meshes; controls whether instance
-  names, product names, or both are used.
+  FileType.STEP or FileType.IGES)doc") +
+       PARAMETERS)
+          .c_str(),
+      "data"_a, "file_type"_a = FileType::STEP, "tol_linear"_a = 0.01,
+      "tol_angular"_a = 0.5, "tol_relative"_a = false,
+      "merge_primitives"_a = true, "use_parallel"_a = true,
+      "include_brep"_a = false, "brep_types"_a = std::set<std::string>(),
+      "include_materials"_a = false,
+      "node_name_format"_a = RWMesh_NameFormat_InstanceOrProduct);
 
-Returns
--------
-bytes
-  The GLB file content as bytes, or empty bytes on error.
-
-)doc",
-      nb::arg("data"), nb::arg("file_type") = FileType::STEP,
-      nb::arg("tol_linear") = 0.01, nb::arg("tol_angular") = 0.5,
-      nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
-      nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
-      nb::arg("brep_types") = std::set<std::string>(),
-      nb::arg("include_materials") = false,
-      nb::arg("node_name_format") = RWMesh_NameFormat::RWMesh_NameFormat_InstanceOrProduct);
-
-  // Backward compatibility wrappers
   m.def(
       "step_to_glb",
-      [](const std::string &input_path, const std::string &output_path, double tol_linear,
-         double tol_angle, bool tol_relative, bool merge_primitives,
-         bool use_parallel, bool include_brep, std::set<std::string> brep_types,
-         bool include_materials, RWMesh_NameFormat node_name_format) -> int {
-        // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
-        if ((include_brep || include_materials) && !merge_primitives) {
-          std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
-          merge_primitives = true;
-        }
-        return to_glb(input_path.c_str(), output_path.c_str(), FileType::STEP, tol_linear,
-                      tol_angle, tol_relative, merge_primitives, use_parallel,
-                      include_brep, brep_types, include_materials, node_name_format);
+      [](const std::string &input_path, const std::string &output_path,
+         double tol_linear, double tol_angular, bool tol_relative,
+         bool merge_primitives, bool use_parallel, bool include_brep,
+         std::set<std::string> brep_types, bool include_materials,
+         RWMesh_NameFormat node_name_format) {
+        const bool ok = report([&] {
+          const std::vector<char> step = readFile(input_path);
+          const std::vector<char> glb = toGlb(
+              step.data(), step.size(), FileType::STEP,
+              {{tol_linear, tol_angular, tol_relative, use_parallel},
+               merge_primitives, include_brep, std::move(brep_types),
+               include_materials, node_name_format});
+          std::ofstream file(output_path, std::ios::binary);
+          file.write(glb.data(), static_cast<std::streamsize>(glb.size()));
+          if (!file) {
+            throw std::runtime_error("cannot write output file: " +
+                                     output_path);
+          }
+        });
+        return ok ? 0 : 1;
+      },
+      (std::string(R"doc(
+Convert a STEP file to a GLB file. Returns 0 on success and 1 on error.
+
+input_path
+  The STEP file to load.
+output_path
+  Where to save the GLB file.)doc") +
+       PARAMETERS)
+          .c_str(),
+      "input_path"_a, "output_path"_a, "tol_linear"_a = 0.01,
+      "tol_angular"_a = 0.5, "tol_relative"_a = false,
+      "merge_primitives"_a = true, "use_parallel"_a = true,
+      "include_brep"_a = false, "brep_types"_a = std::set<std::string>(),
+      "include_materials"_a = false,
+      "node_name_format"_a = RWMesh_NameFormat_InstanceOrProduct);
+
+  m.def(
+      "step_to_obj",
+      [](const std::string &input_path, const std::string &output_path,
+         double tol_linear, double tol_angular, bool tol_relative,
+         bool use_parallel, bool use_colors) {
+        const bool ok = report([&] {
+          const std::vector<char> step = readFile(input_path);
+          stepToObj(step.data(), step.size(), output_path,
+                    {tol_linear, tol_angular, tol_relative, use_parallel},
+                    use_colors);
+        });
+        return ok ? 0 : 1;
       },
       R"doc(
-Convert a step file to a GLB file.
+Convert a STEP file to an OBJ file. Returns 0 on success and 1 on error.
 
-Parameters
-----------
 input_path
-  The input STEP file to load.
+  The STEP file to load.
 output_path
-  The path to save the GLB file.
-tol_linear
-  How large should linear deflection be allowed.
-tol_angular
-  How large should angular deflection be allowed.
-tol_relative
-  Is tol_linear relative to edge length, or an absolute distance?
-merge_primitives
-  Produce a GLB with one mesh primitive per part.
-use_parallel
-  Use parallel execution to produce meshes and exports.
-include_brep
-  Include BREP analytical primitive data in GLB extras.
-  Primitives (plane, cylinder, cone, sphere, torus) are stored
-  in extras.brep_faces with face_index, type, and geometry params.
-brep_types
-  If non-empty, only include these primitive types in brep_faces.
-  Valid values: "plane", "cylinder", "cone", "sphere", "torus".
-  If empty (default), all primitive types are included.
-include_materials
-  Include material data in GLB asset.extras.materials.
-  Materials include physical properties (name, density) and
-  visual properties (colors, PBR metallic/roughness).
-
-)doc",
-      nb::arg("input_path"), nb::arg("output_path"),
-      nb::arg("tol_linear") = 0.01, nb::arg("tol_angular") = 0.5,
-      nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
-      nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
-      nb::arg("brep_types") = std::set<std::string>(),
-      nb::arg("include_materials") = false,
-      nb::arg("node_name_format") = RWMesh_NameFormat::RWMesh_NameFormat_InstanceOrProduct);
-
-  m.def("step_to_obj", &step_to_obj,
-        R"doc(
-Convert a step file to a OBJ ( and if applicable MTL ) file.
-
-Parameters
-----------
-input_path
-  The input STEP file to load.
-output_path
-  The path to save the OBJ ( and if applicable MTL ) file.
+  Where to save the OBJ file. A MTL file is written next to it
+  when the STEP has colors and use_colors is set.
 tol_linear
   How large should linear deflection be allowed.
 tol_angular
@@ -179,16 +186,11 @@ tol_relative
 use_parallel
   Use parallel execution to produce meshes and exports.
 use_colors
-  Whether to export/use colors/materials from the STEP input.
-  Disabling colors will skip exporting a MTL sidecar file.
-  If input STEP doesn't use color/material then no MTL will be exported,
-  regardless of 'use_colors'.
-
+  Whether to export colors and materials from the STEP input.
 )doc",
-        nb::arg("input_path"), nb::arg("output_path"),
-        nb::arg("tol_linear") = 0.01, nb::arg("tol_angular") = 0.5,
-        nb::arg("tol_relative") = false, nb::arg("use_parallel") = true,
-        nb::arg("use_colors") = true);
+      "input_path"_a, "output_path"_a, "tol_linear"_a = 0.01,
+      "tol_angular"_a = 0.5, "tol_relative"_a = false,
+      "use_parallel"_a = true, "use_colors"_a = true);
 
 #ifdef VERSION_INFO
   m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
