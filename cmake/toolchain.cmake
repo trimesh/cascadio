@@ -1,9 +1,13 @@
 # Shared by the OCCT build (scripts/build_occt.py) and the extension build so
 # both use the same compiler, linker and flags.
 #
-# Uses clang (clang-cl on Windows) with lld whenever they are installed.
+# On Linux, uses clang with lld whenever they are installed. macOS already
+# is clang. Windows uses MSVC: clang-cl built OpenCASCADE but the result
+# did not link against Microsoft's standard library (missing std::variant
+# symbols), and MSVC is what the Windows wheels have always used.
+#
 # Build frontends export generic CC=cc / CXX=c++, so those variables are not
-# treated as a choice. To opt out:
+# treated as a choice. To opt out on Linux:
 #   CASCADIO_CLANG=OFF  use the default compiler (or CC/CXX)
 #
 # Link-time optimization is off by default: measured on the test models it
@@ -13,16 +17,10 @@
 set(cascadio_clang OFF)
 if(APPLE)
   set(cascadio_clang ON) # the system compiler already is clang
-elseif(NOT DEFINED ENV{CASCADIO_CLANG} OR "$ENV{CASCADIO_CLANG}")
-  if(WIN32)
-    find_program(CASCADIO_CC clang-cl)
-    set(CASCADIO_CXX "${CASCADIO_CC}")
-    find_program(CASCADIO_LLD lld-link)
-  else()
-    find_program(CASCADIO_CC clang)
-    find_program(CASCADIO_CXX clang++)
-    find_program(CASCADIO_LLD ld.lld)
-  endif()
+elseif(NOT WIN32 AND (NOT DEFINED ENV{CASCADIO_CLANG} OR "$ENV{CASCADIO_CLANG}"))
+  find_program(CASCADIO_CC clang)
+  find_program(CASCADIO_CXX clang++)
+  find_program(CASCADIO_LLD ld.lld)
   if(CASCADIO_CC AND CASCADIO_CXX)
     set(CMAKE_C_COMPILER "${CASCADIO_CC}")
     set(CMAKE_CXX_COMPILER "${CASCADIO_CXX}")
@@ -50,4 +48,8 @@ if(NOT WIN32)
   # -O2 measured smaller and no slower than CMake's default -O3
   set(CMAKE_C_FLAGS_RELEASE_INIT "-O2 -DNDEBUG")
   set(CMAKE_CXX_FLAGS_RELEASE_INIT "-O2 -DNDEBUG")
+else()
+  # MSVC's version of one section per function
+  set(CMAKE_C_FLAGS_INIT "/Gy")
+  set(CMAKE_CXX_FLAGS_INIT "/Gy")
 endif()
