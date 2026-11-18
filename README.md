@@ -51,7 +51,7 @@ scene = trimesh.load(io.BytesIO(glb), file_type="glb")
 
 #### Limits and errors
 
-OpenCASCADE can hang or run out of memory on unusual files. So `load` does the work in a short-lived child process, which costs about 25 milliseconds and lets it enforce two limits:
+OpenCASCADE can hang, run out of memory or crash on unusual files. So every conversion is done by a small separate program, `cascadio-worker`, which ships in the wheel next to the Python module. The module starts it, hands it the bytes, and stops it if it breaks a limit. This costs a few milliseconds per call.
 
 ```python
 cascadio.load(data, timeout=30.0, memory_limit=8 * 2**30)  # the defaults
@@ -64,9 +64,9 @@ cascadio.load(data, timeout=30.0, memory_limit=8 * 2**30)  # the defaults
 | It used more than `memory_limit` bytes | `MemoryError` |
 | OpenCASCADE failed or crashed | `RuntimeError` |
 
-Pass `timeout=None, memory_limit=None` to convert inside your own process with no child and no protection.
+Either limit can be `None` to switch it off.
 
-`step_to_glb` and `step_to_obj` work on file paths and convert inside your own process, without the limits above. They are deprecated and will be removed in the first release after January 2028.
+`step_to_glb` and `step_to_obj` work on file paths. They are deprecated and will be removed in the first release after January 2028.
 
 ### Motivation
 
@@ -84,7 +84,7 @@ make wheel     # build a wheel for this machine into dist/
 
 `make occt` fetches the OpenCASCADE, RapidJSON and zstd submodules if needed and uses clang and lld when they are installed. Add `CPUS=4` to any target to limit how many cores it uses.
 
-OpenCASCADE is built as static libraries with only the pieces cascadio uses, then linked into a single extension module. The linker removes every function that is not reachable, which is what keeps the wheels small.
+OpenCASCADE is built as static libraries with only the pieces cascadio uses, then linked into the `cascadio-worker` program. The linker removes every function that is not reachable, which is what keeps the wheels small. The Python module itself is a small nanobind extension that contains no OpenCASCADE: it starts the worker and enforces the limits. `src/request.hpp` is the whole contract between the two.
 
 #### Building against a system OpenCASCADE
 

@@ -1,8 +1,12 @@
 """
-Tests for how conversions fail: bad input, time and memory limits,
-crashes, and the pieces that keep a failure from hurting the caller.
+Tests for how conversions fail: bad input, time and memory limits, a
+crashing worker, and the pieces that keep a failure from hurting the caller.
+
+Every conversion is done by the `cascadio-worker` program, started by the
+compiled module. These tests are about that boundary.
 """
 
+import os
 import subprocess
 import sys
 import threading
@@ -11,45 +15,45 @@ from pathlib import Path
 
 import cascadio
 import pytest
-from cascadio import _worker
 
 MODELS_DIR = Path(__file__).parent / "models"
 STEP = (MODELS_DIR / "featuretype.STEP").read_bytes()
-# no limits means the conversion runs inside this process
-IN_PROCESS = {"timeout": None, "memory_limit": None}
+NO_LIMITS = {"timeout": None, "memory_limit": None}
 
 
-def test_in_process_matches_worker():
-    """Both ways of running a conversion give the same bytes."""
-    assert cascadio.load(STEP) == cascadio.load(STEP, **IN_PROCESS)
+def test_limits_do_not_change_output():
+    assert cascadio.load(STEP) == cascadio.load(STEP, **NO_LIMITS)
+    assert cascadio.load(STEP) == cascadio.to_glb_bytes(STEP)
 
 
-@pytest.mark.parametrize("limits", [{}, IN_PROCESS], ids=["worker", "in-process"])
 @pytest.mark.parametrize("file_type", ["step", "iges"])
 @pytest.mark.parametrize("data", [b"", b"this is not a CAD file", STEP[:2000]])
-def test_bad_data_raises(limits, file_type, data):
+def test_bad_data_raises(file_type, data):
     """Unparseable input raises instead of returning empty bytes."""
     with pytest.raises((ValueError, RuntimeError)):
-        cascadio.load(data, file_type=file_type, **limits)
+        cascadio.load(data, file_type=file_type)
 
 
-@pytest.mark.parametrize("limits", [{}, IN_PROCESS], ids=["worker", "in-process"])
-def test_garbage_is_a_value_error(limits):
+def test_garbage_is_a_value_error():
     with pytest.raises(ValueError, match="STEP"):
-        cascadio.load(b"this is not a CAD file", **limits)
+        cascadio.load(b"this is not a CAD file")
 
 
-def test_bad_file_type():
+def test_bad_arguments():
     with pytest.raises(ValueError, match="file_type"):
         cascadio.load(STEP, file_type="stl")
+    with pytest.raises(ValueError, match="timeout"):
+        cascadio.load(STEP, timeout=0)
+    with pytest.raises(TypeError):
+        cascadio.load("not bytes")
 
 
 def test_timeout():
     """A conversion that runs past `timeout` is killed and reported."""
     started = time.monotonic()
-    # a process cannot even start in a millisecond
+    # far less than a process needs just to start
     with pytest.raises(TimeoutError, match="timeout"):
-        cascadio.load(STEP, timeout=0.001)
+        cascadio.load(STEP, timeout=0.0001)
     assert time.monotonic() - started < 5
     # the limit is per call: the next one works
     assert len(cascadio.load(STEP)) > 1000
@@ -57,33 +61,48 @@ def test_timeout():
 
 def test_memory_limit():
     """A conversion that uses more than `memory_limit` is stopped."""
-    # far less than the Python interpreter itself needs
+    # far less than the conversion needs
     with pytest.raises(MemoryError, match="memory_limit"):
         cascadio.load(STEP, memory_limit=2**20)
     assert len(cascadio.load(STEP)) > 1000
 
 
 def test_only_one_limit():
-    """Either limit alone still runs in a worker."""
     assert len(cascadio.load(STEP, timeout=None)) > 1000
     assert len(cascadio.load(STEP, memory_limit=None)) > 1000
 
 
-def test_worker_crash_is_reported():
-    """If the child dies without answering, the parent raises RuntimeError."""
-    # a module that cannot be loaded stands in for a crash inside OpenCASCADE
-    with pytest.raises(RuntimeError):
-        _worker.run("/nonexistent/_core.so", STEP, {}, 30, None)
+def test_missing_worker(monkeypatch):
+    """If the worker program cannot be started, say so."""
+    monkeypatch.setenv("CASCADIO_WORKER", str(MODELS_DIR / "no-such-program"))
+    with pytest.raises(RuntimeError, match="cannot start"):
+        cascadio.load(STEP)
+
+
+def test_crashing_worker(monkeypatch):
+    """A worker that dies without one of our exit codes is a RuntimeError."""
+    # the Python interpreter stands in for a crashed worker: handed our
+    # request on standard input it fails with an exit code we do not use
+    monkeypatch.setenv("CASCADIO_WORKER", sys.executable)
+    with pytest.raises(RuntimeError, match="crashed"):
+        cascadio.load(STEP)
+
+
+def test_large_input_and_output():
+    """More data than a pipe holds flows both ways without deadlock."""
+    # padding after the end of a STEP file is ignored by the reader
+    padded = STEP + b"\n" * (8 * 2**20)
+    assert cascadio.load(padded) == cascadio.load(STEP)
 
 
 def test_gil_released():
-    """Other Python threads keep running during an in-process conversion."""
+    """Other Python threads keep running while a conversion is under way."""
     data = (MODELS_DIR / "multibody.step").read_bytes()
     done = threading.Event()
 
     def convert():
         try:
-            cascadio.load(data, **IN_PROCESS)
+            cascadio.load(data)
         finally:
             done.set()
 
@@ -98,11 +117,49 @@ def test_gil_released():
     assert ticks > 5
 
 
-def test_frozen_application(monkeypatch):
-    """Without a Python executable there is no worker: warn and convert anyway."""
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    with pytest.warns(RuntimeWarning, match="not enforced"):
-        assert len(cascadio.load(STEP)) > 1000
+def test_threads():
+    """Conversions started from several threads at once all succeed."""
+    expected = cascadio.load(STEP)
+    results = []
+
+    def convert():
+        results.append(cascadio.load(STEP))
+
+    threads = [threading.Thread(target=convert) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert results == [expected] * 8
+
+
+def test_no_processes_left_behind():
+    """Workers are reaped, including the ones that were killed."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("reads /proc")
+
+    def children():
+        me = str(os.getpid())
+        found = []
+        for entry in os.listdir("/proc"):
+            if entry.isdigit():
+                try:
+                    with open(f"/proc/{entry}/stat") as f:
+                        # pid (name) state ppid ...
+                        fields = f.read().rsplit(")", 1)[1].split()
+                except OSError:
+                    continue
+                if fields[1] == me:
+                    found.append(entry)
+        return found
+
+    before = children()
+    cascadio.load(STEP)
+    with pytest.raises(TimeoutError):
+        cascadio.load(STEP, timeout=0.0001)
+    with pytest.raises(MemoryError):
+        cascadio.load(STEP, memory_limit=2**20)
+    assert children() == before
 
 
 def test_import_without_numpy():
@@ -112,9 +169,7 @@ import sys
 sys.modules["numpy"] = None  # makes `import numpy` raise ImportError
 sys.modules["trimesh"] = None
 import cascadio
-data = open(sys.argv[1], "rb").read()
-assert len(cascadio.load(data)) > 1000
-assert len(cascadio.load(data, timeout=None, memory_limit=None)) > 1000
+assert len(cascadio.load(open(sys.argv[1], "rb").read())) > 1000
 """
     subprocess.run(
         [sys.executable, "-c", script, str(MODELS_DIR / "featuretype.STEP")],
@@ -125,12 +180,10 @@ assert len(cascadio.load(data, timeout=None, memory_limit=None)) > 1000
 def test_quiet():
     """A library should not print: conversions write nothing to the terminal."""
     script = """
-import sys, warnings
+import sys
 import cascadio
 for name, kind in (("featuretype.STEP", "step"), ("microstrip.igs", "iges")):
-    data = open(sys.argv[1] + "/" + name, "rb").read()
-    cascadio.load(data, file_type=kind)
-    cascadio.load(data, file_type=kind, timeout=None, memory_limit=None)
+    cascadio.load(open(sys.argv[1] + "/" + name, "rb").read(), file_type=kind)
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(MODELS_DIR)],
@@ -141,33 +194,18 @@ for name, kind in (("featuretype.STEP", "step"), ("microstrip.igs", "iges")):
     assert result.stderr == b""
 
 
-def test_threads_in_process():
-    """Conversions started from several threads at once all succeed."""
-    expected = cascadio.load(STEP, **IN_PROCESS)
-    results = []
-
-    def convert():
-        results.append(cascadio.load(STEP, **IN_PROCESS))
-
-    threads = [threading.Thread(target=convert) for _ in range(8)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert results == [expected] * 8
-
-
-def test_threads_worker():
-    """Worker processes run side by side without interfering."""
-    expected = cascadio.load(STEP)
-    results = []
-
-    def convert():
-        results.append(cascadio.load(STEP))
-
-    threads = [threading.Thread(target=convert) for _ in range(4)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert results == [expected] * 4
+def test_docstrings():
+    """Every public function has a numpy-style docstring and a signature."""
+    for name in ("load", "to_glb_bytes", "step_to_glb", "step_to_obj"):
+        doc = getattr(cascadio, name).__doc__
+        signature, body = doc.split("\n", 1)
+        assert signature.startswith(name + "(") and "->" in signature
+        for section in ("Parameters\n----------", "Returns\n-------", "Raises\n------"):
+            assert section in body, (name, section)
+        # every argument in the signature is described
+        arguments = signature.split("(", 1)[1].rsplit(")", 1)[0].split(", ")
+        for argument in arguments:
+            assert "\n" + argument.split(":")[0].strip() + "\n" in body, (
+                name,
+                argument,
+            )

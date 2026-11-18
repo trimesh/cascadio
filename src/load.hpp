@@ -1,6 +1,7 @@
 #pragma once
 
 #include "filehandle.hpp"
+#include "request.hpp"
 #include "zstd.hpp"
 
 #include <BRepBuilderAPI_Sewing.hxx>
@@ -19,8 +20,6 @@
 #include <stdexcept>
 #include <streambuf>
 #include <vector>
-
-enum class FileType { UNSPECIFIED = 0, STEP = 1, IGES = 2 };
 
 /// Tessellation settings shared by every loader.
 struct MeshOptions {

@@ -1,4 +1,4 @@
-# Shared by the OCCT build (scripts/build_occt.py) and the extension build so
+# Shared by the OCCT build (scripts/build_occt.py) and the cascadio build so
 # both use the same compiler, linker and flags.
 #
 # On Linux, uses clang with lld whenever they are installed. macOS already
@@ -37,7 +37,7 @@ if("$ENV{CASCADIO_LTO}" AND cascadio_clang AND (APPLE OR CASCADIO_LLD))
 endif()
 
 # Hide symbols and give every function its own section so the final link can
-# drop everything the extension never reaches.
+# drop everything the worker never reaches.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)

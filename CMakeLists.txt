@@ -51,13 +51,18 @@ elseif(OpenCASCADE_VERSION VERSION_LESS OCCT_MINIMUM)
 endif()
 message(STATUS "Using OpenCASCADE ${OpenCASCADE_VERSION} from ${OpenCASCADE_INSTALL_PREFIX}")
 
-# STABLE_ABI: one wheel serves every regular CPython from 3.12 on.
-# FREE_THREADED: on free-threaded CPython (which has no stable ABI yet, so it
-# gets its own wheel) declare that the module is safe without the GIL.
-# It is: the only shared state is OpenCASCADE's, guarded by a lock in main.cpp.
-nanobind_add_module(_core STABLE_ABI FREE_THREADED src/main.cpp)
-target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION_FULL})
-target_include_directories(_core SYSTEM PRIVATE "${OpenCASCADE_INCLUDE_DIR}")
+# Two binaries:
+#   cascadio-worker  a plain program that does one conversion; all of
+#                    OpenCASCADE is in here and Python is not
+#   _core            the Python module, which starts the worker for every
+#                    conversion and enforces the time and memory limits
+# They share src/request.hpp and nothing else.
+
+add_executable(cascadio-worker src/worker.cpp)
+target_include_directories(cascadio-worker SYSTEM PRIVATE "${OpenCASCADE_INCLUDE_DIR}")
+# Only what src/ uses directly; these targets bring their own dependencies.
+target_link_libraries(cascadio-worker PRIVATE
+  TKDESTEP TKDEIGES TKDEGLTF TKDEOBJ TKXCAF TKMesh)
 
 # The code that writes TM_brep_faces JSON is generated from the extension's
 # schema on every build, so the two cannot disagree.
@@ -69,17 +74,17 @@ add_custom_command(
           "${brep_schema}" "${brep_header}"
   DEPENDS "${brep_schema}" "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_schema_header.py"
   VERBATIM)
-target_sources(_core PRIVATE "${brep_header}")
-target_include_directories(_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_sources(cascadio-worker PRIVATE "${brep_header}")
+target_include_directories(cascadio-worker PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # the schema ships in the package for anyone who wants to validate output
 install(FILES "${brep_schema}" DESTINATION cascadio RENAME schema.json)
 
 # RapidJSON is header-only: vendored copy if checked out, else the system one.
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/upstream/rapidjson/include/rapidjson")
-  target_include_directories(_core SYSTEM PRIVATE upstream/rapidjson/include)
+  target_include_directories(cascadio-worker SYSTEM PRIVATE upstream/rapidjson/include)
 else()
   find_package(RapidJSON REQUIRED)
-  target_include_directories(_core SYSTEM PRIVATE ${RapidJSON_INCLUDE_DIRS} ${RAPIDJSON_INCLUDE_DIRS})
+  target_include_directories(cascadio-worker SYSTEM PRIVATE ${RapidJSON_INCLUDE_DIRS} ${RAPIDJSON_INCLUDE_DIRS})
 endif()
 
 # Zstandard, to accept compressed input. Only the decompressor is built from
@@ -91,32 +96,42 @@ if(EXISTS "${zstd_source}/zstd.h")
   target_include_directories(zstd_decompress PUBLIC "${zstd_source}")
   # no assembly (one less language to set up) and no pre-1.0 formats
   target_compile_definitions(zstd_decompress PRIVATE ZSTD_DISABLE_ASM ZSTD_LEGACY_SUPPORT=0)
-  target_link_libraries(_core PRIVATE zstd_decompress)
+  target_link_libraries(cascadio-worker PRIVATE zstd_decompress)
 else()
   find_path(ZSTD_INCLUDE_DIR zstd.h REQUIRED)
   find_library(ZSTD_LIBRARY zstd REQUIRED)
-  target_include_directories(_core SYSTEM PRIVATE "${ZSTD_INCLUDE_DIR}")
-  target_link_libraries(_core PRIVATE "${ZSTD_LIBRARY}")
+  target_include_directories(cascadio-worker SYSTEM PRIVATE "${ZSTD_INCLUDE_DIR}")
+  target_link_libraries(cascadio-worker PRIVATE "${ZSTD_LIBRARY}")
 endif()
 
-# Only what src/ uses directly; these targets bring their own dependencies.
-target_link_libraries(_core PRIVATE
-  TKDESTEP TKDEIGES TKDEGLTF TKDEOBJ TKXCAF TKMesh)
-
-# Drop every function the extension never reaches. With a static
+# Drop every function the worker never reaches. With a static
 # OpenCASCADE this is what keeps the wheel small.
 if(APPLE)
-  target_link_options(_core PRIVATE -Wl,-dead_strip)
+  target_link_options(cascadio-worker PRIVATE -Wl,-dead_strip)
 elseif(MSVC)
-  target_link_options(_core PRIVATE /OPT:REF /OPT:ICF)
+  target_link_options(cascadio-worker PRIVATE /OPT:REF /OPT:ICF)
 else()
-  target_link_options(_core PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL)
+  target_link_options(cascadio-worker PRIVATE -Wl,--gc-sections)
   if(CMAKE_LINKER_TYPE STREQUAL "LLD")
     # fold identical functions, which OCCT's templates produce in bulk
-    target_link_options(_core PRIVATE -Wl,--icf=safe)
+    target_link_options(cascadio-worker PRIVATE -Wl,--icf=safe)
+  endif()
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_link_options(cascadio-worker PRIVATE -s) # no symbol table
   endif()
 endif()
+find_package(Threads REQUIRED)
+target_link_libraries(cascadio-worker PRIVATE Threads::Threads)
 
+# STABLE_ABI: one wheel serves every regular CPython from 3.12 on.
+# FREE_THREADED: on free-threaded CPython (which has no stable ABI yet, so it
+# gets its own wheel) declare that the module is safe without the GIL.
+# It is: the module keeps no state, each call talks to its own process.
+nanobind_add_module(_core STABLE_ABI FREE_THREADED src/main.cpp)
+target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION_FULL})
+target_link_libraries(_core PRIVATE ${CMAKE_DL_LIBS})
+
+install(TARGETS cascadio-worker RUNTIME DESTINATION cascadio)
 install(TARGETS _core LIBRARY DESTINATION cascadio)
 
 # Type stubs are generated from the compiled module so they cannot go stale.

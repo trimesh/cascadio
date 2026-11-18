@@ -2,7 +2,6 @@ import io
 import json
 import struct
 import tempfile
-import timeit
 from pathlib import Path
 from typing import List, Optional
 
@@ -389,31 +388,6 @@ def test_brep_forces_merge_primitives():
 
     # Validate vertices lie on their BREP surfaces
     assert_brep_surfaces(mesh)
-
-
-def test_worker_overhead():
-    """The child process used to enforce limits should cost little."""
-    step_data = (MODELS_DIR / "featuretype.STEP").read_bytes()
-    kwargs = {"tol_linear": 0.1, "tol_angular": 0.5}
-
-    def in_process():
-        return cascadio.load(step_data, timeout=None, memory_limit=None, **kwargs)
-
-    def in_worker():
-        return cascadio.load(step_data, **kwargs)
-
-    # same bytes either way
-    assert in_process() == in_worker()
-
-    count = 5
-    direct = timeit.timeit(in_process, number=count) / count
-    worker = timeit.timeit(in_worker, number=count) / count
-    print(
-        f"\nin-process {direct * 1000:.1f} ms, worker {worker * 1000:.1f} ms, "
-        f"overhead {(worker - direct) * 1000:.1f} ms"
-    )
-    # generous bound: catches the worker importing something heavy
-    assert worker - direct < 0.5
 
 
 def test_convert_step_to_glb_with_materials():
