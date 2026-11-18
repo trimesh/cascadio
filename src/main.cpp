@@ -8,6 +8,7 @@
 #include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
 
+#include <mutex>
 #include <new>
 #include <type_traits>
 
@@ -28,12 +29,19 @@ template <typename Failure> static std::string failureText(const Failure &f) {
 }
 
 /// Run a conversion with the GIL released so other Python threads keep
-/// running, and turn every failure into a Python exception:
+/// running, one conversion at a time, and turn every failure into a Python
+/// exception:
 ///   std::invalid_argument -> ValueError    (the input is bad)
 ///   std::bad_alloc        -> MemoryError
 ///   anything else         -> RuntimeError  (OpenCASCADE failed)
 template <typename Function> static auto guarded(Function &&convert) {
   nb::gil_scoped_release release;
+  // OpenCASCADE's application and document registry are unsynchronized
+  // globals, so two conversions must not overlap inside one process.
+  // (Each conversion still uses many threads; `cascadio.load` runs them
+  // in separate processes, which do run side by side.)
+  static std::mutex one_at_a_time;
+  const std::lock_guard<std::mutex> lock(one_at_a_time);
   try {
     return convert();
   } catch (const std::invalid_argument &) {

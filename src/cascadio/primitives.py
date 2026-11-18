@@ -128,7 +128,9 @@ __all__ = [
 ]
 
 
-def parse_primitive(data: Optional[dict], face_index: int = 0) -> Optional[BrepPrimitive]:
+def parse_primitive(
+    data: Optional[dict], face_index: int = 0
+) -> Optional[BrepPrimitive]:
     """
     Parse one face of the TM_brep_faces extension into a typed dataclass.
 

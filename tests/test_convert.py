@@ -1,6 +1,5 @@
 import io
 import json
-import os
 import struct
 import tempfile
 import timeit
@@ -578,7 +577,10 @@ def test_node_name_format(name_format, expected):
     assert names[:4] == expected
 
     # the low-level binding takes the same argument
-    assert _node_names(cascadio.to_glb_bytes(step_data, node_name_format=name_format)) == names
+    assert (
+        _node_names(cascadio.to_glb_bytes(step_data, node_name_format=name_format))
+        == names
+    )
 
 
 def test_node_name_format_default():

@@ -158,8 +158,7 @@ def test_load_zstd(name, file_type, limits):
     # is empty, as written by some tools when they flush
     empty_frame = b"\x28\xb5\x2f\xfd\x24\x00\x01\x00\x00\x99\xe9\xd8\x51"
     assert (
-        cascadio.load(packed + empty_frame, file_type=file_type, **limits)
-        == expected
+        cascadio.load(packed + empty_frame, file_type=file_type, **limits) == expected
     )
 
 

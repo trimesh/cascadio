@@ -218,9 +218,10 @@ def main() -> None:
 
         result = b"\x00" + convert(core, header["function"], data, header["options"])
     except BaseException as error:
-        result = b"\x01" + json.dumps(
-            {"type": type(error).__name__, "message": str(error)}
-        ).encode()
+        result = (
+            b"\x01"
+            + json.dumps({"type": type(error).__name__, "message": str(error)}).encode()
+        )
 
     reply.write(result)
     reply.flush()

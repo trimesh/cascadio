@@ -170,25 +170,23 @@ public:
     }
   }
 
-  /// Check if memfd is available on this system (cached)
+  /// Can this system create a memfd and reach it through /proc?
+  /// Probed once; the static makes the first call safe from any thread.
   static bool memfd_available() {
-    static int cached = -1;
-    if (cached < 0) {
+    static const bool available = [] {
 #ifdef __linux__
-      int test_fd = syscall(SYS_memfd_create, "probe", MFD_CLOEXEC);
-      if (test_fd >= 0) {
-        std::string test_path = "/proc/self/fd/" + std::to_string(test_fd);
-        struct stat st;
-        cached = (stat(test_path.c_str(), &st) == 0) ? 1 : 0;
-        close(test_fd);
-      } else {
-        cached = 0;
+      const int fd = syscall(SYS_memfd_create, "probe", MFD_CLOEXEC);
+      if (fd >= 0) {
+        struct stat info;
+        const std::string path = "/proc/self/fd/" + std::to_string(fd);
+        const bool reachable = stat(path.c_str(), &info) == 0;
+        close(fd);
+        return reachable;
       }
-#else
-      cached = 0;
 #endif
-    }
-    return cached == 1;
+      return false;
+    }();
+    return available;
   }
 
 private:

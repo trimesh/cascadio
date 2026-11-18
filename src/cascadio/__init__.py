@@ -210,7 +210,8 @@ def step_to_obj(
     Returns 0, as it always did on success; failures now raise.
     """
     _deprecated(
-        "step_to_obj", "Call cascadio.load(data) and export the GLB with a mesh library."
+        "step_to_obj",
+        "Call cascadio.load(data) and export the GLB with a mesh library.",
     )
     with open(input_path, "rb") as file:
         data = file.read()

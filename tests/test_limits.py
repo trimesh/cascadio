@@ -139,3 +139,35 @@ for name, kind in (("featuretype.STEP", "step"), ("microstrip.igs", "iges")):
     )
     assert result.stdout == b""
     assert result.stderr == b""
+
+
+def test_threads_in_process():
+    """Conversions started from several threads at once all succeed."""
+    expected = cascadio.load(STEP, **IN_PROCESS)
+    results = []
+
+    def convert():
+        results.append(cascadio.load(STEP, **IN_PROCESS))
+
+    threads = [threading.Thread(target=convert) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert results == [expected] * 8
+
+
+def test_threads_worker():
+    """Worker processes run side by side without interfering."""
+    expected = cascadio.load(STEP)
+    results = []
+
+    def convert():
+        results.append(cascadio.load(STEP))
+
+    threads = [threading.Thread(target=convert) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert results == [expected] * 4
