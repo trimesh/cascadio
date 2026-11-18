@@ -51,8 +51,11 @@ elseif(OpenCASCADE_VERSION VERSION_LESS OCCT_MINIMUM)
 endif()
 message(STATUS "Using OpenCASCADE ${OpenCASCADE_VERSION} from ${OpenCASCADE_INSTALL_PREFIX}")
 
-# Stable ABI: one wheel serves every CPython from 3.12 on.
-nanobind_add_module(_core STABLE_ABI src/main.cpp)
+# STABLE_ABI: one wheel serves every regular CPython from 3.12 on.
+# FREE_THREADED: on free-threaded CPython (which has no stable ABI yet, so it
+# gets its own wheel) declare that the module is safe without the GIL.
+# It is: the only shared state is OpenCASCADE's, guarded by a lock in main.cpp.
+nanobind_add_module(_core STABLE_ABI FREE_THREADED src/main.cpp)
 target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION_FULL})
 target_include_directories(_core SYSTEM PRIVATE "${OpenCASCADE_INCLUDE_DIR}")
 
