@@ -28,10 +28,7 @@
 #include <vector>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#define PSAPI_VERSION 2 // GetProcessMemoryInfo from kernel32, no extra library
-#include <windows.h>
+#include <windows.h> // NOMINMAX and WIN32_LEAN_AND_MEAN come from CMake
 
 #include <fcntl.h>
 #include <io.h>

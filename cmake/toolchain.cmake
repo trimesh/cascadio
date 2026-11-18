@@ -52,4 +52,10 @@ else()
   # MSVC's version of one section per function
   set(CMAKE_C_FLAGS_INIT "/Gy")
   set(CMAKE_CXX_FLAGS_INIT "/Gy")
+  # Link the C and C++ runtime statically. The worker is a program started
+  # on its own, so it cannot rely on runtime DLLs being installed on the
+  # user's machine or bundled next to the Python module. The policy makes
+  # OpenCASCADE's older CMake honor the setting too.
+  set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 endif()

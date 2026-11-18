@@ -11,6 +11,7 @@
 #include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
 
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -46,7 +47,7 @@ static std::string workerPath() {
 
 /// Raise a Python exception of a built-in type that nanobind has no
 /// C++ class for.
-[[noreturn]] static void raise(PyObject *type, const std::string &message) {
+[[noreturn]] static void raisePython(PyObject *type, const std::string &message) {
   PyErr_SetString(type, message.c_str());
   throw nb::python_error();
 }
@@ -70,7 +71,7 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
   }
 
   if (result.timed_out) {
-    raise(PyExc_TimeoutError,
+    raisePython(PyExc_TimeoutError,
           "conversion did not finish within " + std::to_string(*timeout) +
               " seconds; pass a larger `timeout`, or None for no limit");
   }
@@ -85,7 +86,7 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
   case worker_exit::INVALID_INPUT:
     throw std::invalid_argument(said);
   case worker_exit::OUT_OF_MEMORY:
-    raise(PyExc_MemoryError,
+    raisePython(PyExc_MemoryError,
           "conversion used more than " +
               std::to_string(memory_limit.value_or(0)) +
               " bytes of memory; pass a larger `memory_limit`, "

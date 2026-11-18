@@ -51,6 +51,11 @@ elseif(OpenCASCADE_VERSION VERSION_LESS OCCT_MINIMUM)
 endif()
 message(STATUS "Using OpenCASCADE ${OpenCASCADE_VERSION} from ${OpenCASCADE_INSTALL_PREFIX}")
 
+if(WIN32)
+  # keep <windows.h> from defining min/max macros and pulling in the world
+  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # Two binaries:
 #   cascadio-worker  a plain program that does one conversion; all of
 #                    OpenCASCADE is in here and Python is not
@@ -122,6 +127,9 @@ else()
 endif()
 find_package(Threads REQUIRED)
 target_link_libraries(cascadio-worker PRIVATE Threads::Threads)
+if(WIN32)
+  target_link_libraries(cascadio-worker PRIVATE psapi) # GetProcessMemoryInfo
+endif()
 
 # STABLE_ABI: one wheel serves every regular CPython from 3.12 on.
 # FREE_THREADED: on free-threaded CPython (which has no stable ABI yet, so it

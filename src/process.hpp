@@ -7,9 +7,11 @@
 // There are two implementations of one function, `runProcess`:
 // POSIX (Linux, macOS, BSD) and Windows.
 
+#include <algorithm>
 #include <chrono>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct ProcessResult {
@@ -45,7 +47,14 @@ static std::string thisBinaryFolder();
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+// on macOS a shared library cannot see `environ` directly
+#include <crt_externs.h>
+#define CASCADIO_ENVIRON (*_NSGetEnviron())
+#else
 extern char **environ;
+#define CASCADIO_ENVIRON environ
+#endif
 
 static std::string thisBinaryFolder() {
   Dl_info info;
@@ -104,7 +113,8 @@ static ProcessResult runProcess(const std::string &program,
   char *const arguments[] = {const_cast<char *>(program.c_str()), nullptr};
   pid_t child = -1;
   const int failed =
-      posix_spawn(&child, program.c_str(), &actions, nullptr, arguments, environ);
+      posix_spawn(&child, program.c_str(), &actions, nullptr, arguments,
+                  CASCADIO_ENVIRON);
   posix_spawn_file_actions_destroy(&actions);
   if (failed != 0) {
     throw std::runtime_error("cannot start " + program + ": " +
@@ -222,11 +232,7 @@ static ProcessResult runProcess(const std::string &program,
 // Windows
 // ============================================================================
 
-#define WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#include <windows.h> // NOMINMAX and WIN32_LEAN_AND_MEAN come from CMake
 
 #include <thread>
 
