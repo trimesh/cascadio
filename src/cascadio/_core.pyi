@@ -10,6 +10,13 @@ class FileType(Enum):
     STEP: FileType
     IGES: FileType
 
+class NodeNameFormat(Enum):
+    PRODUCT: NodeNameFormat
+    INSTANCE: NodeNameFormat
+    INSTANCE_OR_PRODUCT: NodeNameFormat
+    PRODUCT_OR_INSTANCE: NodeNameFormat
+    PRODUCT_AND_INSTANCE: NodeNameFormat
+
 def to_glb_bytes(
     data: bytes,
     file_type: FileType = FileType.STEP,
@@ -21,6 +28,7 @@ def to_glb_bytes(
     include_brep: bool = False,
     brep_types: Optional[Set[BrepType]] = None,
     include_materials: bool = False,
+    node_name_format: NodeNameFormat = NodeNameFormat.INSTANCE_OR_PRODUCT,
 ) -> bytes: ...
 def step_to_glb(
     input_path: str,
@@ -33,6 +41,7 @@ def step_to_glb(
     include_brep: bool = False,
     brep_types: Optional[Set[BrepType]] = None,
     include_materials: bool = False,
+    node_name_format: NodeNameFormat = NodeNameFormat.INSTANCE_OR_PRODUCT,
 ) -> int: ...
 def step_to_obj(
     input_path: str,

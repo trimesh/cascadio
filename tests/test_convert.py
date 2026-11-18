@@ -1,5 +1,7 @@
 import io
+import json
 import os
+import struct
 import tempfile
 import timeit
 from pathlib import Path
@@ -618,3 +620,58 @@ def test_cylinder_vertices_on_surface(brep_mesh):
 
 if __name__ == "__main__":
     test_multibody()
+
+
+def _node_names(glb: bytes) -> list:
+    """Read node names straight from the GLB JSON chunk."""
+    json_length = struct.unpack("<I", glb[12:16])[0]
+    header = json.loads(glb[20 : 20 + json_length])
+    return [node.get("name") for node in header["nodes"]]
+
+
+@pytest.mark.parametrize(
+    "name_format,expected",
+    [
+        # instance labels from the STEP assembly structure
+        ("INSTANCE", ["box_sides", "NAUO1", "NAUO2", "NAUO3"]),
+        ("INSTANCE_OR_PRODUCT", ["box_sides", "NAUO1", "NAUO2", "NAUO3"]),
+        # human-readable product names
+        ("PRODUCT", ["box_sides", "box_base", "side_long", "side_long"]),
+        ("PRODUCT_OR_INSTANCE", ["box_sides", "box_base", "side_long", "side_long"]),
+        (
+            "PRODUCT_AND_INSTANCE",
+            ["box_sides", "box_base [NAUO1]", "side_long [NAUO2]", "side_long [NAUO3]"],
+        ),
+    ],
+)
+def test_node_name_format(name_format, expected):
+    """`node_name_format` picks between instance and product names for nodes."""
+    step_data = (MODELS_DIR / "multibody.step").read_bytes()
+    name_format = getattr(cascadio.NodeNameFormat, name_format)
+
+    names = _node_names(cascadio.load(step_data, node_name_format=name_format))
+    assert names[:4] == expected
+
+    # the low-level binding takes the same argument
+    assert _node_names(cascadio.to_glb_bytes(step_data, node_name_format=name_format)) == names
+
+
+def test_node_name_format_default():
+    """The default keeps the behavior from before the option existed."""
+    step_data = (MODELS_DIR / "multibody.step").read_bytes()
+    assert _node_names(cascadio.load(step_data)) == _node_names(
+        cascadio.load(
+            step_data, node_name_format=cascadio.NodeNameFormat.INSTANCE_OR_PRODUCT
+        )
+    )
+
+
+def test_node_name_format_step_to_glb(tmp_path):
+    """The file-based wrapper passes `node_name_format` through."""
+    output = tmp_path / "out.glb"
+    cascadio.step_to_glb(
+        str(MODELS_DIR / "multibody.step"),
+        str(output),
+        node_name_format=cascadio.NodeNameFormat.PRODUCT,
+    )
+    assert _node_names(output.read_bytes())[1] == "box_base"

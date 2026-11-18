@@ -75,6 +75,9 @@ def load(
         Valid values: "plane", "cylinder", "cone", "sphere", "torus".
     include_materials : bool, optional
         Include material data in GLB asset.extras.materials. Default is False.
+    node_name_format : NodeNameFormat, optional
+        Which STEP name each GLB node gets: the instance label, the product
+        name, or a mix. Default is NodeNameFormat.INSTANCE_OR_PRODUCT.
 
     Returns
     -------
@@ -125,6 +128,7 @@ def load(
 __all__ = [
     "load",
     "FileType",
+    "NodeNameFormat",
     "STEP",
     "IGES",
     "to_glb_bytes",
