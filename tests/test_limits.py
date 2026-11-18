@@ -88,6 +88,21 @@ def test_crashing_worker(monkeypatch):
         cascadio.load(STEP)
 
 
+def test_segfault_is_survived(monkeypatch, tmp_path):
+    """A worker killed by a segmentation fault raises; the interpreter lives."""
+    if sys.platform == "win32":
+        pytest.skip("uses a shell script as the worker")
+    worker = tmp_path / "segfault"
+    worker.write_text("#!/bin/sh\nkill -SEGV $$\n")
+    worker.chmod(0o755)
+    monkeypatch.setenv("CASCADIO_WORKER", str(worker))
+    with pytest.raises(RuntimeError, match="crashed.*signal 11"):
+        cascadio.load(STEP)
+
+    monkeypatch.delenv("CASCADIO_WORKER")
+    assert len(cascadio.load(STEP)) > 1000
+
+
 def test_large_input_and_output():
     """More data than a pipe holds flows both ways without deadlock."""
     # padding after the end of a STEP file is ignored by the reader
