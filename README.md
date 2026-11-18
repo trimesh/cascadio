@@ -16,6 +16,12 @@ The primary goal of this project is building wheels so vanilla `pip` can be used
 pip install cascadio
 ```
 
+Version 0.2 is out as a release candidate. It is much smaller and safer but changes how errors are reported (see below), so `pip` only picks it when asked:
+
+```
+pip install --pre cascadio
+```
+
 Wheels are built for Python 3.12 and newer on Linux (x86_64 and ARM, not musl), Windows x64, and macOS (Intel and ARM). Each wheel is about 9 MB and has no dependencies. You can check [PyPI](https://pypi.org/project/cascadio/#files) for current platforms.
 
 ### Usage
@@ -68,27 +74,15 @@ A lot of analysis can be done on triangulated surface meshes that doesn't need t
 
 ### Contributing
 
-Developed on Linux which should build wheels locally with docker:
+Everything goes through `make`, which needs [uv](https://docs.astral.sh/uv/). Run `make` on its own to list the targets.
+
 ```bash
-# Build wheels using cibuildwheel (builds OCCT inside container)
-CIBW_BUILD="cp312-manylinux_x86_64" cibuildwheel --platform linux
+make occt      # build static OpenCASCADE into occt_install/ (several minutes, once)
+make test      # build cascadio against it and run the tests
+make wheel     # build a wheel for this machine into dist/
 ```
 
-For local development without docker:
-```bash
-# fetch OpenCASCADE and RapidJSON
-git submodule update --init --depth 1
-
-# install build tools (clang and lld are used when installed)
-uv pip install cmake ninja
-
-# build static OpenCASCADE into occt_install/ (several minutes, done once)
-python scripts/build_occt.py
-
-# install and test
-uv pip install -e ".[tests]"
-pytest tests/
-```
+`make occt` fetches the OpenCASCADE, RapidJSON and zstd submodules if needed and uses clang and lld when they are installed. Add `CPUS=4` to any target to limit how many cores it uses.
 
 OpenCASCADE is built as static libraries with only the pieces cascadio uses, then linked into a single extension module. The linker removes every function that is not reachable, which is what keeps the wheels small.
 
@@ -103,12 +97,16 @@ pip install --no-binary cascadio cascadio
 
 No patches to OpenCASCADE are needed. If CMake does not find it, point `CMAKE_PREFIX_PATH` at the install.
 
-#### Slower checks
+#### Build tools are locked
+
+`uv.lock` records the exact version and checksum of every tool that takes part in building a wheel (the `build` group in `pyproject.toml`). Local and CI builds refuse anything that does not match. `make lock` takes updates.
+
+#### Release checks
 
 These run in Docker and are kept out of CI on purpose:
 
 ```bash
-make wheel         # build and test one Linux wheel exactly like CI
+make manylinux     # build and test a Linux wheel exactly like CI
 make system-occt   # build the sdist against OpenCASCADE 7.9.0 and test
 make occt-master   # build and test against the newest OpenCASCADE commit
 ```

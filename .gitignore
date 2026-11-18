@@ -164,8 +164,8 @@ cython_debug/
 # Static OpenCASCADE built by scripts/build_occt.py
 occt_install/
 
-# uv
-uv.lock
+# written from uv.lock during wheel builds
+build-constraints.txt
 
 # GTAGS
 GPATH

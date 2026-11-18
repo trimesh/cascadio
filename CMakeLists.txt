@@ -6,8 +6,11 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
   set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_LIST_DIR}/cmake/toolchain.cmake")
 endif()
 
+# scikit-build-core passes the version twice: numbers only for CMake, and
+# in full (for example 0.2.0rc0) for the module's __version__.
 if(NOT SKBUILD_PROJECT_VERSION)
   set(SKBUILD_PROJECT_VERSION 0.0.0) # building with plain cmake
+  set(SKBUILD_PROJECT_VERSION_FULL 0.0.0)
 endif()
 project(cascadio VERSION ${SKBUILD_PROJECT_VERSION} LANGUAGES C CXX)
 
@@ -50,7 +53,7 @@ message(STATUS "Using OpenCASCADE ${OpenCASCADE_VERSION} from ${OpenCASCADE_INST
 
 # Stable ABI: one wheel serves every CPython from 3.12 on.
 nanobind_add_module(_core STABLE_ABI src/main.cpp)
-target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
+target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION_FULL})
 target_include_directories(_core SYSTEM PRIVATE "${OpenCASCADE_INCLUDE_DIR}")
 
 # The code that writes TM_brep_faces JSON is generated from the extension's
