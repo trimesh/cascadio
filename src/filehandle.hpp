@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <random>
 #include <string>
 #include <vector>
@@ -17,181 +16,99 @@
 #endif
 #endif
 
-/// RAII file handle that automatically uses memfd (Linux) or tempfile.
-/// Provides a file path suitable for OCCT APIs that require paths.
-/// On Linux 3.17+: uses memfd_create (no filesystem writes)
-/// Elsewhere: falls back to temp file in system temp directory
-///
+/// A scratch file for OpenCASCADE APIs that only take a path.
+/// On Linux it lives in memory (memfd), so nothing touches the filesystem;
+/// elsewhere it is a temporary file that is deleted when this goes away.
 class FileHandle {
 public:
-  /// Create a file handle with the given extension hint (e.g., ".glb", ".igs")
+  /// `extension` (for example ".glb") only names the temporary file.
   explicit FileHandle(const std::string &extension) {
-    if (memfd_available()) {
 #ifdef __linux__
-      // Use memfd - no filesystem writes
-      fd_ = syscall(SYS_memfd_create, "cascadio", MFD_CLOEXEC);
+    if (memfdAvailable()) {
+      fd_ = static_cast<int>(syscall(SYS_memfd_create, "cascadio", MFD_CLOEXEC));
       if (fd_ >= 0) {
         path_ = "/proc/self/fd/" + std::to_string(fd_);
-        is_memfd_ = true;
-        valid_ = true;
         return;
       }
+    }
 #endif
+    static const char letters[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    std::random_device random;
+    std::string name = "cascadio_";
+    for (int i = 0; i < 12; ++i) {
+      name += letters[random() % (sizeof(letters) - 1)];
     }
-
-    // Fallback to temp file
-    static const char charset[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, sizeof(charset) - 2);
-
-    std::string random_part;
-    for (int i = 0; i < 8; ++i) {
-      random_part += charset[dist(gen)];
-    }
-
-    path_ = (std::filesystem::temp_directory_path() /
-             ("cascadio_" + random_part + extension))
+    path_ = (std::filesystem::temp_directory_path() / (name + extension))
                 .string();
-
-    std::ofstream ofs(path_, std::ios::binary);
-    valid_ = ofs.good();
-    is_memfd_ = false;
+    if (!std::ofstream(path_, std::ios::binary)) {
+      path_.clear(); // could not create it
+    }
   }
 
   ~FileHandle() {
-    if (is_memfd_) {
 #ifdef __linux__
-      if (fd_ >= 0) {
-        close(fd_);
-      }
+    if (fd_ >= 0) {
+      close(fd_);
+      return;
+    }
 #endif
-    } else if (!path_.empty()) {
-      std::filesystem::remove(path_);
+    if (!path_.empty()) {
+      std::error_code ignored;
+      std::filesystem::remove(path_, ignored);
     }
   }
 
-  // Non-copyable, non-movable
   FileHandle(const FileHandle &) = delete;
   FileHandle &operator=(const FileHandle &) = delete;
-  FileHandle(FileHandle &&) = delete;
-  FileHandle &operator=(FileHandle &&) = delete;
 
-  /// Check if handle was created successfully
-  bool valid() const { return valid_; }
-
-  /// True if backed by memfd rather than a file on disk
-  bool is_memfd() const { return is_memfd_; }
-
-  /// Get file path for OCCT APIs
+  bool valid() const { return !path_.empty(); }
+  bool is_memfd() const { return fd_ >= 0; }
   const char *path() const { return path_.c_str(); }
 
-  /// Write data to the handle
-  bool write_data(const void *data, size_t size) {
-    if (!valid_)
-      return false;
-
-    if (is_memfd_) {
-#ifdef __linux__
-      if (ftruncate(fd_, 0) != 0 || lseek(fd_, 0, SEEK_SET) != 0) {
-        return false;
-      }
-      // one write() call is capped at about 2 GB, so loop until done
-      const char *cursor = static_cast<const char *>(data);
-      while (size > 0) {
-        const ssize_t written = write(fd_, cursor, size);
-        if (written <= 0) {
-          return false;
-        }
-        cursor += written;
-        size -= static_cast<size_t>(written);
-      }
-      return true;
-#else
-      return false;
-#endif
-    } else {
-      std::ofstream ofs(path_, std::ios::binary | std::ios::trunc);
-      ofs.write(static_cast<const char *>(data),
-                static_cast<std::streamsize>(size));
-      return ofs.good();
-    }
+  /// Replace the content. Returns false on failure.
+  bool write_data(const char *data, size_t size) {
+    std::ofstream file(path_, std::ios::binary | std::ios::trunc);
+    file.write(data, static_cast<std::streamsize>(size));
+    return file.good();
   }
 
-  /// Prepare for reading (seeks to start for memfd, no-op for tempfile)
-  void prepare_for_read() {
-#ifdef __linux__
-    if (is_memfd_ && fd_ >= 0) {
-      lseek(fd_, 0, SEEK_SET);
-    }
-#endif
-  }
-
-  /// Read all data from the handle
-  std::vector<char> read_all() {
-    if (!valid_)
+  /// Everything in the file, or empty on failure.
+  std::vector<char> read_all() const {
+    std::ifstream file(path_, std::ios::binary | std::ios::ate);
+    const std::streamoff size = file ? std::streamoff(file.tellg()) : -1;
+    if (size <= 0) {
       return {};
-
-    if (is_memfd_) {
-#ifdef __linux__
-      off_t size = lseek(fd_, 0, SEEK_END);
-      if (size <= 0)
-        return {};
-      lseek(fd_, 0, SEEK_SET);
-      std::vector<char> result(static_cast<size_t>(size));
-      // one read() call is capped at about 2 GB, so loop until done
-      size_t done = 0;
-      while (done < result.size()) {
-        const ssize_t got = read(fd_, result.data() + done, result.size() - done);
-        if (got <= 0) {
-          return {};
-        }
-        done += static_cast<size_t>(got);
-      }
-      return result;
-#else
-      return {};
-#endif
-    } else {
-      std::ifstream file(path_, std::ios::binary | std::ios::ate);
-      if (!file)
-        return {};
-      std::streampos pos = file.tellg();
-      if (pos == std::streampos(-1) || pos < 0)
-        return {};
-      auto size = static_cast<size_t>(pos);
-      file.seekg(0);
-      std::vector<char> result(size);
-      file.read(result.data(), static_cast<std::streamsize>(size));
-      if (!file) {
-        return {};
-      }
-      return result;
     }
-  }
-
-  /// Can this system create a memfd and reach it through /proc?
-  /// Probed once; the static makes the first call safe from any thread.
-  static bool memfd_available() {
-    static const bool available = [] {
-#ifdef __linux__
-      const int fd = syscall(SYS_memfd_create, "probe", MFD_CLOEXEC);
-      if (fd >= 0) {
-        struct stat info;
-        const std::string path = "/proc/self/fd/" + std::to_string(fd);
-        const bool reachable = stat(path.c_str(), &info) == 0;
-        close(fd);
-        return reachable;
-      }
-#endif
-      return false;
-    }();
-    return available;
+    std::vector<char> content(static_cast<size_t>(size));
+    file.seekg(0);
+    file.read(content.data(), size);
+    if (!file) {
+      return {};
+    }
+    return content;
   }
 
 private:
-  bool valid_ = false;
-  bool is_memfd_ = false;
-  std::string path_;
-  int fd_ = -1;
+#ifdef __linux__
+  /// Can this system create a memfd and reach it through /proc?
+  /// Probed once; the static makes the first call safe from any thread.
+  static bool memfdAvailable() {
+    static const bool available = [] {
+      const int fd =
+          static_cast<int>(syscall(SYS_memfd_create, "probe", MFD_CLOEXEC));
+      if (fd < 0) {
+        return false;
+      }
+      struct stat info;
+      const std::string path = "/proc/self/fd/" + std::to_string(fd);
+      const bool reachable = stat(path.c_str(), &info) == 0;
+      close(fd);
+      return reachable;
+    }();
+    return available;
+  }
+#endif
+
+  std::string path_; ///< empty if the file could not be created
+  int fd_ = -1;      ///< the memfd, or -1 for a temporary file
 };

@@ -118,7 +118,6 @@ static void loadIges(Loaded &loaded, const char *data, size_t size,
   if (!handle.valid() || !handle.write_data(data, size)) {
     throw std::runtime_error("could not create a temporary file for IGES");
   }
-  handle.prepare_for_read();
   const IFSelect_ReturnStatus status = reader.ReadFile(handle.path());
 #endif
   if (status != IFSelect_RetDone) {

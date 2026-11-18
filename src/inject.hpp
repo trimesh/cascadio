@@ -17,14 +17,6 @@
 #include <string>
 #include <vector>
 
-/// glTF spec requires 4-byte alignment for buffer views
-constexpr uint32_t GLTF_ALIGNMENT = 4;
-
-/// Align value up to specified alignment (default: 4 bytes for glTF)
-inline uint32_t alignTo(uint32_t value, uint32_t alignment = GLTF_ALIGNMENT) {
-  return (value + (alignment - 1)) & ~(alignment - 1);
-}
-
 /// Add the TM_brep_faces extension and/or material metadata to a finished GLB.
 ///
 /// For each index accessor the writer recorded faces for, this appends a
@@ -54,7 +46,8 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
   if (!faces.empty() && hasMeshes && isArray("accessors") &&
       isArray("bufferViews") && isArray("buffers") &&
       doc["buffers"].Size() > 0) {
-    glb.bin.resize(alignTo(static_cast<uint32_t>(glb.bin.size())));
+    // glTF wants every buffer view to start on a 4-byte boundary
+    glb.bin.resize((glb.bin.size() + 3) & ~size_t(3));
 
     // indices accessor id -> {faceIndices accessor id, faces JSON}
     std::map<int, std::pair<int, rapidjson::Value>> extensions;

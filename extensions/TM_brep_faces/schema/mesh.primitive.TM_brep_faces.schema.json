@@ -12,8 +12,13 @@
     },
     "faces": {
       "type": "array",
-      "description": "Array of face definitions with analytic surface geometry",
-      "items": {"$ref": "#/$defs/face"}
+      "description": "One entry per BREP face, in face index order. An entry is null when the face is not one of the analytic surface types, so positions still match face indices.",
+      "items": {
+        "oneOf": [
+          {"type": "null"},
+          {"$ref": "#/$defs/face"}
+        ]
+      }
     }
   },
   "required": [

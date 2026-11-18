@@ -75,9 +75,6 @@ skip = "*musl* *win32*"
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 
-# Skip testing on i686 (32-bit is not supported)
-test-skip = "*i686"
-
 # Build static OpenCASCADE once per platform (skipped when cached)
 before-all = "make occt"
 

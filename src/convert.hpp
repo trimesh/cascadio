@@ -1,6 +1,6 @@
 #pragma once
 
-#include "extras.hpp"
+#include "inject.hpp"
 #include "filehandle.hpp"
 #include "load.hpp"
 #include "materials.hpp"
@@ -120,7 +120,6 @@ static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
     }
   }
 
-  handle.prepare_for_read();
   return handle.read_all();
 }
 

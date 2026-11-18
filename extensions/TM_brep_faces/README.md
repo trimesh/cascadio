@@ -25,7 +25,7 @@ Per-triangle BREP face indices and analytic surface definitions for glTF mesh pr
 | Property | Type | Description |
 |----------|------|-------------|
 | `faceIndices` | integer | Accessor index for per-triangle face indices (SCALAR, unsigned int) |
-| `faces` | array | Face definitions with `type` and geometry parameters |
+| `faces` | array | One entry per face, in face index order: a definition with `type` and geometry parameters, or `null` for a face that is not one of the types below |
 
 ## Face Types
 

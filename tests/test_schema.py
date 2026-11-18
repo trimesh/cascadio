@@ -4,9 +4,7 @@ Test that cascadio output validates against the TM_brep_faces JSON schema.
 
 import dataclasses
 import json
-import os
 import struct
-import tempfile
 from pathlib import Path
 
 import cascadio
@@ -29,18 +27,11 @@ EXTENSION_SCHEMA = json.loads(SCHEMA_PATH.read_text())
 FACE_SCHEMA = {"$ref": "#/$defs/face", "$defs": EXTENSION_SCHEMA["$defs"]}
 
 
-def extract_glb_json(glb_path):
-    """Extract JSON tree from a GLB file."""
-    with open(glb_path, "rb") as f:
-        data = f.read()
-
-    magic = data[0:4]
-    if magic != b"glTF":
-        raise ValueError("Not a valid GLB file")
-
-    chunk_length = struct.unpack("<I", data[12:16])[0]
-    json_data = data[20 : 20 + chunk_length].decode("utf-8")
-    return json.loads(json_data)
+def extract_glb_json(glb: bytes) -> dict:
+    """The JSON chunk of a GLB."""
+    assert glb[:4] == b"glTF"
+    length = struct.unpack("<I", glb[12:16])[0]
+    return json.loads(glb[20 : 20 + length])
 
 
 def get_validator(schema):
@@ -197,42 +188,22 @@ def test_invalid_vec3_wrong_length():
 
 
 def test_cascadio_output_validates():
-    """Test that cascadio GLB output validates against schema."""
-    step_files = list(MODELS_DIR.glob("*.step")) + list(MODELS_DIR.glob("*.stp"))
-    assert step_files, "No STEP files found for testing"
-
-    step_file = step_files[0]
-
-    with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as f:
-        output_path = f.name
-
-    try:
-        Path(output_path).write_bytes(
-            cascadio.load(step_file.read_bytes(), include_brep=True)
-        )
-
-        tree = extract_glb_json(output_path)
-
-        # Find and validate TM_brep_faces extension
-        found_extension = False
-        for mesh in tree.get("meshes", []):
-            for prim in mesh.get("primitives", []):
-                extensions = prim.get("extensions", {})
-                if "TM_brep_faces" in extensions:
-                    found_extension = True
-                    brep_data = extensions["TM_brep_faces"]
-
-                    # Validate each face
-                    validator = get_validator(FACE_SCHEMA)
-                    for face in brep_data.get("faces", []):
-                        if face is not None and face.get("type") is not None:
-                            validator.validate(face)
-
-        assert found_extension, "TM_brep_faces extension not found in output"
-
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+    """Every face cascadio writes validates against the schema."""
+    validator = get_validator(FACE_SCHEMA)
+    found = 0
+    for model in sorted(MODELS_DIR.glob("*.st*p")):
+        tree = extract_glb_json(cascadio.load(model.read_bytes(), include_brep=True))
+        for mesh in tree["meshes"]:
+            for primitive in mesh["primitives"]:
+                extension = primitive.get("extensions", {}).get("TM_brep_faces")
+                if extension is None:
+                    continue
+                get_validator(EXTENSION_SCHEMA).validate(extension)
+                for face in extension["faces"]:
+                    if face is not None:
+                        validator.validate(face)
+                        found += 1
+    assert found > 100
 
 
 # --- The Python side matches the schema ---
