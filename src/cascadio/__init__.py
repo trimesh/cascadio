@@ -10,6 +10,7 @@ from typing import Literal, Optional, Set
 # Import the C extension functions and enums
 from cascadio._core import (
     FileType,
+    NodeNameFormat,
     to_glb_bytes,
     step_to_glb,
     step_to_obj,
@@ -42,6 +43,7 @@ def load(
     include_brep: bool = False,
     brep_types: Optional[Set[BrepType]] = None,
     include_materials: bool = False,
+    node_name_format: NodeNameFormat = NodeNameFormat.INSTANCE_OR_PRODUCT,
 ) -> bytes:
     """
     Convert BREP data (STEP or IGES) to GLB format.
@@ -116,6 +118,7 @@ def load(
         include_brep=include_brep,
         brep_types=brep_types,
         include_materials=include_materials,
+        node_name_format=node_name_format,
     )
 
 

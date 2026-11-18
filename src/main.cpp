@@ -24,12 +24,20 @@ NB_MODULE(_core, m) {
       .value("IGES", FileType::IGES)
       .export_values();
 
+  nb::enum_<RWMesh_NameFormat>(m, "NodeNameFormat")
+      .value("PRODUCT", RWMesh_NameFormat_Product)
+      .value("INSTANCE", RWMesh_NameFormat_Instance)
+      .value("INSTANCE_OR_PRODUCT", RWMesh_NameFormat_InstanceOrProduct)
+      .value("PRODUCT_OR_INSTANCE", RWMesh_NameFormat_ProductOrInstance)
+      .value("PRODUCT_AND_INSTANCE", RWMesh_NameFormat_ProductAndInstance)
+      .export_values();
+
   m.def(
       "to_glb_bytes",
       [](nb::bytes data, FileType file_type, double tol_linear,
          double tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
-         bool include_materials) -> nb::bytes {
+         bool include_materials, RWMesh_NameFormat node_name_format) -> nb::bytes {
         // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
         if ((include_brep || include_materials) && !merge_primitives) {
           std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
@@ -42,7 +50,7 @@ NB_MODULE(_core, m) {
         std::vector<char> result =
             to_glb_bytes(input_data, input_data_len, file_type, tol_linear, tol_angle,
                          tol_relative, merge_primitives, use_parallel,
-                         include_brep, brep_types, include_materials);
+                         include_brep, brep_types, include_materials, node_name_format);
         return nb::bytes(result.data(), result.size());
       },
       R"doc(
@@ -70,6 +78,9 @@ brep_types
   If non-empty, only include these primitive types in brep_faces.
 include_materials
   Include material data in GLB asset.extras.materials.
+node_name_format
+  Name format for GLB nodes and meshes; controls whether instance
+  names, product names, or both are used.
 
 Returns
 -------
@@ -82,7 +93,8 @@ bytes
       nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
       nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
       nb::arg("brep_types") = std::set<std::string>(),
-      nb::arg("include_materials") = false);
+      nb::arg("include_materials") = false,
+      nb::arg("node_name_format") = RWMesh_NameFormat::RWMesh_NameFormat_InstanceOrProduct);
 
   // Backward compatibility wrappers
   m.def(
@@ -90,7 +102,7 @@ bytes
       [](const std::string &input_path, const std::string &output_path, double tol_linear,
          double tol_angle, bool tol_relative, bool merge_primitives,
          bool use_parallel, bool include_brep, std::set<std::string> brep_types,
-         bool include_materials) -> int {
+         bool include_materials, RWMesh_NameFormat node_name_format) -> int {
         // Force merge_primitives when BREP/materials requested (metadata requires merged faces)
         if ((include_brep || include_materials) && !merge_primitives) {
           std::cerr << "Warning: include_brep/include_materials require merge_primitives=true, enabling automatically" << std::endl;
@@ -98,7 +110,7 @@ bytes
         }
         return to_glb(input_path.c_str(), output_path.c_str(), FileType::STEP, tol_linear,
                       tol_angle, tol_relative, merge_primitives, use_parallel,
-                      include_brep, brep_types, include_materials);
+                      include_brep, brep_types, include_materials, node_name_format);
       },
       R"doc(
 Convert a step file to a GLB file.
@@ -138,7 +150,8 @@ include_materials
       nb::arg("tol_relative") = false, nb::arg("merge_primitives") = true,
       nb::arg("use_parallel") = true, nb::arg("include_brep") = false,
       nb::arg("brep_types") = std::set<std::string>(),
-      nb::arg("include_materials") = false);
+      nb::arg("include_materials") = false,
+      nb::arg("node_name_format") = RWMesh_NameFormat::RWMesh_NameFormat_InstanceOrProduct);
 
   m.def("step_to_obj", &step_to_obj,
         R"doc(
