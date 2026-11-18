@@ -9,7 +9,7 @@ endif()
 if(NOT SKBUILD_PROJECT_VERSION)
   set(SKBUILD_PROJECT_VERSION 0.0.0) # building with plain cmake
 endif()
-project(cascadio VERSION ${SKBUILD_PROJECT_VERSION} LANGUAGES CXX)
+project(cascadio VERSION ${SKBUILD_PROJECT_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,7 +39,7 @@ if(NOT OpenCASCADE_FOUND)
   message(FATAL_ERROR
     "OpenCASCADE was not found. From a git checkout run "
     "`python scripts/build_occt.py` first. Otherwise install the "
-    "OpenCASCADE ${OCCT_MINIMUM}+ development files (and RapidJSON) "
+    "OpenCASCADE ${OCCT_MINIMUM}+ development files (plus RapidJSON and zstd) "
     "and point CMAKE_PREFIX_PATH at them if they are not found.")
 elseif(OpenCASCADE_VERSION VERSION_LESS OCCT_MINIMUM)
   message(FATAL_ERROR
@@ -74,6 +74,23 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/upstream/rapidjson/include/rapidjson")
 else()
   find_package(RapidJSON REQUIRED)
   target_include_directories(_core SYSTEM PRIVATE ${RapidJSON_INCLUDE_DIRS} ${RAPIDJSON_INCLUDE_DIRS})
+endif()
+
+# Zstandard, to accept compressed input. Only the decompressor is built from
+# the vendored copy (about 100 KB); otherwise the system library is used.
+set(zstd_source "${CMAKE_CURRENT_LIST_DIR}/upstream/zstd/lib")
+if(EXISTS "${zstd_source}/zstd.h")
+  file(GLOB zstd_files "${zstd_source}/common/*.c" "${zstd_source}/decompress/*.c")
+  add_library(zstd_decompress STATIC ${zstd_files})
+  target_include_directories(zstd_decompress PUBLIC "${zstd_source}")
+  # no assembly (one less language to set up) and no pre-1.0 formats
+  target_compile_definitions(zstd_decompress PRIVATE ZSTD_DISABLE_ASM ZSTD_LEGACY_SUPPORT=0)
+  target_link_libraries(_core PRIVATE zstd_decompress)
+else()
+  find_path(ZSTD_INCLUDE_DIR zstd.h REQUIRED)
+  find_library(ZSTD_LIBRARY zstd REQUIRED)
+  target_include_directories(_core SYSTEM PRIVATE "${ZSTD_INCLUDE_DIR}")
+  target_link_libraries(_core PRIVATE "${ZSTD_LIBRARY}")
 endif()
 
 # Only what src/ uses directly; these targets bring their own dependencies.

@@ -129,3 +129,58 @@ def test_step_to_obj():
         assert len(mesh.faces) > 100, "Mesh should have substantial faces"
         assert mesh.is_winding_consistent, "Mesh should have consistent winding"
         assert mesh.area > 0, "Mesh should have positive surface area"
+
+
+@pytest.mark.parametrize(
+    "name,file_type", [("colored.step", "step"), ("microstrip.igs", "iges")]
+)
+@pytest.mark.parametrize(
+    "limits",
+    [{}, {"timeout": None, "memory_limit": None}],
+    ids=["worker", "in-process"],
+)
+def test_load_zstd(name, file_type, limits):
+    """Zstandard-compressed input is detected and gives the same GLB."""
+    models = os.path.join(cwd, "models")
+    with open(os.path.join(models, name), "rb") as f:
+        plain = f.read()
+    with open(os.path.join(models, name + ".zst"), "rb") as f:
+        packed = f.read()
+    # colored.step.zst was compressed from a pipe, so its frame does not
+    # record the unpacked size; microstrip.igs.zst does
+    assert packed[:4] == b"\x28\xb5\x2f\xfd"
+    assert len(packed) < len(plain)
+
+    expected = cascadio.load(plain, file_type=file_type, **limits)
+    assert cascadio.load(packed, file_type=file_type, **limits) == expected
+
+    # two frames back to back are one valid stream; here the second frame
+    # is empty, as written by some tools when they flush
+    empty_frame = b"\x28\xb5\x2f\xfd\x24\x00\x01\x00\x00\x99\xe9\xd8\x51"
+    assert (
+        cascadio.load(packed + empty_frame, file_type=file_type, **limits)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [{}, {"timeout": None, "memory_limit": None}],
+    ids=["worker", "in-process"],
+)
+def test_load_zstd_damaged(limits):
+    """Cut-short or corrupt Zstandard data raises ValueError."""
+    with open(os.path.join(cwd, "models", "colored.step.zst"), "rb") as f:
+        packed = f.read()
+
+    with pytest.raises(ValueError, match="Zstandard"):
+        cascadio.load(packed[: len(packed) // 2], **limits)
+
+    corrupt = bytearray(packed)
+    corrupt[len(corrupt) // 2] ^= 0xFF
+    with pytest.raises(ValueError):
+        cascadio.load(bytes(corrupt), **limits)
+
+    # only the magic number
+    with pytest.raises(ValueError, match="Zstandard"):
+        cascadio.load(packed[:4], **limits)

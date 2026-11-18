@@ -78,7 +78,9 @@ def load(
     Parameters
     ----------
     data
-      The STEP or IGES file content.
+      The STEP or IGES file content. It may be compressed with Zstandard
+      (`.step.zst`): that is detected from the first four bytes and
+      unpacked in memory.
     file_type
       "step" or "iges" (also "stp" and "igs").
     tol_linear

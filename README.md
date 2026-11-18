@@ -26,6 +26,9 @@ import cascadio
 with open("model.step", "rb") as f:
     glb = cascadio.load(f.read())  # bytes in, bytes out
 
+# Zstandard-compressed files are detected and unpacked in memory
+glb = cascadio.load(open("model.step.zst", "rb").read())
+
 # IGES, with a finer mesh
 glb = cascadio.load(data, file_type="iges", tol_linear=0.001)
 
@@ -94,7 +97,7 @@ OpenCASCADE is built as static libraries with only the pieces cascadio uses, the
 The source distribution on PyPI contains no vendored code. It builds against the OpenCASCADE your system provides, which is what Linux and BSD packagers want:
 
 ```bash
-# needs the development files of OpenCASCADE 7.9 or newer, and RapidJSON
+# needs the development files of OpenCASCADE 7.9 or newer, RapidJSON and zstd
 pip install --no-binary cascadio cascadio
 ```
 

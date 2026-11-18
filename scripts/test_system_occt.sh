@@ -8,7 +8,7 @@ set -euo pipefail
 
 # conda-forge carries old OpenCASCADE releases, which distributions do not
 micromamba create -y -q -n occt -c conda-forge \
-  python=3.12 "occt=$1" rapidjson cxx-compiler binutils cmake ninja pip
+  python=3.12 "occt=$1" rapidjson zstd cxx-compiler c-compiler binutils cmake ninja pip
 
 # `micromamba run` activates the environment, which puts the compiler on PATH
 micromamba run -n occt env \

@@ -7,9 +7,10 @@ name = "cascadio"
 version = "0.2.0"
 requires-python = ">=3.12"
 authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
-# cascadio is MIT; wheels also contain OpenCASCADE, which is LGPL 2.1 with
-# an exception. Both license texts ship in the wheel.
-license = "MIT AND LGPL-2.1-only WITH OCCT-exception-1.0"
+# cascadio is MIT; wheels also contain OpenCASCADE (LGPL 2.1 with an
+# exception) and the Zstandard decompressor (BSD). All three texts ship
+# in the wheel.
+license = "MIT AND LGPL-2.1-only WITH OCCT-exception-1.0 AND BSD-3-Clause"
 license-files = ["LICENSE/LICENSE-*.md"]
 description = "Convert STEP and IGES files to GLB using OpenCASCADE"
 keywords = ["graphics", "STEP", "IGES", "GLTF"]
@@ -38,7 +39,7 @@ wheel.packages = ["src/cascadio"]
 wheel.exclude = ["**/__pycache__"]
 wheel.py-api = "cp312"
 # The source distribution leaves out the vendored libraries, so it stays
-# small and builds against the system's OpenCASCADE 7.9+ and RapidJSON.
+# small and builds against the system's OpenCASCADE 7.9+, RapidJSON and zstd.
 sdist.exclude = ["upstream", "occt_install", "build", "wheelhouse", ".github"]
 
 [tool.cibuildwheel]

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "filehandle.hpp"
+#include "zstd.hpp"
 
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -149,9 +150,16 @@ static void loadIges(Loaded &loaded, const char *data, size_t size,
 }
 
 /// Read and mesh a STEP or IGES file held in memory.
+/// Zstandard-compressed input is recognized and unpacked first.
 static void load(Loaded &loaded, const char *data, size_t size,
                  FileType file_type, const MeshOptions &mesh,
                  bool use_colors = true) {
+  std::vector<char> unpacked;
+  if (isZstd(data, size)) {
+    unpacked = zstdDecompress(data, size);
+    data = unpacked.data();
+    size = unpacked.size();
+  }
   switch (file_type) {
   case FileType::STEP:
     return loadStep(loaded, data, size, mesh, use_colors);
