@@ -41,19 +41,21 @@ CIBW_BUILD="cp312-manylinux_x86_64" cibuildwheel --platform linux
 
 For local development without docker:
 ```bash
-# install build tools
+# fetch OpenCASCADE and RapidJSON
+git submodule update --init --depth 1
+
+# install build tools (clang and lld are used when installed)
 uv pip install cmake ninja
 
-# build OCCT to occt_cache/
-uv run python scripts/build_occt.py
-
-# source the env vars it writes
-source occt_cache/env.sh
+# build static OpenCASCADE into occt_install/ (several minutes, done once)
+python scripts/build_occt.py
 
 # install and test
-uv pip install -e .
+uv pip install -e ".[tests]"
 pytest tests/
 ```
+
+OpenCASCADE is built as static libraries with only the pieces cascadio uses, then linked into a single extension module. The linker removes every function that is not reachable, which is what keeps the wheels small.
 
 ### Future Work
 

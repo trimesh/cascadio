@@ -1,0 +1,53 @@
+# Shared by the OCCT build (scripts/build_occt.py) and the extension build so
+# both use the same compiler, linker and flags.
+#
+# Uses clang (clang-cl on Windows) with lld whenever they are installed.
+# Build frontends export generic CC=cc / CXX=c++, so those variables are not
+# treated as a choice. To opt out:
+#   CASCADIO_CLANG=OFF  use the default compiler (or CC/CXX)
+#
+# Link-time optimization is off by default: measured on the test models it
+# made wheels 1.4 MB larger for a speedup within noise (about 2%).
+#   CASCADIO_LTO=ON     turn it on (needs clang, and lld except on macOS)
+
+set(cascadio_clang OFF)
+if(APPLE)
+  set(cascadio_clang ON) # the system compiler already is clang
+elseif(NOT DEFINED ENV{CASCADIO_CLANG} OR "$ENV{CASCADIO_CLANG}")
+  if(WIN32)
+    find_program(CASCADIO_CC clang-cl)
+    set(CASCADIO_CXX "${CASCADIO_CC}")
+    find_program(CASCADIO_LLD lld-link)
+  else()
+    find_program(CASCADIO_CC clang)
+    find_program(CASCADIO_CXX clang++)
+    find_program(CASCADIO_LLD ld.lld)
+  endif()
+  if(CASCADIO_CC AND CASCADIO_CXX)
+    set(CMAKE_C_COMPILER "${CASCADIO_CC}")
+    set(CMAKE_CXX_COMPILER "${CASCADIO_CXX}")
+    set(cascadio_clang ON)
+  endif()
+endif()
+
+# lld links faster than the GNU linker and can fold identical functions.
+if(cascadio_clang AND CASCADIO_LLD)
+  set(CMAKE_LINKER_TYPE LLD)
+endif()
+if("$ENV{CASCADIO_LTO}" AND cascadio_clang AND (APPLE OR CASCADIO_LLD))
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
+
+# Hide symbols and give every function its own section so the final link can
+# drop everything the extension never reaches.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+if(NOT WIN32)
+  set(CMAKE_C_FLAGS_INIT "-ffunction-sections -fdata-sections")
+  set(CMAKE_CXX_FLAGS_INIT "-ffunction-sections -fdata-sections")
+  # -O2 measured smaller and no slower than CMake's default -O3
+  set(CMAKE_C_FLAGS_RELEASE_INIT "-O2 -DNDEBUG")
+  set(CMAKE_CXX_FLAGS_RELEASE_INIT "-O2 -DNDEBUG")
+endif()

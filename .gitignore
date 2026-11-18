@@ -161,8 +161,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
-# Local OCCT build cache
-occt_cache/
+# Static OpenCASCADE built by scripts/build_occt.py
+occt_install/
 
 # uv
 uv.lock

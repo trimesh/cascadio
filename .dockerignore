@@ -1,21 +1,9 @@
 # Docker ignore for cibuildwheel builds
 # Prevents local build artifacts from being copied into container
 
-# Local OCCT build cache (not needed in container, will rebuild)
-occt_cache/
-
-# CMake build directory
+# CMake build directories; OpenCASCADE is rebuilt inside the container
 build/
-
-# OCCT in-tree build artifacts (from previous cibuildwheel or local builds)
-upstream/OCCT/lin64/
-upstream/OCCT/mac64/
-upstream/OCCT/win64/
-upstream/OCCT/CMakeCache.txt
-upstream/OCCT/CMakeFiles/
-upstream/OCCT/build.ninja
-upstream/OCCT/.ninja_*
-upstream/OCCT/compile_commands.json
+occt_install/
 
 # Built wheels
 wheelhouse/

@@ -23,29 +23,26 @@ jobs:
       - name: Get OCCT cache key
         id: occt-key
         shell: bash
-        run: |
-          # Cache key includes: OS, OCCT commit and build script
-          OCCT_COMMIT=$(git rev-parse HEAD:upstream/OCCT)
-          echo "hash=${{ runner.os }}-${OCCT_COMMIT}-${{ hashFiles('scripts/build_occt.py') }}" >> $GITHUB_OUTPUT
+        run: echo "commit=$(git rev-parse HEAD:upstream/OCCT)" >> $GITHUB_OUTPUT
 
+      # The static OpenCASCADE build takes most of the job, so keep it
+      # between runs. It only changes with the OCCT commit or how we build it.
       - name: Cache OCCT build
-        id: cache-occt
         uses: actions/cache@v4
         with:
-          path: |
-            upstream/OCCT/lin64
-            upstream/OCCT/lin32
-            upstream/OCCT/win64
-            upstream/OCCT/mac64
-          key: occt-${{ steps.occt-key.outputs.hash }}
-          save-always: true
-      
+          path: occt_install
+          key: occt-${{ runner.os }}-${{ runner.arch }}-${{ steps.occt-key.outputs.commit }}-${{ hashFiles('scripts/build_occt.py', 'cmake/toolchain.cmake') }}
+
       - uses: ilammy/msvc-dev-cmd@v1.13.0
       
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         with:
           output-dir: wheelhouse
+        env:
+          # Linux wheels build in a container that sees the runner's disk
+          # at /host. Installing OpenCASCADE there lets the cache step keep it.
+          CIBW_ENVIRONMENT_LINUX: CASCADIO_OCCT_PREFIX=/host${{ github.workspace }}/occt_install
       
       - uses: actions/upload-artifact@v4
         with:
