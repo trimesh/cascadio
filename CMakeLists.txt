@@ -53,6 +53,21 @@ nanobind_add_module(_core STABLE_ABI src/main.cpp)
 target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
 target_include_directories(_core SYSTEM PRIVATE "${OpenCASCADE_INCLUDE_DIR}")
 
+# The code that writes TM_brep_faces JSON is generated from the extension's
+# schema on every build, so the two cannot disagree.
+set(brep_schema "${CMAKE_CURRENT_LIST_DIR}/extensions/TM_brep_faces/schema/mesh.primitive.TM_brep_faces.schema.json")
+set(brep_header "${CMAKE_CURRENT_BINARY_DIR}/generated/tm_brep_faces.hpp")
+add_custom_command(
+  OUTPUT "${brep_header}"
+  COMMAND Python::Interpreter "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_schema_header.py"
+          "${brep_schema}" "${brep_header}"
+  DEPENDS "${brep_schema}" "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_schema_header.py"
+  VERBATIM)
+target_sources(_core PRIVATE "${brep_header}")
+target_include_directories(_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+# the schema ships in the package for anyone who wants to validate output
+install(FILES "${brep_schema}" DESTINATION cascadio RENAME schema.json)
+
 # RapidJSON is header-only: vendored copy if checked out, else the system one.
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/upstream/rapidjson/include/rapidjson")
   target_include_directories(_core SYSTEM PRIVATE upstream/rapidjson/include)

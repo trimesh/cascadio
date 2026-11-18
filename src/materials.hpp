@@ -1,8 +1,9 @@
 #pragma once
 
-#include "extras.hpp"
 
 #include <NCollection_Sequence.hxx>
+#include <Quantity_Color.hxx>
+#include <Quantity_ColorRGBA.hxx>
 #include <TCollection_HAsciiString.hxx>
 #include <TDF_Label.hxx>
 #include <TDocStd_Document.hxx>
@@ -10,10 +11,34 @@
 #include <XCAFDoc_MaterialTool.hxx>
 #include <XCAFDoc_VisMaterial.hxx>
 #include <XCAFDoc_VisMaterialTool.hxx>
+#include <rapidjson/document.h>
 
 // ============================================================================
 // Material Extraction
 // ============================================================================
+
+/// Helper to add an RGBA color array to a JSON object (values 0-1)
+static void addColorRGBA(rapidjson::Value &obj, const char *name,
+                         const Quantity_ColorRGBA &color,
+                         rapidjson::Document::AllocatorType &alloc) {
+  rapidjson::Value arr(rapidjson::kArrayType);
+  arr.PushBack(color.GetRGB().Red(), alloc)
+      .PushBack(color.GetRGB().Green(), alloc)
+      .PushBack(color.GetRGB().Blue(), alloc)
+      .PushBack(color.Alpha(), alloc);
+  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
+}
+
+/// Helper to add an RGB color array to a JSON object (values 0-1)
+static void addColorRGB(rapidjson::Value &obj, const char *name,
+                        const Quantity_Color &color,
+                        rapidjson::Document::AllocatorType &alloc) {
+  rapidjson::Value arr(rapidjson::kArrayType);
+  arr.PushBack(color.Red(), alloc)
+      .PushBack(color.Green(), alloc)
+      .PushBack(color.Blue(), alloc);
+  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
+}
 
 /// Extract all materials from the document into a JSON array
 static rapidjson::Value

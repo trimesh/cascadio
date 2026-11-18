@@ -36,7 +36,7 @@ Per-triangle BREP face indices and analytic surface definitions for glTF mesh pr
 `origin`, `axis` (vec3), `radius` (meters), `extent_angle` (radians), `extent_height` (meters)
 
 ### cone
-`apex`, `axis` (vec3), `half_angle` (radians), `ref_radius` (meters), `extent_angle` (radians), `extent_distance` (meters)
+`apex`, `axis` (vec3), `semi_angle` (radians), `ref_radius` (meters), `extent_angle` (radians), `extent_distance` (meters)
 
 ### sphere
 `center` (vec3), `radius` (meters), `extent_longitude`, `extent_latitude` (radians)
@@ -46,4 +46,4 @@ Per-triangle BREP face indices and analytic surface definitions for glTF mesh pr
 
 ## Schema
 
-See `schema/` for JSON Schema definitions. All coordinates in meters, same system as mesh vertices.
+See [`schema/mesh.primitive.TM_brep_faces.schema.json`](schema/mesh.primitive.TM_brep_faces.schema.json) for the JSON Schema. It is the single source of truth: cascadio generates the code that writes this extension from it. All coordinates in meters, same system as mesh vertices.

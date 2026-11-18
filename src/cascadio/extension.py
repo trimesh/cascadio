@@ -35,93 +35,7 @@ except ImportError:
         return decorator
 
 
-from .primitives import (
-    BrepPrimitive,
-    Plane,
-    Cylinder,
-    Cone,
-    Sphere,
-    Torus,
-)
-
-
-def _parse_face_to_primitive(
-    face: Optional[Dict], face_index: int
-) -> Optional[BrepPrimitive]:
-    """
-    Convert a face definition from TM_brep_faces to a cascadio primitive.
-
-    Parameters
-    ----------
-    face : dict or None
-        Face definition from glTF extension, or None if filtered out
-    face_index : int
-        Index of this face in the faces array
-
-    Returns
-    -------
-    BrepPrimitive or None
-        The parsed primitive dataclass, or None if type not supported or face is None.
-    """
-    if face is None:
-        return None
-
-    face_type = face.get("type")
-    if face_type is None:
-        return None
-
-    # Use face_index from data if present, otherwise use parameter
-    idx = face.get("face_index", face_index)
-
-    if face_type == "plane":
-        return Plane(
-            face_index=idx,
-            extent_x=tuple(face["extent_x"]),
-            extent_y=tuple(face["extent_y"]),
-            origin=tuple(face["origin"]),
-            normal=tuple(face["normal"]),
-            x_dir=tuple(face["x_dir"]),
-        )
-    elif face_type == "cylinder":
-        return Cylinder(
-            face_index=idx,
-            extent_angle=tuple(face["extent_angle"]),
-            extent_height=tuple(face["extent_height"]),
-            origin=tuple(face["origin"]),
-            axis=tuple(face["axis"]),
-            radius=face["radius"],
-        )
-    elif face_type == "cone":
-        return Cone(
-            face_index=idx,
-            extent_angle=tuple(face["extent_angle"]),
-            extent_distance=tuple(face["extent_distance"]),
-            apex=tuple(face["apex"]),
-            axis=tuple(face["axis"]),
-            semi_angle=face["semi_angle"],
-            ref_radius=face["ref_radius"],
-        )
-    elif face_type == "sphere":
-        return Sphere(
-            face_index=idx,
-            extent_longitude=tuple(face["extent_longitude"]),
-            extent_latitude=tuple(face["extent_latitude"]),
-            center=tuple(face["center"]),
-            radius=face["radius"],
-        )
-    elif face_type == "torus":
-        return Torus(
-            face_index=idx,
-            extent_major_angle=tuple(face["extent_major_angle"]),
-            extent_minor_angle=tuple(face["extent_minor_angle"]),
-            center=tuple(face["center"]),
-            axis=tuple(face["axis"]),
-            major_radius=face["major_radius"],
-            minor_radius=face["minor_radius"],
-        )
-
-    # "bspline", "other", or unknown types
-    return None
+from .primitives import parse_brep_faces
 
 
 def process_brep_faces(
@@ -152,11 +66,7 @@ def process_brep_faces(
     }
 
     if faces:
-        primitives = []
-        for i, face in enumerate(faces):
-            prim = _parse_face_to_primitive(face, face_index=i)
-            primitives.append(prim)
-        result["brep_primitives"] = primitives
+        result["brep_primitives"] = parse_brep_faces(faces)
 
     return result
 
@@ -198,14 +108,9 @@ def _import_brep_faces_cascadio(ctx: Dict) -> Optional[Dict]:
 
     # Process into cascadio primitives
     if faces is not None:
-        primitives = []
-        for i, face in enumerate(faces):
-            prim = _parse_face_to_primitive(face, face_index=i)
-            primitives.append(prim)
-
         # Put everything under cascadio namespace for consistency
         cascadio_meta = result["metadata"].setdefault("cascadio", {})
-        cascadio_meta["brep_primitives"] = primitives
+        cascadio_meta["brep_primitives"] = parse_brep_faces(faces)
         cascadio_meta["brep_faces"] = faces
 
     # Add materials if present

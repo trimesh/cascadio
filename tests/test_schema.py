@@ -2,6 +2,7 @@
 Test that cascadio output validates against the TM_brep_faces JSON schema.
 """
 
+import dataclasses
 import json
 import os
 import struct
@@ -11,32 +12,21 @@ from pathlib import Path
 import cascadio
 import jsonschema
 import pytest
-from referencing import Registry, Resource
-from referencing.jsonschema import DRAFT202012
 
 
-# Path to schema files
-SCHEMA_DIR = Path(__file__).parent.parent / "extensions" / "TM_brep_faces" / "schema"
+# The one schema file. cascadio generates its C++ writer from it.
+SCHEMA_PATH = (
+    Path(__file__).parent.parent
+    / "extensions"
+    / "TM_brep_faces"
+    / "schema"
+    / "mesh.primitive.TM_brep_faces.schema.json"
+)
 MODELS_DIR = Path(__file__).parent / "models"
 
-
-def load_schemas():
-    """Load all schema files and create a registry for $ref resolution."""
-    schemas = {}
-    for schema_file in SCHEMA_DIR.glob("*.json"):
-        with open(schema_file) as f:
-            schema = json.load(f)
-            schemas[schema_file.name] = schema
-    return schemas
-
-
-def create_registry(schemas):
-    """Create a jsonschema registry for resolving $ref references."""
-    resources = []
-    for name, schema in schemas.items():
-        resource = Resource.from_contents(schema, default_specification=DRAFT202012)
-        resources.append((name, resource))
-    return Registry().with_resources(resources)
+EXTENSION_SCHEMA = json.loads(SCHEMA_PATH.read_text())
+# a single face, with the shared definitions it refers to
+FACE_SCHEMA = {"$ref": "#/$defs/face", "$defs": EXTENSION_SCHEMA["$defs"]}
 
 
 def extract_glb_json(glb_path):
@@ -53,16 +43,8 @@ def extract_glb_json(glb_path):
     return json.loads(json_data)
 
 
-# Load schemas once at module level
-SCHEMAS = load_schemas()
-REGISTRY = create_registry(SCHEMAS)
-FACE_SCHEMA = SCHEMAS["face.schema.json"]
-EXTENSION_SCHEMA = SCHEMAS["mesh.primitive.TM_brep_faces.schema.json"]
-
-
 def get_validator(schema):
-    """Create a validator with the registry for $ref resolution."""
-    return jsonschema.Draft202012Validator(schema, registry=REGISTRY)
+    return jsonschema.Draft202012Validator(schema)
 
 
 # --- Face schema validation tests ---
@@ -253,62 +235,36 @@ def test_cascadio_output_validates():
             os.unlink(output_path)
 
 
-# --- Schema resolution helpers ---
+# --- The Python side matches the schema ---
 
 
-def resolve_ref(ref_path, schemas):
-    """Resolve a $ref path to its actual schema content."""
-    if "#" in ref_path:
-        file_name, pointer = ref_path.split("#", 1)
-        schema = schemas[file_name]
-        parts = pointer.strip("/").split("/")
-        result = schema
-        for part in parts:
-            result = result[part]
-        return result
-    else:
-        return schemas[ref_path]
+def test_dataclasses_match_schema():
+    """Each primitive dataclass has exactly the fields the schema defines."""
+    face = EXTENSION_SCHEMA["$defs"]["face"]
+    cases = {
+        case["if"]["properties"]["type"]["const"]: case["then"]["required"]
+        for case in face["allOf"]
+    }
+    assert set(cases) == set(face["properties"]["type"]["enum"])
+    assert set(cases) == set(cascadio.primitives.PRIMITIVES)
+    assert set(cases) == set(cascadio.BrepType.__args__)
+
+    for name, required in cases.items():
+        kind = cascadio.primitives.PRIMITIVES[name]
+        names = {f.name for f in dataclasses.fields(kind)}
+        assert names == set(required) | {"face_index"}, name
 
 
-def resolve_refs(obj, schemas):
-    """Recursively resolve all $ref references in a schema object."""
-    if isinstance(obj, dict):
-        if "$ref" in obj:
-            resolved = resolve_ref(obj["$ref"], schemas)
-            return resolve_refs(resolved, schemas)
-        return {k: resolve_refs(v, schemas) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [resolve_refs(item, schemas) for item in obj]
-    return obj
+def test_packaged_schema_is_the_source():
+    """The schema shipped in the wheel is the same file, not a copy that can drift."""
+    packaged = Path(cascadio.__file__).parent / "schema.json"
+    if not packaged.exists():
+        pytest.skip("editable install: the schema is only copied into wheels")
+    assert json.loads(packaged.read_text()) == EXTENSION_SCHEMA
 
 
-def build_resolved_schema():
-    """Build and return the fully resolved schema from source files."""
-    schemas = load_schemas()
-    root_schema = schemas["mesh.primitive.TM_brep_faces.schema.json"]
-    return resolve_refs(root_schema, schemas)
-
-
-# --- Baked schema match test ---
-
-
-def test_baked_schema_matches_source():
-    """Test that packaged schema.json matches dynamically resolved source."""
-    baked_path = Path(cascadio.__file__).parent / "schema.json"
-
-    if not baked_path.exists():
-        baked_path = Path(__file__).parent.parent / "src" / "cascadio" / "schema.json"
-
-    assert baked_path.exists(), (
-        "schema.json not found. Run: python scripts/build_schema.py"
-    )
-
-    with open(baked_path) as f:
-        baked = json.load(f)
-
-    resolved = build_resolved_schema()
-
-    assert baked == resolved, (
-        "Baked schema.json doesn't match source schemas. "
-        "Run: python scripts/build_schema.py"
-    )
+def test_unknown_brep_type_rejected():
+    """A typo in `brep_types` is an error instead of silently matching nothing."""
+    data = (MODELS_DIR / "featuretype.STEP").read_bytes()
+    with pytest.raises(ValueError, match="brep_types"):
+        cascadio.load(data, include_brep=True, brep_types={"plane", "cilinder"})

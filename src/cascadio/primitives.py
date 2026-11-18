@@ -1,11 +1,11 @@
 """
 Dataclasses for BREP analytical surface primitives.
 
-These represent the analytical surfaces extracted from STEP files
-when using `include_brep=True` in `step_to_glb()`.
+These represent the analytical surfaces extracted from CAD files
+when using `include_brep=True` in `cascadio.load()`.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import List, Tuple, Union, Optional
 
 
@@ -104,6 +104,17 @@ class Torus:
 # Union type for any primitive
 BrepPrimitive = Union[Plane, Cylinder, Cone, Sphere, Torus]
 
+# The `type` string of a face in the TM_brep_faces extension -> its dataclass.
+# The dataclass fields are the schema's fields for that type; a test checks
+# they match extensions/TM_brep_faces/schema.
+PRIMITIVES = {
+    "plane": Plane,
+    "cylinder": Cylinder,
+    "cone": Cone,
+    "sphere": Sphere,
+    "torus": Torus,
+}
+
 __all__ = [
     "Plane",
     "Cylinder",
@@ -111,102 +122,47 @@ __all__ = [
     "Sphere",
     "Torus",
     "BrepPrimitive",
+    "PRIMITIVES",
     "parse_primitive",
     "parse_brep_faces",
 ]
 
 
-def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
+def parse_primitive(data: Optional[dict], face_index: int = 0) -> Optional[BrepPrimitive]:
     """
-    Parse a primitive dict from GLTF extension into a typed dataclass.
+    Parse one face of the TM_brep_faces extension into a typed dataclass.
 
     Parameters
     ----------
-    data : dict or None
-        A single primitive dict from the TM_brep_faces extension,
-        or None if the face was filtered out
-    face_index : int
-        The index of this face in the faces array (used as fallback
-        if face_index is not in the data)
+    data
+      A face dict from the extension, or None for a face that is not an
+      analytic surface or was filtered out.
+    face_index
+      Used when the dict carries no `face_index` of its own.
 
     Returns
     -------
-    BrepPrimitive or None
-        The parsed primitive, or None if type is not recognized or data is None.
+    primitive
+      The parsed primitive, or None if `data` is None or of an unknown type.
     """
-    if data is None:
+    kind = PRIMITIVES.get((data or {}).get("type"))
+    if kind is None:
         return None
-
-    ptype = data.get("type")
-    if ptype is None:
-        return None
-
-    # Use face_index from data if present, otherwise use parameter
-    idx = data.get("face_index", face_index)
-
-    if ptype == "plane":
-        return Plane(
-            face_index=idx,
-            extent_x=tuple(data["extent_x"]),
-            extent_y=tuple(data["extent_y"]),
-            origin=tuple(data["origin"]),
-            normal=tuple(data["normal"]),
-            x_dir=tuple(data["x_dir"]),
-        )
-    elif ptype == "cylinder":
-        return Cylinder(
-            face_index=idx,
-            extent_angle=tuple(data["extent_angle"]),
-            extent_height=tuple(data["extent_height"]),
-            origin=tuple(data["origin"]),
-            axis=tuple(data["axis"]),
-            radius=data["radius"],
-        )
-    elif ptype == "cone":
-        return Cone(
-            face_index=idx,
-            extent_angle=tuple(data["extent_angle"]),
-            extent_distance=tuple(data["extent_distance"]),
-            apex=tuple(data["apex"]),
-            axis=tuple(data["axis"]),
-            semi_angle=data["semi_angle"],
-            ref_radius=data["ref_radius"],
-        )
-    elif ptype == "sphere":
-        return Sphere(
-            face_index=idx,
-            extent_longitude=tuple(data["extent_longitude"]),
-            extent_latitude=tuple(data["extent_latitude"]),
-            center=tuple(data["center"]),
-            radius=data["radius"],
-        )
-    elif ptype == "torus":
-        return Torus(
-            face_index=idx,
-            extent_major_angle=tuple(data["extent_major_angle"]),
-            extent_minor_angle=tuple(data["extent_minor_angle"]),
-            center=tuple(data["center"]),
-            axis=tuple(data["axis"]),
-            major_radius=data["major_radius"],
-            minor_radius=data["minor_radius"],
-        )
-
-    return None
+    values = {"face_index": face_index, **data}
+    return kind(
+        **{
+            # JSON arrays become tuples so the frozen dataclass is hashable
+            f.name: tuple(v) if isinstance(v := values[f.name], list) else v
+            for f in fields(kind)
+        }
+    )
 
 
-def parse_brep_faces(brep_faces: List[dict]) -> List[Optional[BrepPrimitive]]:
+def parse_brep_faces(brep_faces: List[Optional[dict]]) -> List[Optional[BrepPrimitive]]:
     """
-    Parse all brep_faces from mesh metadata into typed dataclasses.
+    Parse the `faces` list of the TM_brep_faces extension.
 
-    Parameters
-    ----------
-    brep_faces : list of dict
-        The faces list from the TM_brep_faces extension
-
-    Returns
-    -------
-    list of BrepPrimitive or None
-        List of parsed primitives, with None for non-analytical faces.
-        Maintains the same indexing as the input list.
+    Returns one entry per face, in the same order, with None for faces
+    that are not analytic surfaces.
     """
     return [parse_primitive(face, face_index=i) for i, face in enumerate(brep_faces)]

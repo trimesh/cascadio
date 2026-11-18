@@ -2,27 +2,20 @@
 
 #include "glb.hpp"
 #include "gltf_writer.hpp"
+#include "primitives.hpp"
 
-#include <Quantity_Color.hxx>
 #include <gp_Trsf.hxx>
-#include <Quantity_ColorRGBA.hxx>
-#include <TopoDS_Face.hxx>
-#include <TopoDS_Shape.hxx>
-#include <XCAFDoc_DocumentTool.hxx>
-#include <algorithm>
-#include <cstdint>
-#include <cstring>
-#include <map>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
-
-// ============================================================================
-// Constants
-// ============================================================================
 
 /// glTF spec requires 4-byte alignment for buffer views
 constexpr uint32_t GLTF_ALIGNMENT = 4;
@@ -31,56 +24,6 @@ constexpr uint32_t GLTF_ALIGNMENT = 4;
 inline uint32_t alignTo(uint32_t value, uint32_t alignment = GLTF_ALIGNMENT) {
   return (value + (alignment - 1)) & ~(alignment - 1);
 }
-
-// ============================================================================
-// JSON Helper Functions
-// ============================================================================
-
-/// Helper to add a vec3 array to a JSON object
-static void addVec3(rapidjson::Value &obj, const char *name, double x, double y,
-                    double z, rapidjson::Document::AllocatorType &alloc) {
-  rapidjson::Value arr(rapidjson::kArrayType);
-  arr.PushBack(x, alloc).PushBack(y, alloc).PushBack(z, alloc);
-  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
-}
-
-/// Helper to add an RGBA color array to a JSON object (values 0-1)
-static void addColorRGBA(rapidjson::Value &obj, const char *name,
-                         const Quantity_ColorRGBA &color,
-                         rapidjson::Document::AllocatorType &alloc) {
-  rapidjson::Value arr(rapidjson::kArrayType);
-  arr.PushBack(color.GetRGB().Red(), alloc)
-      .PushBack(color.GetRGB().Green(), alloc)
-      .PushBack(color.GetRGB().Blue(), alloc)
-      .PushBack(color.Alpha(), alloc);
-  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
-}
-
-/// Helper to add an RGB color array to a JSON object (values 0-1)
-static void addColorRGB(rapidjson::Value &obj, const char *name,
-                        const Quantity_Color &color,
-                        rapidjson::Document::AllocatorType &alloc) {
-  rapidjson::Value arr(rapidjson::kArrayType);
-  arr.PushBack(color.Red(), alloc)
-      .PushBack(color.Green(), alloc)
-      .PushBack(color.Blue(), alloc);
-  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
-}
-
-/// Helper to add bounds array [min, max] to a JSON object
-static void addBounds(rapidjson::Value &obj, const char *name, double min,
-                      double max, rapidjson::Document::AllocatorType &alloc) {
-  rapidjson::Value arr(rapidjson::kArrayType);
-  arr.PushBack(min, alloc).PushBack(max, alloc);
-  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
-}
-
-// Forward declaration - defined in primitives.hpp
-static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
-                                 rapidjson::Value &facesArray,
-                                 rapidjson::Document::AllocatorType &alloc,
-                                 const std::set<std::string> &allowedTypes,
-                                 double lengthUnit, const gp_Trsf &frame);
 
 /// Add the TM_brep_faces extension and/or material metadata to a finished GLB.
 ///
@@ -125,8 +68,9 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
             UINT32_MAX);
         std::fill_n(faceIndices.begin() + f.triStart, f.triCount,
                     static_cast<uint32_t>(i));
-        extractFacePrimitive(f.face, static_cast<int>(i), facesJson, alloc,
-                             allowedTypes, lengthUnit, frame);
+        facesJson.PushBack(describeFace(f.face, static_cast<int>(i), alloc,
+                                        allowedTypes, lengthUnit, frame),
+                           alloc);
       }
 
       const size_t byteOffset = glb.bin.size();

@@ -4,7 +4,6 @@
 #include "filehandle.hpp"
 #include "load.hpp"
 #include "materials.hpp"
-#include "primitives.hpp"
 
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
@@ -125,6 +124,12 @@ static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
 /// Convert STEP or IGES bytes to GLB bytes without touching the disk.
 static std::vector<char> toGlb(const char *data, size_t size,
                                FileType file_type, ConvertOptions options) {
+  for (const std::string &type : options.brep_types) {
+    if (std::find(std::begin(brep::TYPES), std::end(brep::TYPES), type) ==
+        std::end(brep::TYPES)) {
+      throw std::invalid_argument("unknown brep_types entry: " + type);
+    }
+  }
   // face and material metadata is attached per part,
   // which needs one merged primitive per part
   if (options.include_brep || options.include_materials) {
