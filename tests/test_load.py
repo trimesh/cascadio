@@ -85,13 +85,17 @@ def test_load_iges_file_extensions(file_type):
 
 
 def test_step_to_glb():
-    """Test the step_to_glb function with file paths."""
+    """The deprecated file-based wrapper still works, and warns."""
     step_file = os.path.join(cwd, "models", "featuretype.STEP")
     assert os.path.exists(step_file)
 
     with tempfile.TemporaryDirectory() as D:
         outfile = os.path.join(D, "output.glb")
-        cascadio.step_to_glb(step_file, outfile, tol_linear=0.1, tol_angular=0.5)
+        with pytest.warns(DeprecationWarning, match="cascadio.load"):
+            result = cascadio.step_to_glb(
+                step_file, outfile, tol_linear=0.1, tol_angular=0.5
+            )
+        assert result == 0
         assert os.path.exists(outfile)
         assert os.path.getsize(outfile) > 1000, "Output file suspiciously small"
 
@@ -106,13 +110,17 @@ def test_step_to_glb():
 
 
 def test_step_to_obj():
-    """Test the step_to_obj function with file paths."""
+    """The deprecated file-based wrapper still works, and warns."""
     step_file = os.path.join(cwd, "models", "featuretype.STEP")
     assert os.path.exists(step_file)
 
     with tempfile.TemporaryDirectory() as D:
         outfile = os.path.join(D, "output.obj")
-        cascadio.step_to_obj(step_file, outfile, tol_linear=0.1, tol_angular=0.5)
+        with pytest.warns(DeprecationWarning, match="cascadio.load"):
+            result = cascadio.step_to_obj(
+                step_file, outfile, tol_linear=0.1, tol_angular=0.5
+            )
+        assert result == 0
         assert os.path.exists(outfile)
         assert os.path.getsize(outfile) > 1000, "Output file suspiciously small"
 
@@ -121,12 +129,3 @@ def test_step_to_obj():
         assert len(mesh.faces) > 100, "Mesh should have substantial faces"
         assert mesh.is_winding_consistent, "Mesh should have consistent winding"
         assert mesh.area > 0, "Mesh should have positive surface area"
-
-
-if __name__ == "__main__":
-    test_load_step_bytes()
-    test_load_iges_bytes()
-    test_load_iges_file_extensions()
-    test_step_to_glb()
-    test_step_to_obj()
-    print("All tests passed!")

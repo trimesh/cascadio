@@ -4,6 +4,7 @@
 #include "gltf_writer.hpp"
 
 #include <Quantity_Color.hxx>
+#include <gp_Trsf.hxx>
 #include <Quantity_ColorRGBA.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
@@ -79,18 +80,20 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
                                  rapidjson::Value &facesArray,
                                  rapidjson::Document::AllocatorType &alloc,
                                  const std::set<std::string> &allowedTypes,
-                                 double lengthUnit);
+                                 double lengthUnit, const gp_Trsf &frame);
 
 /// Add the TM_brep_faces extension and/or material metadata to a finished GLB.
 ///
 /// For each index accessor the writer recorded faces for, this appends a
 /// uint32 array (one face index per triangle) to the binary buffer and attaches
 /// `{faceIndices, faces}` to every primitive that uses that accessor.
+/// `frame` moves the face geometry into the coordinate frame of the mesh.
 static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
                                        const FacesByAccessor &faces,
                                        const std::set<std::string> &allowedTypes,
                                        const rapidjson::Value *materials,
-                                       double lengthUnit) {
+                                       double lengthUnit,
+                                       const gp_Trsf &frame) {
   static const char *EXTENSION_NAME = "TM_brep_faces";
 
   Glb glb = Glb::parse(glbData);
@@ -123,7 +126,7 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
         std::fill_n(faceIndices.begin() + f.triStart, f.triCount,
                     static_cast<uint32_t>(i));
         extractFacePrimitive(f.face, static_cast<int>(i), facesJson, alloc,
-                             allowedTypes, lengthUnit);
+                             allowedTypes, lengthUnit, frame);
       }
 
       const size_t byteOffset = glb.bin.size();

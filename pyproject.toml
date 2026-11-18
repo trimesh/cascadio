@@ -4,20 +4,17 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cascadio"
-version = "0.1.1"
-requires-python = ">=3.9"
+version = "0.2.0"
+requires-python = ">=3.12"
 authors = [{name = "Michael Dawson-Haggerty", email = "mikedh@kerfed.com"}]
 # cascadio is MIT; wheels also contain OpenCASCADE, which is LGPL 2.1 with
 # an exception. Both license texts ship in the wheel.
 license = "MIT AND LGPL-2.1-only WITH OCCT-exception-1.0"
 license-files = ["LICENSE/LICENSE-*.md"]
-description = "Convert STEP files to GLB using OpenCASCADE"
-keywords = ["graphics", "STEP", "GLTF"]
+description = "Convert STEP and IGES files to GLB using OpenCASCADE"
+keywords = ["graphics", "STEP", "IGES", "GLTF"]
 classifiers = [
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",

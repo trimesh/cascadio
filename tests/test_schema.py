@@ -225,7 +225,9 @@ def test_cascadio_output_validates():
         output_path = f.name
 
     try:
-        cascadio.step_to_glb(str(step_file), output_path, include_brep=True)
+        Path(output_path).write_bytes(
+            cascadio.load(step_file.read_bytes(), include_brep=True)
+        )
 
         tree = extract_glb_json(output_path)
 

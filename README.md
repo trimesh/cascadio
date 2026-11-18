@@ -16,16 +16,48 @@ The primary goal of this project is building wheels so vanilla `pip` can be used
 pip install cascadio
 ```
 
-Currently this works on non-MUSL flavors of Linux, Windows x64, and MacOS x64+ARM. You can check [PyPi](https://pypi.org/project/cascadio/#files) for current platforms.
+Wheels are built for Python 3.12 and newer on Linux (x86_64 and ARM, not musl), Windows x64, and macOS (Intel and ARM). Each wheel is about 9 MB and has no dependencies. You can check [PyPI](https://pypi.org/project/cascadio/#files) for current platforms.
 
-### :warning: :warning: :warning: :warning:
-PyPI has a size limit, and each release of this is large! We will *not* be keeping every release on PyPi (i.e. if we run out of space we delete versions) so be very careful pinning the version!
+### Usage
 
-We'll keep the following versions as "LTS" style releases on PyPi:
+```python
+import cascadio
+
+with open("model.step", "rb") as f:
+    glb = cascadio.load(f.read())  # bytes in, bytes out
+
+# IGES, with a finer mesh
+glb = cascadio.load(data, file_type="iges", tol_linear=0.001)
+
+# load the result with trimesh
+import io, trimesh
+scene = trimesh.load(io.BytesIO(glb), file_type="glb")
 ```
-pip install cascadio==0.0.13
+
+`load` never reads or writes files. Useful options (see the docstring for all of them):
+
+- `include_brep=True` adds, for every triangle, which CAD face it came from and the exact plane, cylinder, cone, sphere or torus of that face. This is the [`TM_brep_faces`](extensions/TM_brep_faces/README.md) glTF extension.
+- `include_materials=True` adds material names, densities and colors.
+- `y_up=True` rotates the model into glTF's Y-up frame. CAD files are almost always Z-up, and by default the coordinates are left as they are. Viewers that follow the glTF convention, such as Blender, rotate on import, so use this if the model shows up lying on its side.
+
+#### Limits and errors
+
+OpenCASCADE can hang or run out of memory on unusual files. So `load` does the work in a short-lived child process, which costs about 25 milliseconds and lets it enforce two limits:
+
+```python
+cascadio.load(data, timeout=30.0, memory_limit=8 * 2**30)  # the defaults
 ```
 
+| What happened | Exception |
+|---|---|
+| The data is not a valid STEP or IGES file | `ValueError` |
+| It took longer than `timeout` seconds | `TimeoutError` |
+| It used more than `memory_limit` bytes | `MemoryError` |
+| OpenCASCADE failed or crashed | `RuntimeError` |
+
+Pass `timeout=None, memory_limit=None` to convert inside your own process with no child and no protection.
+
+`step_to_glb` and `step_to_obj` work on file paths. They are deprecated and will be removed in the first release after January 2028.
 
 ### Motivation
 

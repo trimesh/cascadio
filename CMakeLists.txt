@@ -17,7 +17,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(Python REQUIRED
+find_package(Python 3.12 REQUIRED
   COMPONENTS Interpreter Development.Module
   OPTIONAL_COMPONENTS Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)

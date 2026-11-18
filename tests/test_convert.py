@@ -150,17 +150,14 @@ def assert_brep_surfaces(mesh, tolerance: float = 1e-8) -> None:
     check_brep(triangles, brep_index, primitives, tolerance)
 
 
+def load_scene(name: str, **kwargs) -> trimesh.Scene:
+    """Convert a test model with cascadio and load the GLB with trimesh."""
+    glb = cascadio.load((MODELS_DIR / name).read_bytes(), **kwargs)
+    return trimesh.load(io.BytesIO(glb), file_type="glb", merge_primitives=True)
+
+
 def test_convert_step_to_glb():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        glb_path = Path(temp_dir) / "output.glb"
-        cascadio.step_to_glb(
-            str(MODELS_DIR / "featuretype.STEP"),
-            str(glb_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-        )
-        assert glb_path.stat().st_size > 1000, "GLB file suspiciously small"
-        scene = trimesh.load(glb_path, merge_primitives=True)
+    scene = load_scene("featuretype.STEP", tol_linear=0.1, tol_angular=0.5)
 
     assert len(scene.geometry) == 1
 
@@ -171,6 +168,7 @@ def test_convert_step_to_glb():
     assert np.allclose(scene.extents, np.array([0.127, 0.0635, 0.034925]))
 
 
+@pytest.mark.filterwarnings("ignore:cascadio.step_to_obj:DeprecationWarning")
 def test_convert_step_to_obj():
     with tempfile.TemporaryDirectory() as temp_dir:
         obj_path = Path(temp_dir) / "output.obj"
@@ -194,6 +192,7 @@ def test_convert_step_to_obj():
         (False, np.array([102, 102, 102, 255])),  # Default gray
     ],
 )
+@pytest.mark.filterwarnings("ignore:cascadio.step_to_obj:DeprecationWarning")
 def test_convert_step_to_obj_colors(use_colors, expected_color):
     """Test OBJ export with and without colors."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -218,18 +217,9 @@ def test_convert_step_to_obj_colors(use_colors, expected_color):
 
 def test_convert_step_to_glb_with_brep():
     """Test that include_brep=True embeds BREP primitive data in mesh extras."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        glb_path = Path(temp_dir) / "output.glb"
-        cascadio.step_to_glb(
-            str(MODELS_DIR / "featuretype.STEP"),
-            str(glb_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-            include_brep=True,
-        )
-
-        # Load with trimesh
-        scene = trimesh.load(glb_path, merge_primitives=True)
+    scene = load_scene(
+        "featuretype.STEP", tol_linear=0.1, tol_angular=0.5, include_brep=True
+    )
 
     # Should have one mesh
     assert len(scene.geometry) == 1
@@ -402,94 +392,29 @@ def test_brep_forces_merge_primitives():
     assert_brep_surfaces(mesh)
 
 
-def test_step_to_glb_bytes_performance():
-    """Compare performance of file-based vs bytes-based conversion."""
+def test_worker_overhead():
+    """The child process used to enforce limits should cost little."""
     step_data = (MODELS_DIR / "featuretype.STEP").read_bytes()
-    n_iterations = 5
+    kwargs = {"tol_linear": 0.1, "tol_angular": 0.5}
 
-    # Time file-based method (no BREP)
-    def file_based():
-        f = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
-        try:
-            f.close()
-            cascadio.step_to_glb(
-                str(MODELS_DIR / "featuretype.STEP"),
-                f.name,
-                tol_linear=0.1,
-                tol_angular=0.5,
-            )
-            with open(f.name, "rb") as glb_file:
-                return glb_file.read()
-        finally:
-            if os.path.exists(f.name):
-                os.unlink(f.name)
+    def in_process():
+        return cascadio.load(step_data, timeout=None, memory_limit=None, **kwargs)
 
-    # Time file-based method with BREP
-    def file_based_brep():
-        f = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
-        try:
-            f.close()
-            cascadio.step_to_glb(
-                str(MODELS_DIR / "featuretype.STEP"),
-                f.name,
-                tol_linear=0.1,
-                tol_angular=0.5,
-                include_brep=True,
-            )
-            with open(f.name, "rb") as glb_file:
-                return glb_file.read()
-        finally:
-            if os.path.exists(f.name):
-                os.unlink(f.name)
+    def in_worker():
+        return cascadio.load(step_data, **kwargs)
 
-    # Time bytes-based methods
-    def bytes_based():
-        return cascadio.load(
-            step_data, file_type="step", tol_linear=0.1, tol_angular=0.5
-        )
+    # same bytes either way
+    assert in_process() == in_worker()
 
-    def bytes_with_brep():
-        return cascadio.load(
-            step_data,
-            file_type="step",
-            tol_linear=0.1,
-            tol_angular=0.5,
-            include_brep=True,
-        )
-
-    file_time = timeit.timeit(file_based, number=n_iterations)
-    file_brep_time = timeit.timeit(file_based_brep, number=n_iterations)
-    bytes_time = timeit.timeit(bytes_based, number=n_iterations)
-    brep_time = timeit.timeit(bytes_with_brep, number=n_iterations)
-
-    print(f"\nPerformance ({n_iterations} iterations):")
-    print(f"  File-based (no BREP):   {file_time / n_iterations * 1000:.1f}ms/call")
+    count = 5
+    direct = timeit.timeit(in_process, number=count) / count
+    worker = timeit.timeit(in_worker, number=count) / count
     print(
-        f"  File-based (with BREP): {file_brep_time / n_iterations * 1000:.1f}ms/call  (+{(file_brep_time / file_time - 1) * 100:.1f}%)"
+        f"\nin-process {direct * 1000:.1f} ms, worker {worker * 1000:.1f} ms, "
+        f"overhead {(worker - direct) * 1000:.1f} ms"
     )
-    print(
-        f"  Bytes (no BREP):        {bytes_time / n_iterations * 1000:.1f}ms/call  ({file_time / bytes_time:.2f}x faster)"
-    )
-    print(
-        f"  Bytes (with BREP):      {brep_time / n_iterations * 1000:.1f}ms/call  (+{(brep_time / bytes_time - 1) * 100:.1f}%, {file_brep_time / brep_time:.2f}x faster)"
-    )
-
-    # Verify outputs are valid GLB with actual mesh content
-    file_output = file_based()
-    bytes_output = bytes_based()
-    assert len(file_output) > 1000, "File-based output too small"
-    assert len(bytes_output) > 1000, "Bytes-based output too small"
-
-    # Verify outputs load as valid meshes
-    scene_file = trimesh.load(io.BytesIO(file_output), file_type="glb")
-    scene_bytes = trimesh.load(io.BytesIO(bytes_output), file_type="glb")
-    assert len(scene_file.geometry) == 1
-    assert len(scene_bytes.geometry) == 1
-
-    mesh_file = list(scene_file.geometry.values())[0]
-    mesh_bytes = list(scene_bytes.geometry.values())[0]
-    assert len(mesh_file.vertices) > 100
-    assert len(mesh_bytes.vertices) > 100
+    # generous bound: catches the worker importing something heavy
+    assert worker - direct < 0.5
 
 
 def test_convert_step_to_glb_with_materials():
@@ -669,9 +594,43 @@ def test_node_name_format_default():
 def test_node_name_format_step_to_glb(tmp_path):
     """The file-based wrapper passes `node_name_format` through."""
     output = tmp_path / "out.glb"
-    cascadio.step_to_glb(
-        str(MODELS_DIR / "multibody.step"),
-        str(output),
-        node_name_format=cascadio.NodeNameFormat.PRODUCT,
-    )
+    with pytest.warns(DeprecationWarning):
+        cascadio.step_to_glb(
+            str(MODELS_DIR / "multibody.step"),
+            str(output),
+            node_name_format=cascadio.NodeNameFormat.PRODUCT,
+        )
     assert _node_names(output.read_bytes())[1] == "box_base"
+
+
+def test_y_up_cuboid():
+    """
+    `y_up` rotates CAD's Z-up into glTF's Y-up: (x, y, z) -> (x, z, -y).
+
+    The models are a 1 x 2 x 3 meter cuboid exported from Onshape twice,
+    once as-is and once with Onshape's own "Y-up" export option.
+    """
+    z_up = load_scene("cuboid_zup.step")
+    assert np.allclose(z_up.bounds, [[0, 0, 0], [1, 2, 3]])
+
+    rotated = load_scene("cuboid_zup.step", y_up=True)
+    assert np.allclose(rotated.bounds, [[0, 0, -2], [1, 3, 0]])
+
+    # the same thing Onshape produces when asked for Y-up
+    onshape = load_scene("cuboid_yup.step")
+    assert np.allclose(rotated.bounds, onshape.bounds)
+
+
+def test_y_up_brep():
+    """With `y_up` the BREP surfaces are rotated along with the mesh."""
+    for name in ("featuretype.STEP", "cuboid_zup.step"):
+        scene = load_scene(name, y_up=True, include_brep=True)
+        for mesh in scene.geometry.values():
+            assert_brep_surfaces(mesh)
+
+    # the top face of the cuboid points along +Z in CAD and +Y in glTF
+    for y_up, up in ((False, [0, 0, 1]), (True, [0, 1, 0])):
+        scene = load_scene("cuboid_zup.step", y_up=y_up, include_brep=True)
+        mesh = next(iter(scene.geometry.values()))
+        normals = [p.normal for p in mesh.metadata["cascadio"]["brep_primitives"]]
+        assert any(np.allclose(n, up) for n in normals)

@@ -10,12 +10,16 @@
 #include <Bnd_Box.hxx>
 #include <Message_ProgressRange.hxx>
 #include <NCollection_IndexedDataMap.hxx>
+#include <RWMesh_CoordinateSystem.hxx>
 #include <RWMesh_NameFormat.hxx>
 #include <RWObj_CafWriter.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <gp.hxx>
+#include <gp_Trsf.hxx>
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -30,6 +34,8 @@ struct ConvertOptions {
   std::set<std::string> brep_types;
   bool include_materials = false;
   RWMesh_NameFormat node_name_format = RWMesh_NameFormat_InstanceOrProduct;
+  /// Rotate from CAD's Z-up into glTF's Y-up: (x, y, z) -> (x, z, -y)
+  bool y_up = false;
 };
 
 /// Metadata the OCCT writers accept for the output file; we add none.
@@ -102,6 +108,12 @@ static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
   writer.SetParallel(options.mesh.use_parallel);
   writer.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
   writer.SetNodeNameFormat(options.node_name_format);
+  if (options.y_up) {
+    // with both ends declared the writer rotates Z-up into glTF's Y-up;
+    // by default the input frame is undefined and nothing is rotated
+    writer.ChangeCoordinateSystemConverter().SetInputCoordinateSystem(
+        RWMesh_CoordinateSystem_Zup);
+  }
   if (!writer.Perform(doc, FileInfo(), Message_ProgressRange())) {
     throw std::runtime_error("OpenCASCADE could not write the GLB");
   }
@@ -140,9 +152,14 @@ static std::vector<char> toGlb(const char *data, size_t size,
   if (options.include_brep || options.include_materials) {
     // scale factor from the file's unit to meters, the unit of glTF
     const double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
+    // the face metadata must turn with the mesh: -90 degrees about X
+    gp_Trsf frame;
+    if (options.y_up) {
+      frame.SetRotation(gp::OX(), -M_PI / 2);
+    }
     glb = injectIntoGlb(glb, faces, options.brep_types,
                         options.include_materials ? &materials : nullptr,
-                        lengthUnit);
+                        lengthUnit, frame);
   }
   return glb;
 }

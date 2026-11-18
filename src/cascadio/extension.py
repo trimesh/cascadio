@@ -15,9 +15,14 @@ Usage:
     scene = trimesh.load("model.glb")
 """
 
-from typing import Dict, List, Optional, Any
+from __future__ import annotations
 
-import numpy as np
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    # numpy is only needed once trimesh hands us arrays, so cascadio
+    # itself imports and converts without it
+    import numpy as np
 
 try:
     from trimesh.exchange.gltf.extensions import register_handler
@@ -139,6 +144,8 @@ def process_brep_faces(
         - 'brep_index': numpy array for face_attributes
         - 'brep_primitives': list of primitive dataclasses
     """
+    import numpy as np
+
     result = {
         "brep_index": np.asarray(face_indices).flatten(),
         "brep_primitives": [],
@@ -178,6 +185,8 @@ def _import_brep_faces_cascadio(ctx: Dict) -> Optional[Dict]:
         accessor_idx = data["faceIndices"]
         accessors = ctx.get("accessors")
         if accessors is not None and accessor_idx < len(accessors):
+            import numpy as np
+
             face_indices = np.asarray(accessors[accessor_idx]).flatten()
             result["face_attributes"]["brep_index"] = face_indices
 

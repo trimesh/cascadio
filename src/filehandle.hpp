@@ -22,16 +22,11 @@
 /// On Linux 3.17+: uses memfd_create (no filesystem writes)
 /// Elsewhere: falls back to temp file in system temp directory
 ///
-/// Note: For output files where OCCT creates sibling temp files (like .bin.tmp
-/// for GLB), use allow_memfd=false to force temp file usage.
 class FileHandle {
 public:
   /// Create a file handle with the given extension hint (e.g., ".glb", ".igs")
-  /// @param extension File extension (e.g., ".glb", ".igs")
-  /// @param allow_memfd If false, always use temp file (needed for output
-  ///        where OCCT creates sibling files like .bin.tmp)
-  explicit FileHandle(const std::string &extension, bool allow_memfd = true) {
-    if (allow_memfd && memfd_available()) {
+  explicit FileHandle(const std::string &extension) {
+    if (memfd_available()) {
 #ifdef __linux__
       // Use memfd - no filesystem writes
       fd_ = syscall(SYS_memfd_create, "cascadio", MFD_CLOEXEC);
@@ -98,9 +93,20 @@ public:
 
     if (is_memfd_) {
 #ifdef __linux__
-      ftruncate(fd_, 0);
-      lseek(fd_, 0, SEEK_SET);
-      return write(fd_, data, size) == static_cast<ssize_t>(size);
+      if (ftruncate(fd_, 0) != 0 || lseek(fd_, 0, SEEK_SET) != 0) {
+        return false;
+      }
+      // one write() call is capped at about 2 GB, so loop until done
+      const char *cursor = static_cast<const char *>(data);
+      while (size > 0) {
+        const ssize_t written = write(fd_, cursor, size);
+        if (written <= 0) {
+          return false;
+        }
+        cursor += written;
+        size -= static_cast<size_t>(written);
+      }
+      return true;
 #else
       return false;
 #endif
@@ -133,9 +139,14 @@ public:
         return {};
       lseek(fd_, 0, SEEK_SET);
       std::vector<char> result(static_cast<size_t>(size));
-      if (read(fd_, result.data(), result.size()) !=
-          static_cast<ssize_t>(size)) {
-        return {};
+      // one read() call is capped at about 2 GB, so loop until done
+      size_t done = 0;
+      while (done < result.size()) {
+        const ssize_t got = read(fd_, result.data() + done, result.size() - done);
+        if (got <= 0) {
+          return {};
+        }
+        done += static_cast<size_t>(got);
       }
       return result;
 #else
@@ -152,6 +163,9 @@ public:
       file.seekg(0);
       std::vector<char> result(size);
       file.read(result.data(), static_cast<std::streamsize>(size));
+      if (!file) {
+        return {};
+      }
       return result;
     }
   }

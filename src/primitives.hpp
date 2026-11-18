@@ -12,6 +12,7 @@
 #include <gp_Pln.hxx>
 #include <gp_Sphere.hxx>
 #include <gp_Torus.hxx>
+#include <gp_Trsf.hxx>
 
 // ============================================================================
 // BREP Primitive Extraction
@@ -43,8 +44,8 @@ static const char *getSurfaceTypeName(GeomAbs_SurfaceType surfType) {
 static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
                                  rapidjson::Value &facesArray,
                                  rapidjson::Document::AllocatorType &alloc,
-                                 const std::set<std::string> &allowedTypes = {},
-                                 double lengthUnit = 1.0) {
+                                 const std::set<std::string> &allowedTypes,
+                                 double lengthUnit, const gp_Trsf &frame) {
   // Null/empty face -> null entry
   if (face.IsNull()) {
     facesArray.PushBack(rapidjson::Value(), alloc);
@@ -81,7 +82,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
 
   switch (surfType) {
   case GeomAbs_Plane: {
-    gp_Pln pln = surf.Plane();
+    gp_Pln pln = surf.Plane().Transformed(frame);
     gp_Ax3 pos = pln.Position();
     obj.AddMember("type", "plane", alloc);
     addVec3(obj, "origin", pos.Location().X() * lengthUnit,
@@ -97,7 +98,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     break;
   }
   case GeomAbs_Cylinder: {
-    gp_Cylinder cyl = surf.Cylinder();
+    gp_Cylinder cyl = surf.Cylinder().Transformed(frame);
     gp_Ax3 pos = cyl.Position();
     obj.AddMember("type", "cylinder", alloc);
     addVec3(obj, "origin", pos.Location().X() * lengthUnit,
@@ -112,7 +113,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     break;
   }
   case GeomAbs_Cone: {
-    gp_Cone cone = surf.Cone();
+    gp_Cone cone = surf.Cone().Transformed(frame);
     gp_Ax3 pos = cone.Position();
     gp_Pnt apex = cone.Apex();
     obj.AddMember("type", "cone", alloc);
@@ -128,7 +129,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     break;
   }
   case GeomAbs_Sphere: {
-    gp_Sphere sph = surf.Sphere();
+    gp_Sphere sph = surf.Sphere().Transformed(frame);
     obj.AddMember("type", "sphere", alloc);
     addVec3(obj, "center", sph.Location().X() * lengthUnit,
             sph.Location().Y() * lengthUnit, sph.Location().Z() * lengthUnit,
@@ -140,7 +141,7 @@ static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
     break;
   }
   case GeomAbs_Torus: {
-    gp_Torus tor = surf.Torus();
+    gp_Torus tor = surf.Torus().Transformed(frame);
     gp_Ax3 pos = tor.Position();
     obj.AddMember("type", "torus", alloc);
     addVec3(obj, "center", pos.Location().X() * lengthUnit,
