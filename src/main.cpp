@@ -12,6 +12,7 @@
 #include <nanobind/stl/string.h>
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -82,6 +83,10 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
   }
   switch (result.exit_code) {
   case worker_exit::OK:
+    if (std::getenv("CASCADIO_TRACE") != nullptr) {
+      // pass the worker's stage timings on to the terminal
+      std::fwrite(result.errors.data(), 1, result.errors.size(), stderr);
+    }
     return std::move(result.output);
   case worker_exit::INVALID_INPUT:
     throw std::invalid_argument(said);

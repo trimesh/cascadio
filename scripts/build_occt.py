@@ -96,6 +96,9 @@ def main() -> int:
         "-G", "Ninja",
         f"--toolchain={TOOLCHAIN}",
         "-DCMAKE_BUILD_TYPE=Release",
+        # lets cmake/toolchain.cmake pick the Windows C runtime; OpenCASCADE
+        # asks for a CMake old enough that this is otherwise ignored
+        "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
         f"-DINSTALL_DIR={PREFIX}",
         "-DINSTALL_DIR_LAYOUT=Unix",
         "-DBUILD_LIBRARY_TYPE=Static",

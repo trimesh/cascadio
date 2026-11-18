@@ -224,3 +224,19 @@ def test_docstrings():
                 name,
                 argument,
             )
+
+
+def test_trace():
+    """CASCADIO_TRACE prints how long each stage took, on standard error."""
+    script = "import sys, cascadio; cascadio.load(open(sys.argv[1], 'rb').read())"
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(MODELS_DIR / "featuretype.STEP")],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "CASCADIO_TRACE": "1"},
+    )
+    assert result.stdout == ""
+    stages = [line.split()[1] for line in result.stderr.splitlines()]
+    for stage in ("parse", "mesh", "total"):
+        assert stage in stages

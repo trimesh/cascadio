@@ -2,6 +2,7 @@
 
 #include "filehandle.hpp"
 #include "request.hpp"
+#include "trace.hpp"
 #include "zstd.hpp"
 
 #include <BRepBuilderAPI_Sewing.hxx>
@@ -70,6 +71,7 @@ struct Loaded {
       return;
     }
     shapes.push_back(shape);
+    Span span("mesh");
     // the constructor runs the meshing
     BRepMesh_IncrementalMesh(shape, mesh.tol_linear, mesh.tol_relative,
                              mesh.tol_angle, mesh.use_parallel);
@@ -81,14 +83,20 @@ static void loadStep(Loaded &loaded, const char *data, size_t size,
                      const MeshOptions &mesh, bool use_colors) {
   STEPCAFControl_Reader reader;
   imemstream stream(data, size);
-  if (reader.ReadStream("data.step", stream) != IFSelect_RetDone) {
-    throw std::invalid_argument("could not parse the data as a STEP file");
+  {
+    Span span("parse");
+    if (reader.ReadStream("data.step", stream) != IFSelect_RetDone) {
+      throw std::invalid_argument("could not parse the data as a STEP file");
+    }
   }
   reader.SetColorMode(use_colors);
   reader.SetNameMode(true);
   reader.SetLayerMode(true);
-  if (!reader.Transfer(loaded.doc)) {
-    throw std::runtime_error("could not convert the STEP file to shapes");
+  {
+    Span span("build shapes");
+    if (!reader.Transfer(loaded.doc)) {
+      throw std::runtime_error("could not convert the STEP file to shapes");
+    }
   }
   const XSControl_Reader &shapes = reader.Reader();
   for (int i = 1; i <= shapes.NbShapes(); i++) {
@@ -117,6 +125,7 @@ static void loadIges(Loaded &loaded, const char *data, size_t size,
     throw std::invalid_argument("could not parse the data as an IGES file");
   }
 
+  Span span("build shapes");
   reader.TransferRoots();
   // a small tolerance for joining neighbouring surfaces,
   // unrelated to the meshing tolerance
@@ -155,6 +164,7 @@ static void load(Loaded &loaded, const char *data, size_t size,
                  bool use_colors = true) {
   std::vector<char> unpacked;
   if (isZstd(data, size)) {
+    Span span("decompress");
     unpacked = zstdDecompress(data, size);
     data = unpacked.data();
     size = unpacked.size();

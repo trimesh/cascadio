@@ -113,8 +113,11 @@ static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
     writer.ChangeCoordinateSystemConverter().SetInputCoordinateSystem(
         RWMesh_CoordinateSystem_Zup);
   }
-  if (!writer.Perform(doc, FileInfo(), Message_ProgressRange())) {
-    throw std::runtime_error("OpenCASCADE could not write the GLB");
+  {
+    Span span("write glb");
+    if (!writer.Perform(doc, FileInfo(), Message_ProgressRange())) {
+      throw std::runtime_error("OpenCASCADE could not write the GLB");
+    }
   }
 
   handle.prepare_for_read();
@@ -155,6 +158,7 @@ static std::vector<char> toGlb(const char *data, size_t size,
   }
 
   if (options.include_brep || options.include_materials) {
+    Span span("face data");
     // scale factor from the file's unit to meters, the unit of glTF
     const double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
     // the face metadata must turn with the mesh: -90 degrees about X

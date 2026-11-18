@@ -7,6 +7,7 @@
 //
 // It can also be run by hand, for example to debug a file:
 //     (printf 'file_type=1\n\n'; cat model.step) | cascadio-worker > model.glb
+// Set CASCADIO_TRACE=1 to print how long each stage takes (see trace.hpp).
 
 #include "convert.hpp"
 #include "request.hpp"
@@ -139,11 +140,15 @@ int main() {
   int code = worker_exit::FAILED;
   try {
     // everything on standard input: the request, an empty line, the file
+    Span total("total");
     std::vector<char> input;
-    char buffer[65536];
-    size_t got;
-    while ((got = std::fread(buffer, 1, sizeof(buffer), stdin)) > 0) {
-      input.insert(input.end(), buffer, buffer + got);
+    {
+      Span span("receive");
+      char buffer[65536];
+      size_t got;
+      while ((got = std::fread(buffer, 1, sizeof(buffer), stdin)) > 0) {
+        input.insert(input.end(), buffer, buffer + got);
+      }
     }
     // the request ends at the first empty line; parse only that part
     static const char marker[] = "\n\n";
@@ -161,10 +166,13 @@ int main() {
 
     const std::vector<char> output =
         run(request, input.data() + start, input.size() - start);
-    if (std::fwrite(output.data(), 1, output.size(), result_stream) !=
-            output.size() ||
-        std::fflush(result_stream) != 0) {
-      throw std::runtime_error("could not write the result");
+    {
+      Span span("send");
+      if (std::fwrite(output.data(), 1, output.size(), result_stream) !=
+              output.size() ||
+          std::fflush(result_stream) != 0) {
+        throw std::runtime_error("could not write the result");
+      }
     }
     code = worker_exit::OK;
   } catch (const std::invalid_argument &error) {

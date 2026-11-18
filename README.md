@@ -66,6 +66,15 @@ cascadio.load(data, timeout=30.0, memory_limit=8 * 2**30)  # the defaults
 
 Either limit can be `None` to switch it off.
 
+To see where the time goes for a slow file, set `CASCADIO_TRACE=1`. Each stage of the conversion then prints how long it took:
+
+```
+cascadio: parse            954.2 ms
+cascadio: build shapes    8987.8 ms
+cascadio: mesh             538.7 ms
+cascadio: write glb         92.7 ms
+```
+
 `step_to_glb` and `step_to_obj` work on file paths. They are deprecated and will be removed in the first release after January 2028.
 
 ### Motivation
