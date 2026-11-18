@@ -66,7 +66,7 @@ cascadio.load(data, timeout=30.0, memory_limit=8 * 2**30)  # the defaults
 
 Pass `timeout=None, memory_limit=None` to convert inside your own process with no child and no protection.
 
-`step_to_glb` and `step_to_obj` work on file paths. They are deprecated and will be removed in the first release after January 2028.
+`step_to_glb` and `step_to_obj` work on file paths and convert inside your own process, without the limits above. They are deprecated and will be removed in the first release after January 2028.
 
 ### Motivation
 

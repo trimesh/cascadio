@@ -16,7 +16,7 @@ This file is both sides of that:
 
 Protocol, parent to child on stdin:
     4 bytes   length of the header, little-endian
-    N bytes   header: JSON `{"core", "function", "options", "memory_limit"}`
+    N bytes   header: JSON `{"core", "options", "memory_limit"}`
               where "core" is the path of the compiled module to load
     the rest  the input file
 Child to parent on stdout:
@@ -41,7 +41,7 @@ POLL_SECONDS = 0.02
 ERRORS = {"ValueError": ValueError, "MemoryError": MemoryError}
 
 
-def convert(core, function: str, data: bytes, options: dict) -> bytes:
+def convert(core, data: bytes, options: dict) -> bytes:
     """
     Call the compiled module with plain-data options.
 
@@ -49,9 +49,6 @@ def convert(core, function: str, data: bytes, options: dict) -> bytes:
     both paths behave the same. Enum options arrive as their names.
     """
     options = dict(options)
-    if function == "obj":
-        core.step_to_obj_file(data, **options)
-        return b""
     options["file_type"] = getattr(core.FileType, options["file_type"])
     options["node_name_format"] = getattr(
         core.NodeNameFormat, options["node_name_format"]
@@ -62,7 +59,6 @@ def convert(core, function: str, data: bytes, options: dict) -> bytes:
 
 def run(
     core_path: str,
-    function: str,
     data: bytes,
     options: dict,
     timeout: float | None,
@@ -85,7 +81,6 @@ def run(
     header = json.dumps(
         {
             "core": core_path,
-            "function": function,
             "options": options,
             "memory_limit": memory_limit,
         }
@@ -216,7 +211,7 @@ def main() -> None:
         core = module_from_spec(spec_from_loader("_core", loader))
         loader.exec_module(core)
 
-        result = b"\x00" + convert(core, header["function"], data, header["options"])
+        result = b"\x00" + convert(core, data, header["options"])
     except BaseException as error:
         result = (
             b"\x01"

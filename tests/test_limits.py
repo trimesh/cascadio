@@ -73,7 +73,7 @@ def test_worker_crash_is_reported():
     """If the child dies without answering, the parent raises RuntimeError."""
     # a module that cannot be loaded stands in for a crash inside OpenCASCADE
     with pytest.raises(RuntimeError):
-        _worker.run("/nonexistent/_core.so", "glb", STEP, {}, 30, None)
+        _worker.run("/nonexistent/_core.so", STEP, {}, 30, None)
 
 
 def test_gil_released():

@@ -8,6 +8,8 @@
 #include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
 
+#include <fstream>
+#include <iterator>
 #include <mutex>
 #include <new>
 #include <type_traits>
@@ -52,6 +54,28 @@ template <typename Function> static auto guarded(Function &&convert) {
     throw std::runtime_error("OpenCASCADE error: " + failureText(failure));
   } catch (const std::exception &error) {
     throw std::runtime_error(error.what());
+  }
+}
+
+/// Read a whole file, or throw.
+static std::vector<char> readFile(const std::string &path) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    throw std::runtime_error("cannot open input file: " + path);
+  }
+  return std::vector<char>(std::istreambuf_iterator<char>(file), {});
+}
+
+/// Warn that a file-path function is going away. Raises if the caller has
+/// turned warnings into errors.
+static void deprecated(const char *name) {
+  const std::string message =
+      std::string("cascadio.") + name +
+      " reads and writes files and is deprecated: it will be removed in the "
+      "first release after January 2028. Read the file yourself and call "
+      "cascadio.load(data), which takes and returns bytes.";
+  if (PyErr_WarnEx(PyExc_DeprecationWarning, message.c_str(), 1) != 0) {
+    throw nb::python_error();
   }
 }
 
@@ -110,26 +134,73 @@ OpenCASCADE fails to convert it.
       "y_up"_a = false);
 
   m.def(
-      "step_to_obj_file",
-      [](nb::bytes data, const std::string &output_path, double tol_linear,
-         double tol_angular, bool tol_relative, bool use_parallel,
-         bool use_colors) {
+      "step_to_glb",
+      [](const std::string &input_path, const std::string &output_path,
+         double tol_linear, double tol_angular, bool tol_relative,
+         bool merge_primitives, bool use_parallel, bool include_brep,
+         std::set<std::string> brep_types, bool include_materials,
+         RWMesh_NameFormat node_name_format) {
+        deprecated("step_to_glb");
         guarded([&] {
-          stepToObj(data.c_str(), data.size(), output_path,
+          const std::vector<char> step = readFile(input_path);
+          const std::vector<char> glb = toGlb(
+              step.data(), step.size(), FileType::STEP,
+              {{tol_linear, tol_angular, tol_relative, use_parallel},
+               merge_primitives, include_brep, std::move(brep_types),
+               include_materials, node_name_format});
+          std::ofstream file(output_path, std::ios::binary);
+          file.write(glb.data(), static_cast<std::streamsize>(glb.size()));
+          if (!file) {
+            throw std::runtime_error("cannot write output file: " +
+                                     output_path);
+          }
+          return 0;
+        });
+        return 0;
+      },
+      R"doc(
+Deprecated: convert a STEP file on disk to a GLB file on disk.
+
+Use `cascadio.load`, which takes and returns bytes, never touches the
+filesystem, and enforces a time and memory limit. This function runs in
+the calling process with no limits.
+
+Returns 0. Failures raise instead of returning 1.
+)doc",
+      "input_path"_a, "output_path"_a, "tol_linear"_a = 0.01,
+      "tol_angular"_a = 0.5, "tol_relative"_a = false,
+      "merge_primitives"_a = true, "use_parallel"_a = true,
+      "include_brep"_a = false, "brep_types"_a = std::set<std::string>(),
+      "include_materials"_a = false,
+      "node_name_format"_a = RWMesh_NameFormat_InstanceOrProduct);
+
+  m.def(
+      "step_to_obj",
+      [](const std::string &input_path, const std::string &output_path,
+         double tol_linear, double tol_angular, bool tol_relative,
+         bool use_parallel, bool use_colors) {
+        deprecated("step_to_obj");
+        guarded([&] {
+          const std::vector<char> step = readFile(input_path);
+          stepToObj(step.data(), step.size(), output_path,
                     {tol_linear, tol_angular, tol_relative, use_parallel},
                     use_colors);
           return 0;
         });
+        return 0;
       },
       R"doc(
-Convert STEP bytes to an OBJ file at `output_path`.
+Deprecated: convert a STEP file on disk to an OBJ file on disk.
 
-A MTL file is written next to it when the STEP has colors and
-`use_colors` is set. This is the only function that writes to disk.
+A MTL file is written next to the OBJ when the STEP has colors and
+`use_colors` is set. Use `cascadio.load` and export the GLB with a mesh
+library instead. This function runs in the calling process with no limits.
+
+Returns 0. Failures raise instead of returning 1.
 )doc",
-      "data"_a, "output_path"_a, "tol_linear"_a = 0.01, "tol_angular"_a = 0.5,
-      "tol_relative"_a = false, "use_parallel"_a = true,
-      "use_colors"_a = true);
+      "input_path"_a, "output_path"_a, "tol_linear"_a = 0.01,
+      "tol_angular"_a = 0.5, "tol_relative"_a = false,
+      "use_parallel"_a = true, "use_colors"_a = true);
 
 #ifdef VERSION_INFO
   m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

@@ -12,7 +12,14 @@ import warnings
 from typing import Literal, Optional, Set
 
 from . import _core, _worker, extension, primitives
-from ._core import FileType, NodeNameFormat, __version__, to_glb_bytes
+from ._core import (
+    FileType,
+    NodeNameFormat,
+    __version__,
+    step_to_glb,
+    step_to_obj,
+    to_glb_bytes,
+)
 
 STEP = FileType.STEP
 IGES = FileType.IGES
@@ -29,7 +36,6 @@ _FILE_TYPES = {"step": "STEP", "stp": "STEP", "iges": "IGES", "igs": "IGES"}
 
 
 def _convert(
-    function: str,
     data: bytes,
     options: dict,
     timeout: Optional[float],
@@ -37,7 +43,7 @@ def _convert(
 ) -> bytes:
     """Convert in a killable child process, or in-process if no limit is set."""
     if timeout is None and memory_limit is None:
-        return _worker.convert(_core, function, data, options)
+        return _worker.convert(_core, data, options)
     if getattr(sys, "frozen", False) or not sys.executable:
         # a frozen application has no Python executable to start a child with
         warnings.warn(
@@ -46,8 +52,8 @@ def _convert(
             RuntimeWarning,
             stacklevel=3,
         )
-        return _worker.convert(_core, function, data, options)
-    return _worker.run(_core.__file__, function, data, options, timeout, memory_limit)
+        return _worker.convert(_core, data, options)
+    return _worker.run(_core.__file__, data, options, timeout, memory_limit)
 
 
 def load(
@@ -139,7 +145,6 @@ def load(
     if kind is None:
         raise ValueError(f"Unsupported file_type: {file_type}. Use 'step' or 'iges'.")
     return _convert(
-        "glb",
         data,
         {
             "file_type": kind,
@@ -157,79 +162,6 @@ def load(
         timeout,
         memory_limit,
     )
-
-
-def _deprecated(name: str, instead: str) -> None:
-    warnings.warn(
-        f"cascadio.{name} reads and writes files and is deprecated: it will be "
-        f"removed in the first release after January 2028. {instead}",
-        DeprecationWarning,
-        stacklevel=3,
-    )
-
-
-def step_to_glb(input_path: str, output_path: str, **kwargs) -> int:
-    """
-    Deprecated: convert a STEP file on disk to a GLB file on disk.
-
-    Use `load`, which works on bytes and never touches the filesystem:
-
-        glb = cascadio.load(open(input_path, "rb").read())
-
-    Accepts the keyword arguments of `load`. Returns 0, as it always did
-    on success; failures now raise instead of returning 1.
-    """
-    _deprecated("step_to_glb", "Read the file yourself and call cascadio.load(data).")
-    with open(input_path, "rb") as file:
-        glb = load(file.read(), file_type="step", **kwargs)
-    with open(output_path, "wb") as file:
-        file.write(glb)
-    return 0
-
-
-def step_to_obj(
-    input_path: str,
-    output_path: str,
-    tol_linear: float = 0.01,
-    tol_angular: float = 0.5,
-    tol_relative: bool = False,
-    use_parallel: bool = True,
-    use_colors: bool = True,
-    timeout: Optional[float] = DEFAULT_TIMEOUT,
-    memory_limit: Optional[int] = DEFAULT_MEMORY_LIMIT,
-) -> int:
-    """
-    Deprecated: convert a STEP file on disk to an OBJ file on disk.
-
-    A MTL file is written next to the OBJ when the STEP has colors and
-    `use_colors` is set. Use `load` and convert the GLB with a mesh library
-    such as trimesh instead:
-
-        trimesh.load(io.BytesIO(cascadio.load(data)), file_type="glb").export("out.obj")
-
-    Returns 0, as it always did on success; failures now raise.
-    """
-    _deprecated(
-        "step_to_obj",
-        "Call cascadio.load(data) and export the GLB with a mesh library.",
-    )
-    with open(input_path, "rb") as file:
-        data = file.read()
-    _convert(
-        "obj",
-        data,
-        {
-            "output_path": str(output_path),
-            "tol_linear": tol_linear,
-            "tol_angular": tol_angular,
-            "tol_relative": tol_relative,
-            "use_parallel": use_parallel,
-            "use_colors": use_colors,
-        },
-        timeout,
-        memory_limit,
-    )
-    return 0
 
 
 __all__ = [
