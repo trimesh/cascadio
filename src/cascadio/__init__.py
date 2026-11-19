@@ -19,7 +19,6 @@ from ._core import (
     __version__,
     load,
     step_to_glb,
-    step_to_obj,
     to_glb_bytes,
 )
 
@@ -42,6 +41,5 @@ __all__ = [
     "load",
     "primitives",
     "step_to_glb",
-    "step_to_obj",
     "to_glb_bytes",
 ]

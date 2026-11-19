@@ -66,6 +66,18 @@ cascadio.load(data, timeout=30.0, memory_limit=8 * 2**30)  # the defaults
 
 Either limit can be `None` to switch it off.
 
+#### The worker is locked down
+
+The worker treats every file as hostile. Before it reads the input it locks itself down, so that even a file that took over the worker could only compute and hand back bytes. It cannot open, create or list files, reach the network, start programs or touch other processes. None of the caller's environment variables are passed to it, so there are no credentials in its memory to leak. Nothing switches this off.
+
+| Platform | How |
+|---|---|
+| Linux (x86-64, ARM64) | A short, fixed seccomp allowlist; `clone` only for new threads. Any other call kills the worker, which raises `RuntimeError` |
+| macOS | Apple's "pure computation" sandbox profile |
+| Windows | A job that allows no other process, a low-integrity token and process mitigations. Windows has no system call filter, so the worker can still read files there |
+
+To find out which call stopped a worker, run it by hand under `strace -f` (see `src/worker.cpp`).
+
 To see where the time goes for a slow file, set `CASCADIO_TRACE=1`. Each stage of the conversion then prints how long it took:
 
 ```
@@ -75,7 +87,7 @@ cascadio: mesh             538.7 ms
 cascadio: write glb         92.7 ms
 ```
 
-`step_to_glb` and `step_to_obj` work on file paths. They are deprecated and will be removed in the first release after January 2028.
+`step_to_glb` works on file paths. It is deprecated and will be removed in the first release after January 2028. `step_to_obj` was removed in 0.2: the converter is not allowed to write files.
 
 ### Motivation
 
@@ -104,6 +116,8 @@ The source distribution on PyPI contains no vendored code. It builds against the
 pip install --no-binary cascadio cascadio
 ```
 
+Reading IGES needs OpenCASCADE 8.1 or newer. Earlier versions read IGES only from a file on disk, and the worker may not open one.
+
 No patches to OpenCASCADE are needed. If CMake does not find it, point `CMAKE_PREFIX_PATH` at the install.
 
 #### Build tools are locked
@@ -116,7 +130,7 @@ No patches to OpenCASCADE are needed. If CMake does not find it, point `CMAKE_PR
 make bughunt   # lint, sanitizers and a fuzzer; for maintainers, takes a few minutes
 ```
 
-This runs the tests against a worker compiled with memory and undefined-behavior checkers, then converts randomly damaged files with it and saves the ones that crash or hang. OpenCASCADE has crashes of its own on damaged files; cascadio survives them because every conversion runs in a separate process.
+This runs the tests against a worker compiled with memory and undefined-behavior checkers, then converts randomly damaged files with it and saves the ones that crash or hang. Then it does the same with the release worker, whose system call filter the checkers leave out, and saves any file that makes it call something the filter does not allow. OpenCASCADE has crashes of its own on damaged files; cascadio survives them because every conversion runs in a separate process.
 
 #### Release checks
 

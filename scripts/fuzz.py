@@ -6,17 +6,20 @@ Throw damaged CAD files at cascadio and keep the ones that break it.
 
 Each round takes a seed file (the test models by default), damages it in
 a random way and converts it. Bad input is supposed to raise ValueError,
-or RuntimeError when OpenCASCADE gives up. Three outcomes are findings,
+or RuntimeError when OpenCASCADE gives up. Four outcomes are findings,
 and the input that caused them is saved to `fuzz-findings/`:
 
     crash    the worker died (a segmentation fault, an abort, a sanitizer
              report); cascadio survives these, but they are bugs
+    sandbox  the worker made a system call its lock-down does not allow
+             (or aborted, which takes one); see src/sandbox.hpp
     timeout  the conversion ran past the limit
     memory   the conversion ran past the memory limit
 
-Run it through `make bughunt`, which uses a worker built with sanitizers so
-that memory errors are caught when they happen instead of when they
-happen to crash.
+Run it through `make bughunt`, which runs it twice: against a worker built
+with sanitizers, so that memory errors are caught when they happen instead
+of when they happen to crash, and against the release worker, whose
+system call filter a sanitizer build leaves out.
 """
 
 import argparse
@@ -34,6 +37,8 @@ ROOT = Path(__file__).resolve().parent.parent
 FINDINGS = ROOT / "fuzz-findings"
 NUMBER = re.compile(rb"-?\d+\.\d*(?:E[+-]?\d+)?")
 REFERENCE = re.compile(rb"#\d+")
+# the outcomes worth keeping the input for
+FINDING = ("crash", "sandbox", "timeout", "memory")
 # values that tend to upset geometry code
 NASTY = [b"0.", b"-0.", b"1.E308", b"-1.E308", b"1.E-320", b"NaN", b"1.E999", b""]
 
@@ -96,6 +101,8 @@ def classify(data: bytes, file_type: str, timeout: float, memory_limit: int) -> 
     except MemoryError:
         return "memory"
     except RuntimeError as error:
+        if "sandbox" in str(error):
+            return "sandbox"
         return "crash" if "crashed" in str(error) else "failed"
 
 
@@ -132,7 +139,7 @@ def main() -> None:
             outcome = classify(data, file_type, args.timeout, args.memory_limit)
             with lock:
                 outcomes[outcome] += 1
-                if outcome in ("crash", "timeout", "memory"):
+                if outcome in FINDING:
                     FINDINGS.mkdir(exist_ok=True)
                     name = (
                         f"{outcome}-{hashlib.sha1(data).hexdigest()[:12]}.{file_type}"
@@ -147,9 +154,9 @@ def main() -> None:
 
     total = sum(outcomes.values())
     print(f"{total} damaged files in {args.seconds:.0f} s")
-    for outcome in ("converted", "rejected", "failed", "crash", "timeout", "memory"):
+    for outcome in ("converted", "rejected", "failed", *FINDING):
         print(f"  {outcome:<10} {outcomes[outcome]}")
-    found = outcomes["crash"] + outcomes["timeout"] + outcomes["memory"]
+    found = sum(outcomes[outcome] for outcome in FINDING)
     if found:
         print(f"{found} findings saved to {FINDINGS.relative_to(ROOT)}/")
 

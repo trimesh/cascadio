@@ -1,16 +1,16 @@
 #pragma once
 
 #include "inject.hpp"
-#include "filehandle.hpp"
 #include "load.hpp"
+#include "sandbox.hpp"
 
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
 #include <Message_ProgressRange.hxx>
 #include <NCollection_IndexedDataMap.hxx>
+#include <OSD_FileSystem.hxx>
 #include <RWMesh_CoordinateSystem.hxx>
 #include <RWMesh_NameFormat.hxx>
-#include <RWObj_CafWriter.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <gp.hxx>
@@ -18,8 +18,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <optional>
+#include <map>
+#include <memory>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -79,29 +81,79 @@ static double detectLengthUnit(const Handle(TDocStd_Document) & doc,
   return lengthUnit;
 }
 
-/// Write a meshed document to GLB bytes, optionally recording which
-/// triangles came from which BREP face.
-/// OCCT's writer needs file paths, so both the output and its temporary
-/// binary buffer are memfd-backed on Linux (no filesystem writes) and
-/// temp files elsewhere.
-static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
-                                  const ConvertOptions &options,
-                                  Recorded *recorded) {
-  FileHandle handle(".glb");
-  if (!handle.valid()) {
-    throw std::runtime_error("could not create a temporary file for the GLB");
+/// Where OpenCASCADE's readers and writers find files: in memory, never on
+/// the disk. Its writers only take file names, and the worker may not touch
+/// the filesystem, so this claims every name OCCT opens through
+/// OSD_FileSystem. A name nothing has written is not found.
+class MemoryFiles : public OSD_FileSystem {
+public:
+  bool IsSupportedPath(const TCollection_AsciiString &) const override {
+    return true;
   }
-  // A memfd output has no directory for OCCT's sibling `.bin.tmp`,
-  // so give the binary buffer its own memfd.
-  std::optional<FileHandle> binHandle;
-  if (handle.is_memfd()) {
-    binHandle.emplace(".bin");
+  bool IsOpenIStream(const std::shared_ptr<std::istream> &stream) const override {
+    return stream != nullptr;
+  }
+  bool IsOpenOStream(const std::shared_ptr<std::ostream> &stream) const override {
+    return stream != nullptr;
   }
 
-  GltfWriter writer(handle.path(),
-                    binHandle && binHandle->valid() ? binHandle->path()
-                                                    : nullptr,
-                    recorded);
+  std::shared_ptr<std::streambuf>
+  OpenStreamBuffer(const TCollection_AsciiString &url,
+                   const std::ios_base::openmode mode, const int64_t offset,
+                   int64_t *size) override {
+    const std::string name = url.ToCString();
+    if ((mode & std::ios_base::out) != 0) {
+      // writing always starts a new, empty file
+      return files_[name] = std::make_shared<std::stringbuf>(
+                 std::ios_base::in | std::ios_base::out |
+                 std::ios_base::binary);
+    }
+    const auto found = files_.find(name);
+    if (found == files_.end()) {
+      return nullptr;
+    }
+    std::stringbuf &file = *found->second;
+    if (size != nullptr) {
+      *size = file.pubseekoff(0, std::ios_base::end, std::ios_base::in);
+    }
+    file.pubseekpos(offset, std::ios_base::in);
+    return found->second;
+  }
+
+  /// Everything written to `name`, which is then forgotten.
+  std::string take(const std::string &name) {
+    const auto found = files_.find(name);
+    if (found == files_.end()) {
+      return {};
+    }
+    std::string content = found->second->str();
+    files_.erase(found);
+    return content;
+  }
+
+private:
+  std::map<std::string, std::shared_ptr<std::stringbuf>> files_;
+};
+
+/// The one MemoryFiles, put in front of OpenCASCADE's own file system on
+/// first use. Call it once before any thread starts: OCCT's list of file
+/// systems is not safe to change while others read it.
+static MemoryFiles &memoryFiles() {
+  static const Handle(MemoryFiles) files = [] {
+    Handle(MemoryFiles) created = new MemoryFiles();
+    OSD_FileSystem::AddDefaultProtocol(created, true);
+    return created;
+  }();
+  return *files;
+}
+
+/// Write a meshed document as glTF into memory, optionally recording which
+/// triangles came from which BREP face. It is written as .gltf and its
+/// buffer, not as .glb: OCCT's GLB writer deletes its temporary buffer with
+/// a filesystem call. Glb packs the two into a GLB afterwards.
+static Glb writeGlb(const Handle(TDocStd_Document) & doc,
+                    const ConvertOptions &options, Recorded *recorded) {
+  GltfWriter writer("cascadio.gltf", recorded);
   writer.SetMergeFaces(options.merge_primitives);
   writer.SetParallel(options.mesh.use_parallel);
   writer.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
@@ -112,19 +164,22 @@ static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
     writer.ChangeCoordinateSystemConverter().SetInputCoordinateSystem(
         RWMesh_CoordinateSystem_Zup);
   }
-  {
-    Span span("write glb");
-    if (!writer.Perform(doc, FileInfo(), Message_ProgressRange())) {
-      throw std::runtime_error("OpenCASCADE could not write the GLB");
-    }
+  Span span("write glb");
+  MemoryFiles &files = memoryFiles();
+  const bool written = writer.Perform(doc, FileInfo(), Message_ProgressRange());
+  Glb glb;
+  glb.json = files.take("cascadio.gltf");
+  glb.bin = files.take("cascadio.bin");
+  if (!written || glb.json.empty()) {
+    throw std::runtime_error("OpenCASCADE could not write the GLB");
   }
-
-  return handle.read_all();
+  return glb;
 }
 
-/// Convert STEP or IGES bytes to GLB bytes without touching the disk.
-static std::vector<char> toGlb(const char *data, size_t size,
-                               FileType file_type, ConvertOptions options) {
+/// Convert STEP or IGES bytes to a GLB. The bytes are untrusted, so this
+/// needs the lock-down in force.
+static Glb toGlb(const Locked &, const char *data, size_t size,
+                 FileType file_type, ConvertOptions options) {
   for (const std::string &type : options.brep_types) {
     if (std::find(std::begin(brep::TYPES), std::end(brep::TYPES), type) ==
         std::end(brep::TYPES)) {
@@ -143,12 +198,7 @@ static std::vector<char> toGlb(const char *data, size_t size,
   // BREP data always carries the materials: they are part of the extension
   const bool annotate = options.include_brep || options.include_materials;
   Recorded recorded;
-  std::vector<char> glb =
-      writeGlb(loaded.doc, options, annotate ? &recorded : nullptr);
-  if (glb.empty()) {
-    throw std::runtime_error("OpenCASCADE wrote an empty GLB");
-  }
-
+  Glb glb = writeGlb(loaded.doc, options, annotate ? &recorded : nullptr);
   if (annotate) {
     Span span("face data");
     // scale factor from the file's unit to meters, the unit of glTF
@@ -158,22 +208,9 @@ static std::vector<char> toGlb(const char *data, size_t size,
     if (options.y_up) {
       frame.SetRotation(gp::OX(), -M_PI / 2);
     }
-    glb = injectIntoGlb(glb, loaded.doc, recorded, options.include_brep,
-                        options.include_materials, options.brep_types,
-                        lengthUnit, frame);
+    injectIntoGlb(glb, loaded.doc, recorded, options.include_brep,
+                  options.include_materials, options.brep_types, lengthUnit,
+                  frame);
   }
   return glb;
-}
-
-/// Convert STEP bytes to an OBJ file. A `.mtl` file is written next to it
-/// when the STEP has colors and `use_colors` is set.
-static void stepToObj(const char *data, size_t size,
-                      const std::string &output_path, const MeshOptions &mesh,
-                      bool use_colors) {
-  Loaded loaded;
-  load(loaded, data, size, FileType::STEP, mesh, use_colors);
-  RWObj_CafWriter writer(output_path.c_str());
-  if (!writer.Perform(loaded.doc, FileInfo(), Message_ProgressRange())) {
-    throw std::runtime_error("OpenCASCADE could not write the OBJ");
-  }
 }

@@ -2,6 +2,8 @@
 
 #include <RWGltf_CafWriter.hxx>
 #include <RWGltf_GltfFace.hxx>
+#include <RWGltf_GltfOStreamWriter.hxx>
+#include <RWGltf_GltfRootElement.hxx>
 #include <RWMesh_FaceIterator.hxx>
 #include <RWMesh_ShapeIterator.hxx>
 #include <TDF_Label.hxx>
@@ -34,18 +36,24 @@ struct Recorded {
 /// exposes to subclasses, so it works against an unmodified OpenCASCADE.
 class GltfWriter : public RWGltf_CafWriter {
 public:
-  /// @param path     output GLB path
-  /// @param binPath  where to put the temporary binary buffer, or nullptr to
-  ///                 let OCCT create `<path>.bin.tmp` next to the output
+  /// @param path     the .gltf to write; its buffer goes next to it as .bin
   /// @param recorded filled during Perform() if not null
-  GltfWriter(const char *path, const char *binPath, Recorded *recorded)
-      : RWGltf_CafWriter(path, true), recorded_(recorded) {
-    if (binPath != nullptr) {
-      myBinFileNameFull = binPath;
-    }
-  }
+  GltfWriter(const char *path, Recorded *recorded)
+      : RWGltf_CafWriter(path, false), recorded_(recorded) {}
 
 protected:
+  /// The one buffer, without the `uri` a .gltf would point at its .bin
+  /// with: it becomes the binary chunk of a GLB.
+  void writeBuffers() override {
+    myWriter->Key(RWGltf_GltfRootElementName(RWGltf_GltfRootElement_Buffers));
+    myWriter->StartArray();
+    myWriter->StartObject();
+    myWriter->Key("byteLength");
+    myWriter->Int64(myBinDataLen64);
+    myWriter->EndObject();
+    myWriter->EndArray();
+  }
+
   /// Called once per part, before any of its triangles are written.
   /// The base class creates the part's primitives here; remember which
   /// part they belong to.

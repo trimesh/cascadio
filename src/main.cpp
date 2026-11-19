@@ -100,13 +100,23 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
               "or None for no limit");
   case worker_exit::FAILED:
     throw std::runtime_error(said.empty() ? "conversion failed" : said);
-  default:
-    // not one of our exit codes: the worker crashed
-    throw std::runtime_error(
+  default: {
+    // not one of our exit codes: the worker crashed, or its lock-down
+    // stopped it for a system call it does not allow (see sandbox.hpp)
+    std::string what =
         "converter process crashed (" +
         (result.signal != 0 ? "signal " + std::to_string(result.signal)
                             : "exit code " + std::to_string(result.exit_code)) +
-        ")" + (said.empty() ? "" : ": " + said));
+        ")";
+#ifdef SIGSYS
+    if (result.signal == SIGSYS) {
+      what = "converter process was stopped by its sandbox (signal " +
+             std::to_string(SIGSYS) +
+             "): it made a system call it may not, or aborted";
+    }
+#endif
+    throw std::runtime_error(what + (said.empty() ? "" : ": " + said));
+  }
   }
 }
 
@@ -259,6 +269,8 @@ NB_MODULE(_core, m) {
       .value("PRODUCT_AND_INSTANCE", NodeNameFormat::PRODUCT_AND_INSTANCE)
       .export_values();
 
+  // where the module finds the worker, for the tests to run it directly
+  m.def("_worker_path", workerPath);
   m.attr("DEFAULT_TIMEOUT") = DEFAULT_TIMEOUT;
   m.attr("DEFAULT_MEMORY_LIMIT") = DEFAULT_MEMORY_LIMIT;
 
@@ -378,48 +390,6 @@ output_path
       "include_brep"_a = false, "brep_types"_a = nb::none(),
       "include_materials"_a = false,
       "node_name_format"_a = NodeNameFormat::INSTANCE_OR_PRODUCT,
-      "timeout"_a = DEFAULT_TIMEOUT, "memory_limit"_a = DEFAULT_MEMORY_LIMIT);
-
-  m.def(
-      "step_to_obj",
-      [](const std::string &input_path, const std::string &output_path,
-         double tol_linear, double tol_angular, bool tol_relative,
-         bool use_parallel, bool use_colors, Timeout timeout,
-         MemoryLimit memory_limit) {
-        deprecated("step_to_obj");
-        const std::vector<char> step = readFile(input_path);
-        Request request;
-        request.output = "obj";
-        request.output_path = output_path;
-        request.tol_linear = tol_linear;
-        request.tol_angular = tol_angular;
-        request.tol_relative = tol_relative;
-        request.use_parallel = use_parallel;
-        request.use_colors = use_colors;
-        convert(request, step.data(), step.size(), timeout, memory_limit);
-        return 0;
-      },
-      (R"doc(Deprecated: convert a STEP file on disk to an OBJ file on disk.
-
-Use `load` and export the GLB with a mesh library instead. This
-function will be removed in the first release after January 2028.
-
-Parameters
-----------
-input_path
-    The STEP file to read.
-output_path
-    Where to write the OBJ file. A MTL file is written next to it
-    when the STEP has colors and `use_colors` is set.
-)doc" + DOC_MESH + R"doc(use_parallel
-    Use multiple threads for meshing and export.
-use_colors
-    Export colors and materials from the STEP file.
-)doc" + DOC_LIMITS + DOC_RETURNS_ZERO + DOC_RAISES)
-          .c_str(),
-      "input_path"_a, "output_path"_a, "tol_linear"_a = 0.01,
-      "tol_angular"_a = 0.5, "tol_relative"_a = false,
-      "use_parallel"_a = true, "use_colors"_a = true,
       "timeout"_a = DEFAULT_TIMEOUT, "memory_limit"_a = DEFAULT_MEMORY_LIMIT);
 
 #ifdef VERSION_INFO

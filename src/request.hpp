@@ -13,9 +13,9 @@
 /// The module writes to the worker's standard input:
 ///     the request as text, one `key=value` per line, ended by an empty line
 ///     the input file
-/// The worker writes the output file to standard output and exits with one
-/// of the codes below. On failure it writes a one-line message to standard
-/// error instead.
+/// The worker writes the GLB to standard output and exits with one of the
+/// codes below. On failure it writes a one-line message to standard error
+/// instead.
 
 enum class FileType { UNSPECIFIED = 0, STEP = 1, IGES = 2 };
 
@@ -38,9 +38,6 @@ constexpr int OUT_OF_MEMORY = 66;   // -> MemoryError
 } // namespace worker_exit
 
 struct Request {
-  /// "glb" writes a GLB to standard output; "obj" writes an OBJ file to
-  /// `output_path` and nothing to standard output.
-  std::string output = "glb";
   FileType file_type = FileType::STEP;
   double tol_linear = 0.01;
   double tol_angular = 0.5;
@@ -52,21 +49,13 @@ struct Request {
   bool include_materials = false;
   NodeNameFormat node_name_format = NodeNameFormat::INSTANCE_OR_PRODUCT;
   bool y_up = false;
-  bool use_colors = true;
   /// Bytes of memory the worker may use before it stops itself; 0 = no limit
   uint64_t memory_limit = 0;
-  /// Only for "obj". Last in the text form because it may hold any character
-  /// except a line break.
-  std::string output_path;
 
   std::string serialize() const {
-    if (output_path.find('\n') != std::string::npos) {
-      throw std::invalid_argument("output path contains a line break");
-    }
     std::ostringstream text;
     text.precision(17); // enough digits to round-trip a double
-    text << "output=" << output << '\n'
-         << "file_type=" << static_cast<int>(file_type) << '\n'
+    text << "file_type=" << static_cast<int>(file_type) << '\n'
          << "tol_linear=" << tol_linear << '\n'
          << "tol_angular=" << tol_angular << '\n'
          << "tol_relative=" << tol_relative << '\n'
@@ -79,9 +68,7 @@ struct Request {
     text << "include_materials=" << include_materials << '\n'
          << "node_name_format=" << static_cast<int>(node_name_format) << '\n'
          << "y_up=" << y_up << '\n'
-         << "use_colors=" << use_colors << '\n'
          << "memory_limit=" << memory_limit << '\n'
-         << "output_path=" << output_path << '\n'
          << '\n';
     return text.str();
   }
@@ -100,9 +87,7 @@ struct Request {
       const std::string key = line.substr(0, split);
       const std::string value = line.substr(split + 1);
       auto flag = [&value] { return value == "1"; };
-      if (key == "output") {
-        request.output = value;
-      } else if (key == "file_type") {
+      if (key == "file_type") {
         request.file_type = static_cast<FileType>(std::stoi(value));
       } else if (key == "tol_linear") {
         request.tol_linear = std::stod(value);
@@ -125,12 +110,8 @@ struct Request {
             static_cast<NodeNameFormat>(std::stoi(value));
       } else if (key == "y_up") {
         request.y_up = flag();
-      } else if (key == "use_colors") {
-        request.use_colors = flag();
       } else if (key == "memory_limit") {
         request.memory_limit = std::stoull(value);
-      } else if (key == "output_path") {
-        request.output_path = value;
       } else {
         throw std::invalid_argument("unknown request key: " + key);
       }

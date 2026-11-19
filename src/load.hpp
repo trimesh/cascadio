@@ -1,6 +1,5 @@
 #pragma once
 
-#include "filehandle.hpp"
 #include "request.hpp"
 #include "trace.hpp"
 #include "zstd.hpp"
@@ -177,9 +176,9 @@ static void checkLooksLikeIges(const char *data, size_t size) {
   }
 }
 
-/// Read STEP bytes into `loaded`, keeping names, layers and optionally colors.
+/// Read STEP bytes into `loaded`, keeping names, layers and colors.
 static void loadStep(Loaded &loaded, const char *data, size_t size,
-                     const MeshOptions &mesh, bool use_colors) {
+                     const MeshOptions &mesh) {
   const size_t start = checkLooksLikeStep(data, size);
   STEPCAFControl_Reader reader;
   imemstream stream(data + start, size - start);
@@ -189,7 +188,7 @@ static void loadStep(Loaded &loaded, const char *data, size_t size,
       throw std::invalid_argument("could not parse the data as a STEP file");
     }
   }
-  reader.SetColorMode(use_colors);
+  reader.SetColorMode(true);
   reader.SetNameMode(true);
   reader.SetLayerMode(true);
   {
@@ -209,19 +208,17 @@ static void loadStep(Loaded &loaded, const char *data, size_t size,
 static void loadIges(Loaded &loaded, const char *data, size_t size,
                      const MeshOptions &mesh) {
   checkLooksLikeIges(data, size);
-  IGESControl_Reader reader;
-#if OCC_VERSION_HEX >= 0x080100
-  imemstream stream(data, size);
-  const IFSelect_ReturnStatus status = reader.ReadStream("data.igs", stream);
+#if OCC_VERSION_HEX < 0x080100
+  // Older OpenCASCADE reads IGES only from a file, and the worker may not
+  // touch the filesystem.
+  (void)loaded;
+  (void)mesh;
+  throw std::invalid_argument("reading IGES needs cascadio built with "
+                              "OpenCASCADE 8.1 or newer, not " OCC_VERSION_COMPLETE);
 #else
-  // older OpenCASCADE can only read IGES from a path
-  FileHandle handle(".igs");
-  if (!handle.valid() || !handle.write_data(data, size)) {
-    throw std::runtime_error("could not create a temporary file for IGES");
-  }
-  const IFSelect_ReturnStatus status = reader.ReadFile(handle.path());
-#endif
-  if (status != IFSelect_RetDone) {
+  IGESControl_Reader reader;
+  imemstream stream(data, size);
+  if (reader.ReadStream("data.igs", stream) != IFSelect_RetDone) {
     throw std::invalid_argument("could not parse the data as an IGES file");
   }
 
@@ -255,13 +252,13 @@ static void loadIges(Loaded &loaded, const char *data, size_t size,
 
   loaded.addMeshed(shape, mesh);
   XCAFDoc_DocumentTool::ShapeTool(loaded.doc->Main())->AddShape(shape, false);
+#endif
 }
 
 /// Read and mesh a STEP or IGES file held in memory.
 /// Zstandard-compressed input is recognized and unpacked first.
 static void load(Loaded &loaded, const char *data, size_t size,
-                 FileType file_type, const MeshOptions &mesh,
-                 bool use_colors = true) {
+                 FileType file_type, const MeshOptions &mesh) {
   std::vector<char> unpacked;
   if (isZstd(data, size)) {
     Span span("decompress");
@@ -271,7 +268,7 @@ static void load(Loaded &loaded, const char *data, size_t size,
   }
   switch (file_type) {
   case FileType::STEP:
-    return loadStep(loaded, data, size, mesh, use_colors);
+    return loadStep(loaded, data, size, mesh);
   case FileType::IGES:
     return loadIges(loaded, data, size, mesh);
   default:

@@ -32,14 +32,11 @@
 /// extension, and it is where earlier versions put them.
 ///
 /// @param frame moves the face geometry into the coordinate frame of the mesh
-static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
-                                       const Handle(TDocStd_Document) & document,
-                                       const Recorded &recorded, bool withFaces,
-                                       bool withExtras,
-                                       const std::set<std::string> &allowedTypes,
-                                       double lengthUnit,
-                                       const gp_Trsf &frame) {
-  Glb glb = Glb::parse(glbData);
+static void injectIntoGlb(Glb &glb, const Handle(TDocStd_Document) & document,
+                          const Recorded &recorded, bool withFaces,
+                          bool withExtras,
+                          const std::set<std::string> &allowedTypes,
+                          double lengthUnit, const gp_Trsf &frame) {
   rapidjson::Document doc;
   doc.Parse(glb.json.data(), glb.json.size());
   if (doc.HasParseError() || !doc.IsObject()) {
@@ -51,7 +48,7 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
   };
   if (!isArray("meshes") || !isArray("accessors") || !isArray("bufferViews") ||
       !isArray("buffers") || doc["buffers"].Size() == 0) {
-    return glbData; // an empty scene: nothing to attach anything to
+    return; // an empty scene: nothing to attach anything to
   }
 
   // The materials of each part, by the accessor id of its primitive.
@@ -186,5 +183,4 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   doc.Accept(writer);
   glb.json.assign(buffer.GetString(), buffer.GetSize());
-  return glb.serialize();
 }

@@ -7,6 +7,8 @@ compiled module. These tests are about that boundary.
 """
 
 import os
+import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -14,6 +16,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import needs_iges
 
 import cascadio
 
@@ -89,19 +92,93 @@ def test_crashing_worker(monkeypatch):
         cascadio.load(STEP)
 
 
-def test_segfault_is_survived(monkeypatch, tmp_path):
+def test_segfault_is_survived(fake_worker, monkeypatch):
     """A worker killed by a segmentation fault raises; the interpreter lives."""
-    if sys.platform == "win32":
-        pytest.skip("uses a shell script as the worker")
-    worker = tmp_path / "segfault"
-    worker.write_text("#!/bin/sh\nkill -SEGV $$\n")
-    worker.chmod(0o755)
-    monkeypatch.setenv("CASCADIO_WORKER", str(worker))
+    fake_worker("kill -SEGV $$")
     with pytest.raises(RuntimeError, match=r"crashed.*signal 11"):
         cascadio.load(STEP)
 
     monkeypatch.delenv("CASCADIO_WORKER")
     assert len(cascadio.load(STEP)) > 1000
+
+
+def test_sandbox_stop_is_explained(fake_worker):
+    """A worker stopped by its sandbox says so."""
+    fake_worker("kill -SYS $$")
+    with pytest.raises(RuntimeError, match="sandbox"):
+        cascadio.load(STEP)
+
+
+def test_environment_is_not_passed_on(fake_worker, monkeypatch, tmp_path):
+    """The worker gets none of the caller's environment, so a hijacked
+    worker has no credentials to send back."""
+    seen = tmp_path / "environment"
+    fake_worker(f"export -p > {seen}\nexit 65")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "hunter2")
+    monkeypatch.setenv("CASCADIO_TRACE", "1")
+    with pytest.raises(RuntimeError):
+        cascadio.load(STEP)
+    environment = seen.read_text()
+    assert "hunter2" not in environment
+    assert "CASCADIO_TRACE" in environment
+
+
+# What `cascadio-worker --probe` tries once it is locked down (the probes
+# are in sandbox.hpp): read a file, write one, connect to a port, start a
+# program, read from a thread started afterwards; on Linux and macOS also
+# start a copy of itself and use a descriptor it was handed.
+ATTEMPTS = ["read", "write", "connect", "spawn", "thread-read"]
+if sys.platform != "win32":
+    ATTEMPTS += ["fork", "inherited"]
+
+
+def probe(attempt: str, argument: str = "") -> subprocess.CompletedProcess:
+    """Run the worker's probe, with a descriptor left open for it to close."""
+    leaked = () if sys.platform == "win32" else os.pipe()
+    try:
+        done = subprocess.run(
+            [cascadio._core._worker_path(), "--probe", attempt, argument],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            pass_fds=leaked,
+        )
+    finally:
+        for fd in leaked:
+            os.close(fd)
+    if done.returncode == 77:
+        pytest.skip("a sanitizer build has no system call filter")
+    return done
+
+
+def test_probe_reports_escapes():
+    """Something the lock-down allows is reported as an escape, so the
+    probes below cannot pass just because a probe never reports one."""
+    done = probe("allowed")
+    assert done.returncode == 0
+    assert b"escaped" in done.stderr
+
+
+@pytest.mark.parametrize("attempt", ATTEMPTS)
+def test_sandbox(attempt, tmp_path):
+    """Once locked down, the worker reaches no file, network or other
+    process, from any thread, and keeps no descriptor it was handed."""
+    secret = tmp_path / "secret"
+    secret.write_text("the caller's own file")
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        argument = {
+            "read": str(secret),
+            "thread-read": str(secret),
+            "write": str(tmp_path),
+            "connect": str(listener.getsockname()[1]),
+        }.get(attempt, "")
+        done = probe(attempt, argument)
+    assert b"escaped" not in done.stderr
+    assert list(tmp_path.iterdir()) == [secret]
+    if sys.platform.startswith("linux") and attempt != "inherited":
+        # the filter kills the process on the spot
+        assert done.returncode == -signal.SIGSYS
+    else:
+        assert done.returncode == 1
 
 
 def test_large_input_and_output():
@@ -193,6 +270,7 @@ assert len(cascadio.load(open(sys.argv[1], "rb").read())) > 1000
     )
 
 
+@needs_iges
 def test_quiet():
     """A library should not print: conversions write nothing to the terminal."""
     script = """
@@ -212,7 +290,7 @@ for name, kind in (("featuretype.STEP", "step"), ("microstrip.igs", "iges")):
 
 def test_docstrings():
     """Every public function has a numpy-style docstring and a signature."""
-    for name in ("load", "to_glb_bytes", "step_to_glb", "step_to_obj"):
+    for name in ("load", "to_glb_bytes", "step_to_glb"):
         doc = getattr(cascadio, name).__doc__
         signature, body = doc.split("\n", 1)
         assert signature.startswith(name + "(") and "->" in signature
@@ -266,6 +344,7 @@ def test_step_may_hold_non_ascii_text():
     assert len(cascadio.load(b"\xef\xbb\xbf\n\n" + STEP)) > 1000
 
 
+@needs_iges
 def test_damaged_iges_is_refused_early():
     """IGES is fixed-width; a line that is not is refused before parsing."""
     iges = (MODELS_DIR / "microstrip.igs").read_bytes()

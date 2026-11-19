@@ -67,7 +67,7 @@ add_executable(cascadio-worker src/worker.cpp)
 target_include_directories(cascadio-worker SYSTEM PRIVATE "${OpenCASCADE_INCLUDE_DIR}")
 # Only what src/ uses directly; these targets bring their own dependencies.
 target_link_libraries(cascadio-worker PRIVATE
-  TKDESTEP TKDEIGES TKDEGLTF TKDEOBJ TKXCAF TKMesh)
+  TKDESTEP TKDEIGES TKDEGLTF TKXCAF TKMesh)
 
 # The code that writes TM_brep_faces JSON is generated from the extension's
 # schema on every build, so the two cannot disagree.
@@ -128,7 +128,8 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(cascadio-worker PRIVATE Threads::Threads)
 if(WIN32)
-  target_link_libraries(cascadio-worker PRIVATE psapi) # GetProcessMemoryInfo
+  # GetProcessMemoryInfo; sockets for the lock-down's network probe
+  target_link_libraries(cascadio-worker PRIVATE psapi ws2_32)
 endif()
 
 # STABLE_ABI: one wheel serves every regular CPython from 3.12 on.

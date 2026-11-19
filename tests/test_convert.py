@@ -1,7 +1,6 @@
 import io
 import json
 import struct
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -164,53 +163,6 @@ def test_convert_step_to_glb():
     assert len(mesh.faces) > 100, "Mesh should have substantial faces"
     assert mesh.is_winding_consistent, "Mesh should have consistent winding"
     assert np.allclose(scene.extents, np.array([0.127, 0.0635, 0.034925]))
-
-
-@pytest.mark.filterwarnings("ignore:cascadio.step_to_obj:DeprecationWarning")
-def test_convert_step_to_obj():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        obj_path = Path(temp_dir) / "output.obj"
-        cascadio.step_to_obj(
-            str(MODELS_DIR / "featuretype.STEP"),
-            str(obj_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-        )
-        mesh = trimesh.load(obj_path, merge_primitives=True)
-
-    assert mesh.mass > 0.0
-    assert mesh.volume > 0.0
-    assert np.allclose(mesh.extents, np.array([127.0, 63.5, 34.924999]))
-
-
-@pytest.mark.parametrize(
-    "use_colors,expected_color",
-    [
-        (True, np.array([202, 225, 255, 255])),  # With colors from STEP
-        (False, np.array([102, 102, 102, 255])),  # Default gray
-    ],
-)
-@pytest.mark.filterwarnings("ignore:cascadio.step_to_obj:DeprecationWarning")
-def test_convert_step_to_obj_colors(use_colors, expected_color):
-    """Test OBJ export with and without colors."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        obj_path = Path(temp_dir) / "output.obj"
-        mtl_path = obj_path.with_suffix(".mtl")
-        cascadio.step_to_obj(
-            str(MODELS_DIR / "colored.step"),
-            str(obj_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-            use_colors=use_colors,
-        )
-
-        # MTL file should exist only when colors are enabled
-        assert mtl_path.exists() == use_colors
-        mesh = trimesh.load(obj_path, merge_primitives=True)
-
-    assert mesh.mass > 0.0
-    assert mesh.volume > 0.0
-    assert np.allclose(mesh.visual.material.main_color, expected_color)
 
 
 def test_convert_step_to_glb_with_brep():

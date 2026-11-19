@@ -29,7 +29,7 @@ PREFIX = Path(os.environ.get("CASCADIO_OCCT_PREFIX", ROOT / "occt_install"))
 BUILD = Path(os.environ.get("CASCADIO_OCCT_BUILD", ROOT / "build" / "occt"))
 
 # The toolkits cascadio links. OCCT adds the ones these depend on.
-TOOLKITS = ["TKDESTEP", "TKDEIGES", "TKDEGLTF", "TKDEOBJ", "TKXCAF", "TKMesh"]
+TOOLKITS = ["TKDESTEP", "TKDEIGES", "TKDEGLTF", "TKXCAF", "TKMesh"]
 
 # Whole modules are switched off so nothing else is built.
 MODULES = [

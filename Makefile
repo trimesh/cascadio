@@ -92,10 +92,13 @@ sdist: build-constraints.txt
 #   4. scripts/fuzz.py converts randomly damaged copies of the test models
 #      with that worker for SECONDS seconds, and saves every input that
 #      crashes, hangs or runs out of memory to fuzz-findings/.
+#   5. The same again with the release worker, whose system call filter
+#      the sanitizers leave out: a call the filter does not allow is
+#      saved as a "sandbox" finding.
 #
-# Step 4 does not fail the target: OpenCASCADE has known crashes on damaged
-# files, which cascadio survives by design. Read its summary, and look at
-# anything whose stack is in our code rather than OpenCASCADE's.
+# Steps 4 and 5 do not fail the target: OpenCASCADE has known crashes on
+# damaged files, which cascadio survives by design. Read the summaries, and
+# look at anything whose stack is in our code rather than OpenCASCADE's.
 SANITIZED := build/sanitize/cascadio-worker
 SANITIZER_ENV := CASCADIO_WORKER=$(CURDIR)/$(SANITIZED) \
 	ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1
@@ -110,6 +113,7 @@ bughunt: install
 	$(SANITIZER_ENV) uv run --frozen --extra tests pytest tests
 	$(SANITIZER_ENV) uv run --frozen --extra tests python scripts/fuzz.py \
 	  --seconds $(SECONDS) --jobs $(CPUS)
+	uv run --frozen --extra tests python scripts/fuzz.py --seconds $(SECONDS) --jobs $(CPUS)
 
 # OpenCASCADE has to be built again inside the container, for its older
 # system libraries. It is installed under build/ on the host (which the

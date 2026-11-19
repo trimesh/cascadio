@@ -38,6 +38,26 @@ static std::string thisBinaryFolder();
 /// the C runtime, which does not see changes Python makes to os.environ.
 static std::string environmentValue(const char *name);
 
+/// The environment a started program gets, as NAME=value: only the few
+/// variables the worker reads. None of the caller's own (credentials,
+/// tokens) is in its memory, so a hijacked worker has none to send back.
+static std::vector<std::string> childEnvironment() {
+  static const char *const KEEP[] = {
+      "CASCADIO_TRACE", "ASAN_OPTIONS", "UBSAN_OPTIONS",
+#ifdef _WIN32
+      "SystemRoot", // much of Windows does not work without it
+#endif
+  };
+  std::vector<std::string> kept;
+  for (const char *name : KEEP) {
+    const std::string value = environmentValue(name);
+    if (!value.empty()) {
+      kept.push_back(std::string(name) + "=" + value);
+    }
+  }
+  return kept;
+}
+
 #ifndef _WIN32
 // ============================================================================
 // POSIX
@@ -52,15 +72,6 @@ static std::string environmentValue(const char *name);
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-#ifdef __APPLE__
-// on macOS a shared library cannot see `environ` directly
-#include <crt_externs.h>
-#define CASCADIO_ENVIRON (*_NSGetEnviron())
-#else
-extern char **environ;
-#define CASCADIO_ENVIRON environ
-#endif
 
 static std::string thisBinaryFolder() {
   Dl_info info;
@@ -122,10 +133,16 @@ static ProcessResult runProcess(const std::string &program,
   posix_spawn_file_actions_adddup2(&actions, output.write_end, STDOUT_FILENO);
   posix_spawn_file_actions_adddup2(&actions, errors.write_end, STDERR_FILENO);
   char *const arguments[] = {const_cast<char *>(program.c_str()), nullptr};
+  std::vector<std::string> environment = childEnvironment();
+  std::vector<char *> environmentPointers;
+  for (std::string &entry : environment) {
+    environmentPointers.push_back(entry.data());
+  }
+  environmentPointers.push_back(nullptr);
   pid_t child = -1;
   const int failed =
       posix_spawn(&child, program.c_str(), &actions, nullptr, arguments,
-                  CASCADIO_ENVIRON);
+                  environmentPointers.data());
   posix_spawn_file_actions_destroy(&actions);
   if (failed != 0) {
     throw std::runtime_error("cannot start " + program + ": " +
@@ -309,26 +326,60 @@ static ProcessResult runProcess(const std::string &program,
                                 size_t body_size, double timeout_seconds) {
   Pipe input(true), output(false), errors(false);
 
+  auto widen = [](const std::string &utf8) {
+    const int size =
+        MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    std::wstring wide(static_cast<size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, wide.data(), size);
+    wide.resize(static_cast<size_t>(size) - 1);
+    return wide;
+  };
+  const std::wstring wide = widen(program);
   // the path, quoted, is the whole command line
-  const int size =
-      MultiByteToWideChar(CP_UTF8, 0, program.c_str(), -1, nullptr, 0);
-  std::wstring wide(static_cast<size_t>(size), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, program.c_str(), -1, wide.data(), size);
-  wide.resize(static_cast<size_t>(size) - 1);
   std::wstring command = L"\"" + wide + L"\"";
+  // it starts in its own folder, the one place OCCT may look for files
+  const size_t slash = wide.find_last_of(L"\\/");
+  const std::wstring folder =
+      slash == std::wstring::npos ? L"." : wide.substr(0, slash);
+  // NAME=value, each ended by a zero, and the block by one more
+  std::wstring environment;
+  for (const std::string &entry : childEnvironment()) {
+    environment += widen(entry) + L'\0';
+  }
+  environment += L'\0';
 
-  STARTUPINFOW startup = {};
-  startup.cb = sizeof(startup);
-  startup.dwFlags = STARTF_USESTDHANDLES;
-  startup.hStdInput = input.read_end;
-  startup.hStdOutput = output.write_end;
-  startup.hStdError = errors.write_end;
+  // the three pipe ends are the only handles it inherits
+  HANDLE inherited[] = {input.read_end, output.write_end, errors.write_end};
+  SIZE_T attributesSize = 0;
+  InitializeProcThreadAttributeList(nullptr, 1, 0, &attributesSize);
+  std::vector<char> attributes(attributesSize);
+  STARTUPINFOEXW startup = {};
+  startup.StartupInfo.cb = sizeof(startup);
+  startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  startup.StartupInfo.hStdInput = input.read_end;
+  startup.StartupInfo.hStdOutput = output.write_end;
+  startup.StartupInfo.hStdError = errors.write_end;
+  startup.lpAttributeList =
+      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
+  if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0,
+                                         &attributesSize) ||
+      !UpdateProcThreadAttribute(startup.lpAttributeList, 0,
+                                 PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+                                 sizeof(inherited), nullptr, nullptr)) {
+    throw std::runtime_error("cannot prepare to start " + program);
+  }
   PROCESS_INFORMATION child = {};
   // CREATE_NO_WINDOW: no console window flashing up in GUI applications
-  if (!CreateProcessW(wide.c_str(), command.data(), nullptr, nullptr, TRUE,
-                      CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child)) {
+  const BOOL started = CreateProcessW(
+      wide.c_str(), command.data(), nullptr, nullptr, TRUE,
+      CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT |
+          EXTENDED_STARTUPINFO_PRESENT,
+      environment.data(), folder.c_str(), &startup.StartupInfo, &child);
+  const DWORD error = GetLastError();
+  DeleteProcThreadAttributeList(startup.lpAttributeList);
+  if (!started) {
     throw std::runtime_error("cannot start " + program + " (error " +
-                             std::to_string(GetLastError()) + ")");
+                             std::to_string(error) + ")");
   }
   CloseHandle(child.hThread);
 

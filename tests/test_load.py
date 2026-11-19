@@ -4,6 +4,7 @@ from io import BytesIO
 
 import pytest
 import trimesh
+from conftest import needs_iges
 
 import cascadio
 
@@ -34,6 +35,7 @@ def test_load_step_bytes():
     assert mesh.is_winding_consistent, "Mesh should have consistent winding"
 
 
+@needs_iges
 def test_load_iges_bytes():
     """Test loading an IGES file using the new load() function."""
     infile = os.path.join(cwd, "models", "microstrip.igs")
@@ -66,6 +68,7 @@ def test_load_iges_bytes():
     assert len(mesh.faces) > 10, "Mesh should have faces"
 
 
+@needs_iges
 @pytest.mark.parametrize("file_type", ["igs", "iges", "IGES"])
 def test_load_iges_file_extensions(file_type):
     """Test that 'igs', 'iges', and 'IGES' file type strings all work."""
@@ -110,30 +113,12 @@ def test_step_to_glb():
         assert mesh.is_winding_consistent, "Mesh should have consistent winding"
 
 
-def test_step_to_obj():
-    """The deprecated file-based wrapper still works, and warns."""
-    step_file = os.path.join(cwd, "models", "featuretype.STEP")
-    assert os.path.exists(step_file)
-
-    with tempfile.TemporaryDirectory() as D:
-        outfile = os.path.join(D, "output.obj")
-        with pytest.warns(DeprecationWarning, match="cascadio.load"):
-            result = cascadio.step_to_obj(
-                step_file, outfile, tol_linear=0.1, tol_angular=0.5
-            )
-        assert result == 0
-        assert os.path.exists(outfile)
-        assert os.path.getsize(outfile) > 1000, "Output file suspiciously small"
-
-        mesh = trimesh.load(outfile)
-        assert len(mesh.vertices) > 100, "Mesh should have substantial vertices"
-        assert len(mesh.faces) > 100, "Mesh should have substantial faces"
-        assert mesh.is_winding_consistent, "Mesh should have consistent winding"
-        assert mesh.area > 0, "Mesh should have positive surface area"
-
-
 @pytest.mark.parametrize(
-    "name,file_type", [("colored.step", "step"), ("microstrip.igs", "iges")]
+    "name,file_type",
+    [
+        ("colored.step", "step"),
+        pytest.param("microstrip.igs", "iges", marks=needs_iges),
+    ],
 )
 def test_load_zstd(name, file_type):
     """Zstandard-compressed input is detected and gives the same GLB."""
