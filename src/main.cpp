@@ -36,8 +36,9 @@ using BrepTypes = std::optional<std::set<std::string>>;
 /// Where the worker program is. It is installed next to this module;
 /// CASCADIO_WORKER overrides that for packagers who put it elsewhere.
 static std::string workerPath() {
-  if (const char *path = std::getenv("CASCADIO_WORKER")) {
-    return path;
+  const std::string override = environmentValue("CASCADIO_WORKER");
+  if (!override.empty()) {
+    return override;
   }
 #ifdef _WIN32
   return thisBinaryFolder() + "\\cascadio-worker.exe";
@@ -83,7 +84,7 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
   }
   switch (result.exit_code) {
   case worker_exit::OK:
-    if (std::getenv("CASCADIO_TRACE") != nullptr) {
+    if (!environmentValue("CASCADIO_TRACE").empty()) {
       // pass the worker's stage timings on to the terminal
       std::fwrite(result.errors.data(), 1, result.errors.size(), stderr);
     }

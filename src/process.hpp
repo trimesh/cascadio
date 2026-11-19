@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -31,6 +32,11 @@ static ProcessResult runProcess(const std::string &program,
 
 /// The folder holding the shared library or executable this code is in.
 static std::string thisBinaryFolder();
+
+/// An environment variable as it is right now, or empty if it is not set.
+/// On Windows std::getenv is not enough: this module links its own copy of
+/// the C runtime, which does not see changes Python makes to os.environ.
+static std::string environmentValue(const char *name);
 
 #ifndef _WIN32
 // ============================================================================
@@ -66,6 +72,11 @@ static std::string thisBinaryFolder() {
   const std::string path = info.dli_fname;
   const size_t slash = path.rfind('/');
   return slash == std::string::npos ? "." : path.substr(0, slash);
+}
+
+static std::string environmentValue(const char *name) {
+  const char *value = std::getenv(name);
+  return value == nullptr ? "" : value;
 }
 
 /// A pipe whose ends close themselves, so no error path leaks a descriptor.
@@ -255,6 +266,12 @@ static std::string thisBinaryFolder() {
                       nullptr);
   utf8.resize(static_cast<size_t>(size) - 1); // drop the terminator
   return utf8;
+}
+
+static std::string environmentValue(const char *name) {
+  char value[32768];
+  const DWORD length = GetEnvironmentVariableA(name, value, sizeof(value));
+  return length > 0 && length < sizeof(value) ? std::string(value, length) : "";
 }
 
 /// A pipe whose ends close themselves. `child_reads` says which end the

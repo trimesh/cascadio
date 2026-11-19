@@ -237,6 +237,7 @@ def test_trace():
         env={**os.environ, "CASCADIO_TRACE": "1"},
     )
     assert result.stdout == ""
-    stages = [line.split()[1] for line in result.stderr.splitlines()]
+    # "cascadio: mesh    412.7 ms"; Windows can add blank lines
+    stages = [line.split()[1] for line in result.stderr.splitlines() if line.strip()]
     for stage in ("parse", "mesh", "total"):
         assert stage in stages
