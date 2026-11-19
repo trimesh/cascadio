@@ -151,10 +151,11 @@ def test_extension_validates():
     }
     get_validator(EXTENSION_SCHEMA).validate(extension)
 
-    # only faceIndices is required: a file may carry just the indices
-    get_validator(EXTENSION_SCHEMA).validate({"faceIndices": 3})
-    with pytest.raises(jsonschema.ValidationError):
-        get_validator(EXTENSION_SCHEMA).validate({"faces": [], "materials": []})
+    # all three fields are required
+    for key in extension:
+        partial = {k: v for k, v in extension.items() if k != key}
+        with pytest.raises(jsonschema.ValidationError):
+            get_validator(EXTENSION_SCHEMA).validate(partial)
 
 
 def test_extra_fields_rejected():
@@ -307,18 +308,13 @@ def test_every_field_is_described():
 @pytest.mark.parametrize("name", ["featuretype", "material"])
 def test_files_from_0_1_still_work(name):
     """
-    The extension only grows: a GLB written by cascadio 0.1.1 still
-    validates against the schema and still loads through the trimesh plugin.
+    A GLB written by cascadio 0.1.1 still loads through the trimesh plugin.
+
+    The schema describes what is written today and requires fields that
+    0.1 did not write, so such a file no longer validates. Reading it must
+    keep working all the same: those fields come back as None.
     """
     glb = (MODELS_DIR / f"written_by_0.1.1_{name}.glb").read_bytes()
-
-    found = 0
-    for mesh in extract_glb_json(glb)["meshes"]:
-        for primitive in mesh["primitives"]:
-            extension = primitive["extensions"]["TM_brep_faces"]
-            get_validator(EXTENSION_SCHEMA).validate(extension)
-            found += len(extension["faces"])
-    assert found > 0
 
     import io
 

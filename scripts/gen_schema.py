@@ -51,25 +51,25 @@ def face_cases(schema: dict) -> dict:
     }
     if sorted(cases) != sorted(names):
         raise SystemExit(f"face types {names} do not match the cases {list(cases)}")
+    for name, case in cases.items():
+        if list(case["properties"]) != case["required"]:
+            raise SystemExit(f"{name}: every property must be listed in `required`")
     return {name: cases[name]["properties"] for name in names}
 
 
-def optional_fields(schema: dict) -> dict:
-    """
-    Face type name -> the fields a file may leave out.
-
-    These were added after the first release. A writer always writes them
-    (the generated C++ takes every field), but files from older versions
-    lack them, and a reader has to cope.
-    """
-    return {
-        case["if"]["properties"]["type"]["const"]: [
-            field
-            for field in case["then"]["properties"]
-            if field not in case["then"]["required"]
-        ]
-        for case in schema["$defs"]["face"]["allOf"]
-    }
+# Fields the schema gained after cascadio 0.1. The schema requires them and
+# the writer always writes them, but GLB files made by 0.1 are still out
+# there. So the Python dataclasses give exactly these fields a default of
+# None, and keep them last, which lets those older files load. This is a
+# record of history, so it lives here and not in the schema; add to it
+# whenever a field is added to an existing face type.
+ADDED_SINCE_0_1 = {
+    "plane": [],
+    "cylinder": ["x_dir"],
+    "cone": ["x_dir"],
+    "sphere": ["axis", "x_dir"],
+    "torus": ["x_dir"],
+}
 
 
 def extension_name(schema: dict) -> str:
@@ -223,7 +223,7 @@ README = """\
 
 ## Properties
 
-Only `faceIndices` is required, and cascadio always writes all three. No other properties are allowed, here or inside a face or a material.
+All of these are required, and no other properties are allowed, here or inside a face or a material.
 
 {top}
 
@@ -444,7 +444,8 @@ def generate_python(schema: dict, source: str) -> str:
     for kind, properties in face_cases(schema).items():
         name = kind.capitalize()
         names.append(name)
-        optional = optional_fields(schema)[kind]
+        optional = [f for f in ADDED_SINCE_0_1[kind] if f in properties]
+        assert optional == ADDED_SINCE_0_1[kind], f"{kind}: {ADDED_SINCE_0_1[kind]}"
         # The order of the dataclass fields is part of the Python API, so it
         # stays what it was in 0.1: the index, the extents, then the rest.
         # Fields added since go last, with a default, so old files parse.

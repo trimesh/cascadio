@@ -75,8 +75,7 @@ class Cylinder:
         Distance from the axis to the surface, in meters
     x_dir
         Unit direction perpendicular to the axis from which angles are
-        measured. Written by cascadio 0.2 and later; older files do not have
-        it.
+        measured.
     """
 
     face_index: int
@@ -117,8 +116,7 @@ class Cone:
         axis at apex + axis * ref_radius / tan(semi_angle).
     x_dir
         Unit direction perpendicular to the axis from which angles are
-        measured. Written by cascadio 0.2 and later; older files do not have
-        it.
+        measured.
     """
 
     face_index: int
@@ -152,12 +150,10 @@ class Sphere:
     radius
         Distance from the center to the surface, in meters
     axis
-        Unit direction from the center to the sphere's north pole. Written by
-        cascadio 0.2 and later; older files do not have it.
+        Unit direction from the center to the sphere's north pole.
     x_dir
         Unit direction perpendicular to the axis from which longitude is
-        measured. Written by cascadio 0.2 and later; older files do not have
-        it.
+        measured.
     """
 
     face_index: int
@@ -195,8 +191,7 @@ class Torus:
         Radius of the tube, in meters
     x_dir
         Unit direction perpendicular to the axis from which angles are
-        measured. Written by cascadio 0.2 and later; older files do not have
-        it.
+        measured.
     """
 
     face_index: int

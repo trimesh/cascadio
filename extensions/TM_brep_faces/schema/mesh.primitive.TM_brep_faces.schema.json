@@ -26,13 +26,13 @@
     },
     "materials": {
       "type": "array",
-      "description": "The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead. Files written before cascadio 0.2 list every material of the model on the first primitive only.",
+      "description": "The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead.",
       "items": {
         "$ref": "#/$defs/material"
       }
     }
   },
-  "required": ["faceIndices"],
+  "required": ["faceIndices", "faces", "materials"],
   "$defs": {
     "point": {
       "title": "point",
@@ -148,10 +148,10 @@
               },
               "x_dir": {
                 "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it."
+                "description": "Unit direction perpendicular to the axis from which angles are measured."
               }
             },
-            "required": ["origin", "axis", "radius", "extent_angle", "extent_height"]
+            "required": ["origin", "axis", "radius", "extent_angle", "extent_height", "x_dir"]
           }
         },
         {
@@ -193,10 +193,10 @@
               },
               "x_dir": {
                 "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it."
+                "description": "Unit direction perpendicular to the axis from which angles are measured."
               }
             },
-            "required": ["apex", "axis", "semi_angle", "ref_radius", "extent_angle", "extent_distance"]
+            "required": ["apex", "axis", "semi_angle", "ref_radius", "extent_angle", "extent_distance", "x_dir"]
           }
         },
         {
@@ -228,14 +228,14 @@
               },
               "axis": {
                 "$ref": "#/$defs/direction",
-                "description": "Unit direction from the center to the sphere's north pole. Written by cascadio 0.2 and later; older files do not have it."
+                "description": "Unit direction from the center to the sphere's north pole."
               },
               "x_dir": {
                 "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which longitude is measured. Written by cascadio 0.2 and later; older files do not have it."
+                "description": "Unit direction perpendicular to the axis from which longitude is measured."
               }
             },
-            "required": ["center", "radius", "extent_longitude", "extent_latitude"]
+            "required": ["center", "radius", "extent_longitude", "extent_latitude", "axis", "x_dir"]
           }
         },
         {
@@ -276,10 +276,10 @@
               },
               "x_dir": {
                 "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it."
+                "description": "Unit direction perpendicular to the axis from which angles are measured."
               }
             },
-            "required": ["center", "axis", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle"]
+            "required": ["center", "axis", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle", "x_dir"]
           }
         }
       ],
