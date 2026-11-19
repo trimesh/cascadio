@@ -74,7 +74,7 @@ The worker treats every file as hostile. Before it reads the input it locks itse
 |---|---|
 | Linux (x86-64, ARM64) | A short, fixed seccomp allowlist; `clone` only for new threads. Any other call kills the worker, which raises `RuntimeError` |
 | macOS | Apple's "pure computation" sandbox profile |
-| Windows | A job that allows no other process, a low-integrity token and process mitigations. Windows has no system call filter, so the worker can still read files there |
+| Windows | An AppContainer with no capabilities, so no network and none of the user's files; a job that allows no other process; process mitigations. The worker starts itself again inside the container, which costs one more process per conversion |
 
 To find out which call stopped a worker, run it by hand under `strace -f` (see `src/worker.cpp`).
 

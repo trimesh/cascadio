@@ -128,8 +128,8 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(cascadio-worker PRIVATE Threads::Threads)
 if(WIN32)
-  # GetProcessMemoryInfo; sockets for the lock-down's network probe
-  target_link_libraries(cascadio-worker PRIVATE psapi ws2_32)
+  # GetProcessMemoryInfo; AppContainers; sockets for the network probe
+  target_link_libraries(cascadio-worker PRIVATE psapi userenv ws2_32)
 endif()
 
 # STABLE_ABI: one wheel serves every regular CPython from 3.12 on.

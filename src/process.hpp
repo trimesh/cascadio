@@ -337,10 +337,6 @@ static ProcessResult runProcess(const std::string &program,
   const std::wstring wide = widen(program);
   // the path, quoted, is the whole command line
   std::wstring command = L"\"" + wide + L"\"";
-  // it starts in its own folder, the one place OCCT may look for files
-  const size_t slash = wide.find_last_of(L"\\/");
-  const std::wstring folder =
-      slash == std::wstring::npos ? L"." : wide.substr(0, slash);
   // NAME=value, each ended by a zero, and the block by one more
   std::wstring environment;
   for (const std::string &entry : childEnvironment()) {
@@ -374,7 +370,7 @@ static ProcessResult runProcess(const std::string &program,
       wide.c_str(), command.data(), nullptr, nullptr, TRUE,
       CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT |
           EXTENDED_STARTUPINFO_PRESENT,
-      environment.data(), folder.c_str(), &startup.StartupInfo, &child);
+      environment.data(), nullptr, &startup.StartupInfo, &child);
   const DWORD error = GetLastError();
   DeleteProcThreadAttributeList(startup.lpAttributeList);
   if (!started) {

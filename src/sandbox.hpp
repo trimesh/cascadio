@@ -12,9 +12,9 @@
 //
 // Linux: a fixed seccomp allowlist; any other call kills the process.
 // macOS: Apple's fixed "pure computation" sandbox profile.
-// Windows: a job that allows no other process, a low-integrity token and
-// process mitigations. Windows has no system call filter, so the worker
-// can still read files there.
+// Windows: an AppContainer with no capabilities, so no network and none
+// of the user's files; a job that allows no other process; and process
+// mitigations.
 //
 // Each platform's section defines the same functions in `os`, and the
 // code shared by all of them is at the end.
@@ -85,6 +85,9 @@ private:
 #endif
 
 namespace os {
+
+/// Only Windows needs a new process to lock down in (see its section).
+inline void enterContainer() {}
 
 /// Close every descriptor but standard input, output and error, so nothing
 /// the parent leaked stays reachable.
@@ -362,13 +365,157 @@ inline void confine() {
 #include <winsock2.h> // before windows.h, which would bring the old one
 #include <windows.h> // NOMINMAX and WIN32_LEAN_AND_MEAN come from CMake
 
+#include <aclapi.h>  // file permissions
 #include <fcntl.h>
 #include <io.h>
 #include <psapi.h>
+#include <userenv.h> // AppContainers
 
 namespace os {
 
-/// The parent lists the handles the worker inherits (process.hpp).
+/// True if this process runs in an AppContainer.
+inline bool inAppContainer() {
+  HANDLE token = nullptr;
+  DWORD isContainer = 0;
+  DWORD size = 0;
+  if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    GetTokenInformation(token, TokenIsAppContainer, &isContainer,
+                        sizeof(isContainer), &size);
+    CloseHandle(token);
+  }
+  return isContainer != 0;
+}
+
+/// Let processes in `container` read and run `program`. Installed under
+/// the user's own folders, it is not theirs to read otherwise.
+inline void shareWith(PSID container, const wchar_t *program) {
+  PACL current = nullptr;
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  if (GetNamedSecurityInfoW(program, SE_FILE_OBJECT,
+                            DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                            &current, nullptr, &descriptor) != ERROR_SUCCESS) {
+    return;
+  }
+  EXPLICIT_ACCESSW access = {};
+  access.grfAccessPermissions = GENERIC_READ | GENERIC_EXECUTE;
+  access.grfAccessMode = GRANT_ACCESS;
+  access.grfInheritance = NO_INHERITANCE;
+  access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  access.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+  access.Trustee.ptstrName = static_cast<LPWSTR>(container);
+  PACL updated = nullptr;
+  if (SetEntriesInAclW(1, &access, current, &updated) == ERROR_SUCCESS) {
+    SetNamedSecurityInfoW(const_cast<wchar_t *>(program), SE_FILE_OBJECT,
+                          DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                          updated, nullptr);
+    LocalFree(updated);
+  }
+  LocalFree(descriptor);
+}
+
+/// Windows can put a process in an AppContainer only when it starts it.
+/// So unless this already is that process, start this program again in
+/// an AppContainer with no capabilities, which reaches neither the network
+/// nor the user's files, wait for it and leave with its exit code. It
+/// gets the same standard streams and arguments, and dies with this one.
+inline void enterContainer() {
+  if (inAppContainer()) {
+    return;
+  }
+  PSID container = nullptr;
+  if (FAILED(DeriveAppContainerSidFromAppContainerName(L"cascadio.worker",
+                                                       &container))) {
+    cannotLockDown("cannot name its AppContainer");
+  }
+  SECURITY_CAPABILITIES capabilities = {}; // and no capabilities
+  capabilities.AppContainerSid = container;
+
+  // the standard streams are the only handles it inherits
+  const HANDLE streams[] = {GetStdHandle(STD_INPUT_HANDLE),
+                            GetStdHandle(STD_OUTPUT_HANDLE),
+                            GetStdHandle(STD_ERROR_HANDLE)};
+  std::vector<HANDLE> inherited;
+  for (HANDLE stream : streams) {
+    if (stream != nullptr && stream != INVALID_HANDLE_VALUE &&
+        std::find(inherited.begin(), inherited.end(), stream) ==
+            inherited.end()) {
+      SetHandleInformation(stream, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+      inherited.push_back(stream);
+    }
+  }
+  SIZE_T size = 0;
+  InitializeProcThreadAttributeList(nullptr, 2, 0, &size);
+  std::vector<char> attributes(size);
+  STARTUPINFOEXW startup = {};
+  startup.StartupInfo.cb = sizeof(startup);
+  startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  startup.StartupInfo.hStdInput = streams[0];
+  startup.StartupInfo.hStdOutput = streams[1];
+  startup.StartupInfo.hStdError = streams[2];
+  startup.lpAttributeList =
+      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
+  if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 2, 0,
+                                         &size) ||
+      !UpdateProcThreadAttribute(
+          startup.lpAttributeList, 0,
+          PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &capabilities,
+          sizeof(capabilities), nullptr, nullptr) ||
+      !UpdateProcThreadAttribute(startup.lpAttributeList, 0,
+                                 PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                 inherited.data(),
+                                 inherited.size() * sizeof(HANDLE), nullptr,
+                                 nullptr)) {
+    cannotLockDown("cannot prepare its AppContainer");
+  }
+
+  wchar_t program[32768];
+  GetModuleFileNameW(nullptr, program, 32768);
+  // OCCT reads message files from the working directory: start it in one
+  // it may read and nobody can plant a file in
+  wchar_t system[MAX_PATH];
+  GetSystemDirectoryW(system, MAX_PATH);
+  std::wstring command = GetCommandLineW();
+  PROCESS_INFORMATION child = {};
+  auto start = [&] {
+    return CreateProcessW(program, command.data(), nullptr, nullptr, TRUE,
+                          EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
+                          nullptr, system, &startup.StartupInfo,
+                          &child) != 0;
+  };
+  bool started = start();
+  if (!started && GetLastError() == ERROR_ACCESS_DENIED) {
+    shareWith(container, program);
+    started = start();
+  }
+  const DWORD error = GetLastError();
+  DeleteProcThreadAttributeList(startup.lpAttributeList);
+  FreeSid(container);
+  if (!started) {
+    const std::string what =
+        "cannot start in its AppContainer (error " + std::to_string(error) + ")";
+    cannotLockDown(what.c_str());
+  }
+
+  // When this process ends, the job's handle closes and kills it: this is
+  // the process the module stops on a timeout.
+  HANDLE job = CreateJobObjectW(nullptr, nullptr);
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (job == nullptr ||
+      !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                               &limits, sizeof(limits)) ||
+      !AssignProcessToJobObject(job, child.hProcess)) {
+    TerminateProcess(child.hProcess, worker_exit::FAILED);
+    cannotLockDown("cannot create its job object");
+  }
+  ResumeThread(child.hThread);
+  WaitForSingleObject(child.hProcess, INFINITE);
+  DWORD code = worker_exit::FAILED;
+  GetExitCodeProcess(child.hProcess, &code);
+  ExitProcess(code);
+}
+
+/// The worker in the AppContainer inherits only its standard streams.
 inline void closeInherited() {}
 
 inline int keepResultStream() {
@@ -380,7 +527,7 @@ inline int keepResultStream() {
   return result;
 }
 
-/// The parent starts the worker in its own folder (process.hpp).
+/// enterContainer() started it in the system folder.
 inline void leaveWorkingDirectory() {}
 
 inline void prepareCLibrary() {
@@ -416,32 +563,6 @@ inline void confine() {
                                &limits, sizeof(limits)) ||
       !AssignProcessToJobObject(job, GetCurrentProcess())) {
     cannotLockDown("cannot create its job object");
-  }
-
-  // Low integrity: no writing to anything the user owns.
-  HANDLE token = nullptr;
-  SID_IDENTIFIER_AUTHORITY authority = SECURITY_MANDATORY_LABEL_AUTHORITY;
-  PSID low = nullptr;
-  bool lowered = false;
-  if (OpenProcessToken(GetCurrentProcess(),
-                       TOKEN_ADJUST_DEFAULT | TOKEN_QUERY, &token) &&
-      AllocateAndInitializeSid(&authority, 1, SECURITY_MANDATORY_LOW_RID, 0,
-                               0, 0, 0, 0, 0, 0, &low)) {
-    TOKEN_MANDATORY_LABEL label = {};
-    label.Label.Attributes = SE_GROUP_INTEGRITY;
-    label.Label.Sid = low;
-    lowered = SetTokenInformation(
-                  token, TokenIntegrityLevel, &label,
-                  static_cast<DWORD>(sizeof(label) + GetLengthSid(low))) != 0;
-  }
-  if (low != nullptr) {
-    FreeSid(low);
-  }
-  if (token != nullptr) {
-    CloseHandle(token);
-  }
-  if (!lowered) {
-    cannotLockDown("cannot lower its integrity level");
   }
 
   // No generated code, no stray handle use, no injected DLLs.
@@ -546,6 +667,7 @@ inline void startMemoryWatcher() {
 /// Set up, then lock down. `setUp` is where the caller does whatever needs
 /// files while it still can.
 template <typename SetUp> Locked lockDown(SetUp &&setUp) {
+  os::enterContainer();
   os::closeInherited();
   const int result = os::keepResultStream();
   os::leaveWorkingDirectory();
