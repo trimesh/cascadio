@@ -215,9 +215,9 @@ README = """\
 
 {description}
 
-![A machined part with planes in gray and cylinders in blue, and every edge between CAD faces outlined](example.png)
+![A machined part with faces tinted by surface type and edges colored by the pair of surfaces they join](example.png)
 
-The picture is a mesh, not CAD geometry. The colors come from each face's `type` and the outlines from `faceIndices`, in about twenty lines of Python: [examples/show_brep.py](../../examples/show_brep.py).
+The picture is a mesh, not CAD geometry. Faces are tinted by their `type`. The outlines are the edges between triangles with different `faceIndices`, colored by the two kinds of surface they join: green where two planes meet, blue for a plane and a cylinder, red for two cylinders, orange for a plane and a free-form surface. It takes about thirty lines of Python: [examples/show_brep.py](../../examples/show_brep.py).
 
 ## Example
 
