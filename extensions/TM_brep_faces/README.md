@@ -5,6 +5,10 @@ Which BREP face each triangle came from, the analytic surface of each face, and 
 
 All positions and lengths are in meters and all directions are unit vectors, in the same coordinate frame as the primitive's POSITION accessor (before any node transform). All angles are in radians and turn counter-clockwise when seen from the tip of the axis they turn about (the right-hand rule).
 
+![A machined part with planes in gray and cylinders in blue, and every edge between CAD faces outlined](example.png)
+
+The picture is a mesh, not CAD geometry. The colors come from each face's `type` and the outlines from `faceIndices`, in about twenty lines of Python: [examples/show_brep.py](../../examples/show_brep.py).
+
 ## Example
 
 ```json

@@ -215,6 +215,10 @@ README = """\
 
 {description}
 
+![A machined part with planes in gray and cylinders in blue, and every edge between CAD faces outlined](example.png)
+
+The picture is a mesh, not CAD geometry. The colors come from each face's `type` and the outlines from `faceIndices`, in about twenty lines of Python: [examples/show_brep.py](../../examples/show_brep.py).
+
 ## Example
 
 ```json
