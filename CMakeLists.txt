@@ -139,6 +139,36 @@ nanobind_add_module(_core STABLE_ABI FREE_THREADED src/main.cpp)
 target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION_FULL})
 target_link_libraries(_core PRIVATE ${CMAKE_DL_LIBS})
 
+# Our own code is compiled with every reasonable warning on. OpenCASCADE,
+# RapidJSON and zstd headers are included as SYSTEM, so they stay quiet.
+# CASCADIO_STRICT=ON (set by the Makefile and by CI) turns warnings into
+# errors; it is off by default so a packager's newer compiler cannot break
+# the build over a warning we have not seen yet.
+if(MSVC)
+  set(strict_warnings /W4)
+  set(warnings_as_errors /WX)
+else()
+  set(strict_warnings -Wall -Wextra -Wpedantic -Wshadow -Wconversion
+      -Wsign-conversion -Wold-style-cast -Wcast-qual -Wnon-virtual-dtor
+      -Woverloaded-virtual -Wnull-dereference -Wdouble-promotion -Wformat=2
+      -Wimplicit-fallthrough)
+  set(warnings_as_errors -Werror)
+endif()
+# nanobind is built as part of this project, so its headers (and Python's,
+# which it brings along) would be held to our warnings; mark it SYSTEM.
+get_target_property(core_libraries _core LINK_LIBRARIES)
+foreach(library ${core_libraries})
+  if(TARGET ${library} AND library MATCHES "nanobind")
+    set_target_properties(${library} PROPERTIES SYSTEM TRUE)
+  endif()
+endforeach()
+foreach(target cascadio-worker _core)
+  target_compile_options(${target} PRIVATE ${strict_warnings})
+  if("$ENV{CASCADIO_STRICT}")
+    target_compile_options(${target} PRIVATE ${warnings_as_errors})
+  endif()
+endforeach()
+
 install(TARGETS cascadio-worker RUNTIME DESTINATION cascadio)
 install(TARGETS _core LIBRARY DESTINATION cascadio)
 

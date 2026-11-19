@@ -3,11 +3,7 @@ import json
 import struct
 import tempfile
 from pathlib import Path
-from typing import List, Optional
 
-import cascadio
-import cascadio.extension  # Register extension handlers
-import cascadio.primitives
 import numpy as np
 import pytest
 import trimesh
@@ -15,13 +11,17 @@ import trimesh
 # Require trimesh extension registry support
 from trimesh.exchange.gltf.extensions import register_handler  # noqa
 
+import cascadio
+import cascadio.extension  # Register extension handlers
+import cascadio.primitives
+
 MODELS_DIR = Path(__file__).parent / "models"
 
 
 def check_brep(
     triangles: np.ndarray,
     brep_index: np.ndarray,
-    primitives: List[Optional[cascadio.primitives.BrepPrimitive]],
+    primitives: list[cascadio.primitives.BrepPrimitive | None],
     tolerance: float = 1e-8,
 ) -> None:
     """
@@ -159,7 +159,7 @@ def test_convert_step_to_glb():
 
     assert len(scene.geometry) == 1
 
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
     assert len(mesh.vertices) > 100, "Mesh should have substantial vertices"
     assert len(mesh.faces) > 100, "Mesh should have substantial faces"
     assert mesh.is_winding_consistent, "Mesh should have consistent winding"
@@ -223,7 +223,7 @@ def test_convert_step_to_glb_with_brep():
     assert len(scene.geometry) == 1
 
     # Get the mesh
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
 
     # Should have brep_faces in mesh.metadata.cascadio from TM_brep_faces extension
     assert "cascadio" in mesh.metadata
@@ -294,7 +294,7 @@ def test_convert_step_to_glb_brep_types_filter(
     )
 
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
     brep_faces = mesh.metadata["cascadio"]["brep_faces"]
     brep_index = mesh.face_attributes["brep_index"]
 
@@ -373,7 +373,7 @@ def test_brep_forces_merge_primitives():
         "Expected single mesh (merge_primitives auto-enabled)"
     )
 
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
 
     # BREP data should be present
     assert "cascadio" in mesh.metadata, "missing cascadio metadata"
@@ -407,7 +407,7 @@ def test_convert_step_to_glb_with_materials():
 
     # Load with trimesh and check mesh metadata
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
 
     # Materials should be in mesh.metadata.cascadio.materials
     assert "cascadio" in mesh.metadata
@@ -439,7 +439,7 @@ def test_convert_step_to_glb_with_materials():
     scene_brep = trimesh.load(
         io.BytesIO(glb_data_with_brep), file_type="glb", merge_primitives=True
     )
-    mesh_brep = list(scene_brep.geometry.values())[0]
+    mesh_brep = next(iter(scene_brep.geometry.values()))
 
     # Materials should still be present
     assert "cascadio" in mesh_brep.metadata
@@ -475,7 +475,7 @@ def brep_mesh():
     scene = trimesh.load_scene(
         io.BytesIO(glb_data), file_type="glb", merge_primitives=True
     )
-    return list(scene.geometry.values())[0]
+    return next(iter(scene.geometry.values()))
 
 
 def test_cylinder_parameters(brep_mesh):
@@ -718,7 +718,7 @@ def check_extents(prim, verts) -> None:
 def test_extents_mean_what_the_schema_says(y_up):
     """Every face's vertices fall inside its extents, measured as documented."""
     checked = set()
-    for model in sorted(MODELS_DIR.glob("*.st*p")) + [MODELS_DIR / "featuretype.STEP"]:
+    for model in [*sorted(MODELS_DIR.glob("*.st*p")), MODELS_DIR / "featuretype.STEP"]:
         scene = load_scene(model.name, include_brep=True, y_up=y_up)
         for mesh in scene.geometry.values():
             triangles = mesh.vertices[mesh.faces]

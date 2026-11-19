@@ -13,8 +13,9 @@ import threading
 import time
 from pathlib import Path
 
-import cascadio
 import pytest
+
+import cascadio
 
 MODELS_DIR = Path(__file__).parent / "models"
 STEP = (MODELS_DIR / "featuretype.STEP").read_bytes()
@@ -96,7 +97,7 @@ def test_segfault_is_survived(monkeypatch, tmp_path):
     worker.write_text("#!/bin/sh\nkill -SEGV $$\n")
     worker.chmod(0o755)
     monkeypatch.setenv("CASCADIO_WORKER", str(worker))
-    with pytest.raises(RuntimeError, match="crashed.*signal 11"):
+    with pytest.raises(RuntimeError, match=r"crashed.*signal 11"):
         cascadio.load(STEP)
 
     monkeypatch.delenv("CASCADIO_WORKER")

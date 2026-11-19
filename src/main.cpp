@@ -3,13 +3,14 @@
 // feeds, waits for with a time limit, and reports on. See request.hpp for
 // the contract between the two and process.hpp for the process handling.
 
-#include "process.hpp"
-#include "request.hpp"
-
+// Python's headers set feature macros and have to come before any other
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
+
+#include "process.hpp"
+#include "request.hpp"
 
 #include <cctype>
 #include <cstdio>

@@ -8,8 +8,9 @@ Show a STEP model with each face colored by its surface type.
 import sys
 from pathlib import Path
 
-import cascadio
 import trimesh
+
+import cascadio
 from cascadio.primitives import Cone, Cylinder, Plane, Sphere, Torus
 
 COLORS = {

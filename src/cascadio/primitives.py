@@ -11,14 +11,13 @@ the tip of the axis they turn about (the right-hand rule).
 """
 
 from dataclasses import dataclass, fields
-from typing import List, Optional, Tuple, Union
 
 # a position [x, y, z] in meters
-Point = Tuple[float, float, float]
+Point = tuple[float, float, float]
 # a direction [x, y, z] of length 1
-Direction = Tuple[float, float, float]
+Direction = tuple[float, float, float]
 # [min, max] along one of a surface's two directions
-Range = Tuple[float, float]
+Range = tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -202,7 +201,7 @@ class Torus:
     extent_minor_angle: Range
 
 
-BrepPrimitive = Union[Plane, Cylinder, Cone, Sphere, Torus]
+BrepPrimitive = Plane | Cylinder | Cone | Sphere | Torus
 
 # the `type` of a face in the extension -> its dataclass
 PRIMITIVES = {
@@ -214,21 +213,19 @@ PRIMITIVES = {
 }
 
 __all__ = [
-    "Plane",
-    "Cylinder",
+    "PRIMITIVES",
+    "BrepPrimitive",
     "Cone",
+    "Cylinder",
+    "Plane",
     "Sphere",
     "Torus",
-    "BrepPrimitive",
-    "PRIMITIVES",
-    "parse_primitive",
     "parse_brep_faces",
+    "parse_primitive",
 ]
 
 
-def parse_primitive(
-    data: Optional[dict], face_index: int = 0
-) -> Optional[BrepPrimitive]:
+def parse_primitive(data: dict | None, face_index: int = 0) -> BrepPrimitive | None:
     """
     Parse one face of the TM_brep_faces extension into its dataclass.
 
@@ -258,7 +255,7 @@ def parse_primitive(
     )
 
 
-def parse_brep_faces(brep_faces: List[Optional[dict]]) -> List[Optional[BrepPrimitive]]:
+def parse_brep_faces(brep_faces: list[dict | None]) -> list[BrepPrimitive | None]:
     """
     Parse the `faces` list of the TM_brep_faces extension.
 

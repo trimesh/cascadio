@@ -14,20 +14,18 @@ Importing cascadio registers it. When trimesh then loads a GLB made with
   the mesh was made from
 """
 
-from typing import Optional
-
 from .primitives import parse_brep_faces
 
 try:
     from trimesh.exchange.gltf.extensions import register_handler
 except ImportError:
     # trimesh is optional, and old versions have no extension registry
-    def register_handler(*args, **kwargs):
+    def register_handler(name: str, scope: str):
         return lambda function: function
 
 
 @register_handler("TM_brep_faces", "primitive")
-def _import_brep_faces(ctx: dict) -> Optional[dict]:
+def _import_brep_faces(ctx: dict) -> dict | None:
     """
     Turn one primitive's `TM_brep_faces` data into what trimesh attaches
     to the mesh: `{"face_attributes": {...}, "metadata": {...}}`.

@@ -176,3 +176,4 @@ GTAGS
 CMakeCache.txt
 CMakeFiles/
 wheelhouse/
+fuzz-findings/

@@ -52,6 +52,7 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: >-
             CASCADIO_OCCT_PREFIX=/host${{ github.workspace }}/occt_install
             UV_CONSTRAINT=build-constraints.txt
+            CASCADIO_STRICT=ON
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -13,8 +13,15 @@
 #   make system-occt   build the sdist against a system OpenCASCADE and test
 #   make occt-master   build and test against the newest OpenCASCADE commit
 #
+# Bug hunting, on your own machine (needs clang):
+#   make sanitize      run the tests against a worker built with the address
+#                      and undefined-behavior sanitizers
+#   make fuzz          convert randomly damaged files with that worker and
+#                      save the ones that crash or hang (SECONDS=60)
+#
 # Housekeeping:
 #   make sdist         build the source distribution into dist/
+#   make lint          check Python style and likely bugs (ruff)
 #   make schema        regenerate the README and dataclasses of the extension
 #   make lock          update uv.lock to the newest build tools
 #   make clean         delete everything the targets above created
@@ -27,10 +34,12 @@
 #   PYTHON  CPython tag for `make manylinux` (default: cp312)
 #   OCCT    OpenCASCADE version for `make system-occt` (default: 7.9.0,
 #           the oldest one cascadio supports)
+#   SECONDS how long `make fuzz` runs (default: 60)
 
 CPUS ?= $(shell getconf _NPROCESSORS_ONLN)
 PYTHON ?= cp312
 OCCT ?= 7.9.0
+SECONDS ?= 60
 
 MANYLINUX := quay.io/pypa/manylinux_2_28_x86_64
 MICROMAMBA := mambaorg/micromamba:latest
@@ -41,8 +50,10 @@ MICROMAMBA := mambaorg/micromamba:latest
 TOOLS := uv run --frozen --only-group build
 export UV_BUILD_CONSTRAINT := build-constraints.txt
 export CMAKE_BUILD_PARALLEL_LEVEL := $(CPUS)
+# compiler warnings in our own code are errors (see CMakeLists.txt)
+export CASCADIO_STRICT := ON
 
-.PHONY: help occt install test wheel audit manylinux system-occt occt-master sdist schema lock clean
+.PHONY: help occt install test wheel audit sanitize fuzz manylinux system-occt occt-master sdist lint schema lock clean
 
 help:
 	@sed -n '/^#/!q;s/^# \{0,1\}//p' $(MAKEFILE_LIST)
@@ -73,13 +84,34 @@ audit:
 sdist: build-constraints.txt
 	uv build --sdist --out-dir dist
 
+# A second copy of the worker, compiled so that a memory error or undefined
+# behavior in our code stops it with a report instead of going unnoticed.
+# OpenCASCADE itself is the normal build, but its heap use is checked too.
+# Setting CASCADIO_WORKER makes the installed module start this worker.
+SANITIZED := build/sanitize/cascadio-worker
+SANITIZER_ENV := CASCADIO_WORKER=$(CURDIR)/$(SANITIZED) \
+	ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1
+
+$(SANITIZED): install
+	$(TOOLS) cmake -S . -B build/sanitize -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	  "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer" \
+	  "-Dnanobind_DIR=$$($(TOOLS) python -m nanobind --cmake_dir)"
+	$(TOOLS) cmake --build build/sanitize --target cascadio-worker
+
+sanitize: $(SANITIZED)
+	$(SANITIZER_ENV) uv run --frozen --extra tests pytest tests
+
+fuzz: $(SANITIZED)
+	$(SANITIZER_ENV) uv run --frozen --extra tests python scripts/fuzz.py \
+	  --seconds $(SECONDS) --jobs $(CPUS)
+
 # OpenCASCADE has to be built again inside the container, for its older
 # system libraries. It is installed under build/ on the host (which the
 # container sees at /host) so that only the first run is slow.
 manylinux: upstream/OCCT/CMakeLists.txt
 	CIBW_BUILD="$(PYTHON)-manylinux_x86_64" \
 	CIBW_CONTAINER_ENGINE="docker; create_args: --privileged --cpus=$(CPUS)" \
-	CIBW_ENVIRONMENT_LINUX="CASCADIO_OCCT_PREFIX=/host$(CURDIR)/build/occt_manylinux CASCADIO_OCCT_BUILD=/tmp/occt_build UV_CONSTRAINT=build-constraints.txt CMAKE_BUILD_PARALLEL_LEVEL=$(CPUS)" \
+	CIBW_ENVIRONMENT_LINUX="CASCADIO_OCCT_PREFIX=/host$(CURDIR)/build/occt_manylinux CASCADIO_OCCT_BUILD=/tmp/occt_build UV_CONSTRAINT=build-constraints.txt CASCADIO_STRICT=ON CMAKE_BUILD_PARALLEL_LEVEL=$(CPUS)" \
 	  uvx cibuildwheel --platform linux
 
 # What a Linux or BSD packager does: no vendored code, the OpenCASCADE,
@@ -95,6 +127,10 @@ occt-master: upstream/OCCT/CMakeLists.txt
 	docker run --rm --cpus $(CPUS) -v "$(CURDIR)":/src:ro $(MANYLINUX) \
 	  bash /src/scripts/test_occt_master.sh
 
+lint:
+	uvx ruff check .
+	uvx ruff format --check .
+
 # everything that repeats the TM_brep_faces schema is generated from it
 schema:
 	uv run --no-project python scripts/gen_schema.py
@@ -105,4 +141,4 @@ lock:
 # build/occt_manylinux is written by a container as root, hence Docker
 clean:
 	-docker run --rm -v "$(CURDIR)":/src $(MANYLINUX) rm -rf /src/build/occt_manylinux
-	rm -rf build dist wheelhouse occt_install .venv build-constraints.txt
+	rm -rf build dist wheelhouse occt_install .venv build-constraints.txt fuzz-findings

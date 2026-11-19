@@ -30,18 +30,18 @@ IGES = FileType.IGES
 BrepType = Literal["plane", "cylinder", "cone", "sphere", "torus"]
 
 __all__ = [
-    "load",
+    "DEFAULT_MEMORY_LIMIT",
+    "DEFAULT_TIMEOUT",
+    "IGES",
+    "STEP",
+    "BrepType",
     "FileType",
     "NodeNameFormat",
-    "STEP",
-    "IGES",
-    "BrepType",
-    "DEFAULT_TIMEOUT",
-    "DEFAULT_MEMORY_LIMIT",
-    "to_glb_bytes",
+    "__version__",
+    "extension",
+    "load",
+    "primitives",
     "step_to_glb",
     "step_to_obj",
-    "__version__",
-    "primitives",
-    "extension",
+    "to_glb_bytes",
 ]

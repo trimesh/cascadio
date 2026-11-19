@@ -330,18 +330,17 @@ by scripts/gen_schema.py. Do not edit: change the schema and run `make schema`.
 """
 
 from dataclasses import dataclass, fields
-from typing import List, Optional, Tuple, Union
 
 # a position [x, y, z] in meters
-Point = Tuple[float, float, float]
+Point = tuple[float, float, float]
 # a direction [x, y, z] of length 1
-Direction = Tuple[float, float, float]
+Direction = tuple[float, float, float]
 # [min, max] along one of a surface's two directions
-Range = Tuple[float, float]
+Range = tuple[float, float]
 {classes}
 
 
-BrepPrimitive = Union[{names}]
+BrepPrimitive = {names}
 
 # the `type` of a face in the extension -> its dataclass
 PRIMITIVES = {{
@@ -353,9 +352,7 @@ __all__ = [
 ]
 
 
-def parse_primitive(
-    data: Optional[dict], face_index: int = 0
-) -> Optional[BrepPrimitive]:
+def parse_primitive(data: dict | None, face_index: int = 0) -> BrepPrimitive | None:
     """
     Parse one face of the TM_brep_faces extension into its dataclass.
 
@@ -385,7 +382,7 @@ def parse_primitive(
     )
 
 
-def parse_brep_faces(brep_faces: List[Optional[dict]]) -> List[Optional[BrepPrimitive]]:
+def parse_brep_faces(brep_faces: list[dict | None]) -> list[BrepPrimitive | None]:
     """
     Parse the `faces` list of the TM_brep_faces extension.
 
@@ -450,12 +447,11 @@ def generate_python(schema: dict, source: str) -> str:
                 ),
             )
         )
-    exports = names + [
-        "BrepPrimitive",
-        "PRIMITIVES",
-        "parse_primitive",
-        "parse_brep_faces",
-    ]
+    # in the order the linter wants `__all__`: constants, classes, functions
+    exports = sorted(
+        [*names, "BrepPrimitive", "PRIMITIVES", "parse_primitive", "parse_brep_faces"],
+        key=lambda name: (not name.isupper(), not name[0].isupper(), name),
+    )
     # everything after the first sentence of the schema's description
     # is about units and conventions
     units = schema["description"].split(". ", 1)[1]
@@ -463,7 +459,7 @@ def generate_python(schema: dict, source: str) -> str:
         schema=source,
         units=wrap(units, ""),
         classes="".join(classes).rstrip("\n"),
-        names=", ".join(names),
+        names=" | ".join(names),
         mapping="\n".join(f'    "{n.lower()}": {n},' for n in names),
         exports="\n".join(f'    "{e}",' for e in exports),
     )

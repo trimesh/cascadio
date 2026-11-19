@@ -8,10 +8,10 @@ import json
 import struct
 from pathlib import Path
 
-import cascadio
 import jsonschema
 import pytest
 
+import cascadio
 
 # The one schema file. cascadio generates its C++ writer from it.
 SCHEMA_PATH = (

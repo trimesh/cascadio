@@ -2,9 +2,10 @@ import os
 import tempfile
 from io import BytesIO
 
-import cascadio
 import pytest
 import trimesh
+
+import cascadio
 
 cwd = os.path.abspath(os.path.dirname(__file__))
 
@@ -27,7 +28,7 @@ def test_load_step_bytes():
     assert len(scene.geometry) == 1
 
     # Verify mesh is valid
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
     assert len(mesh.vertices) > 100, "Mesh should have substantial vertices"
     assert len(mesh.faces) > 100, "Mesh should have substantial faces"
     assert mesh.is_winding_consistent, "Mesh should have consistent winding"
@@ -60,7 +61,7 @@ def test_load_iges_bytes():
     assert len(scene.geometry) == 1
 
     # Verify mesh has content
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
     assert len(mesh.vertices) > 10, "Mesh should have vertices"
     assert len(mesh.faces) > 10, "Mesh should have faces"
 
@@ -103,7 +104,7 @@ def test_step_to_glb():
         assert len(scene.geometry) == 1
 
         # Verify mesh is valid
-        mesh = list(scene.geometry.values())[0]
+        mesh = next(iter(scene.geometry.values()))
         assert len(mesh.vertices) > 100, "Mesh should have substantial vertices"
         assert len(mesh.faces) > 100, "Mesh should have substantial faces"
         assert mesh.is_winding_consistent, "Mesh should have consistent winding"

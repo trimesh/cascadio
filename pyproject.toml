@@ -63,10 +63,12 @@ sdist.exclude = ["upstream", "occt_install", "build", "wheelhouse", ".github"]
 # build-constraints.txt from the lock, which pins the tools of the wheel
 # build itself. The workflow installs a pinned uv.
 #
+# CASCADIO_STRICT makes compiler warnings in our own code errors.
+#
 # Setting `environment` anywhere else (a platform section, CIBW_ENVIRONMENT*)
-# replaces this table, so UV_CONSTRAINT has to be repeated there.
+# replaces this table, so both variables have to be repeated there.
 build-frontend = "build[uv]"
-environment = { UV_CONSTRAINT = "build-constraints.txt" }
+environment = { UV_CONSTRAINT = "build-constraints.txt", CASCADIO_STRICT = "ON" }
 # `yum` would need to be replaced in the `before-all`
 # script before the musl linux can build OpenCASCADE
 skip = "*musl* *win32*"
@@ -110,8 +112,19 @@ repair-wheel-command = [
 
 [tool.cibuildwheel.macos]
 # Require macOS 10.15+ for std::filesystem support
-environment = { MACOSX_DEPLOYMENT_TARGET = "11.0", UV_CONSTRAINT = "build-constraints.txt" }
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0", UV_CONSTRAINT = "build-constraints.txt", CASCADIO_STRICT = "ON" }
 repair-wheel-command = [
   "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}",
   "make audit WHEEL={wheel}"
 ]
+
+[tool.ruff]
+extend-exclude = ["upstream"]
+
+[tool.ruff.lint]
+# pyflakes and pycodestyle, plus: likely bugs (B), modern syntax for our
+# minimum Python (UP), import order (I), needless complexity (SIM, C4, PIE,
+# RET), slow patterns (PERF) and ruff's own checks (RUF)
+select = ["E", "F", "W", "B", "UP", "I", "SIM", "C4", "PIE", "RET", "PERF", "RUF"]
+# line length is the formatter's job
+ignore = ["E501"]
