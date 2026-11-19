@@ -27,13 +27,15 @@
 /// materials of the part it belongs to. The extension's name and keys come
 /// from the schema (tm_brep_faces.hpp).
 ///
-/// Without it, only the materials are written, to each mesh's
-/// `extras.cascadio.materials`, because there is no extension to hold them.
+/// With `withExtras`, each mesh's materials are also written to its
+/// `extras.cascadio.materials`. That is the only place for them without the
+/// extension, and it is where earlier versions put them.
 ///
 /// @param frame moves the face geometry into the coordinate frame of the mesh
 static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
                                        const Handle(TDocStd_Document) & document,
                                        const Recorded &recorded, bool withFaces,
+                                       bool withExtras,
                                        const std::set<std::string> &allowedTypes,
                                        double lengthUnit,
                                        const gp_Trsf &frame) {
@@ -136,7 +138,7 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
       }
       const int indicesId = prim["indices"].GetInt();
 
-      if (!withFaces) {
+      if (withExtras && &prim == mesh["primitives"].Begin()) {
         // one list per mesh, taken from its first primitive
         if (!mesh.HasMember("extras") || !mesh["extras"].IsObject()) {
           mesh.RemoveMember("extras");
@@ -147,6 +149,8 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
         cascadio.AddMember("materials", materialsFor(indicesId), alloc);
         mesh["extras"].RemoveMember("cascadio");
         mesh["extras"].AddMember("cascadio", cascadio, alloc);
+      }
+      if (!withFaces) {
         break;
       }
 

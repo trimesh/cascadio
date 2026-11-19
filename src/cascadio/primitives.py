@@ -30,6 +30,11 @@ class Plane:
     face_index
         Position of this face in the `faces` array, which is the value
         `faceIndices` holds for its triangles
+    extent_x
+        How far the face reaches along x_dir from origin, in meters
+    extent_y
+        How far the face reaches along the plane's Y axis from origin, in
+        meters
     origin
         A point on the plane, from which the extents are measured
     normal
@@ -37,19 +42,14 @@ class Plane:
     x_dir
         Unit direction in the plane: the plane's own X axis. Its Y axis is
         normal cross x_dir.
-    extent_x
-        How far the face reaches along x_dir from origin, in meters
-    extent_y
-        How far the face reaches along the plane's Y axis from origin, in
-        meters
     """
 
     face_index: int
+    extent_x: Range
+    extent_y: Range
     origin: Point
     normal: Direction
     x_dir: Direction
-    extent_x: Range
-    extent_y: Range
 
 
 @dataclass(frozen=True)
@@ -62,28 +62,30 @@ class Cylinder:
     face_index
         Position of this face in the `faces` array, which is the value
         `faceIndices` holds for its triangles
-    origin
-        A point on the axis, from which heights are measured
-    axis
-        Unit direction of the axis
-    x_dir
-        Unit direction perpendicular to the axis from which angles are measured
-    radius
-        Distance from the axis to the surface, in meters
     extent_angle
         The angles the face covers around the axis, measured from x_dir, in
         radians. A full cylinder covers 2 pi.
     extent_height
         How far the face reaches along the axis from origin, in meters
+    origin
+        A point on the axis, from which heights are measured
+    axis
+        Unit direction of the axis
+    radius
+        Distance from the axis to the surface, in meters
+    x_dir
+        Unit direction perpendicular to the axis from which angles are
+        measured. Written by cascadio 0.2 and later; older files do not have
+        it.
     """
 
     face_index: int
-    origin: Point
-    axis: Direction
-    x_dir: Direction
-    radius: float
     extent_angle: Range
     extent_height: Range
+    origin: Point
+    axis: Direction
+    radius: float
+    x_dir: Direction | None = None
 
 
 @dataclass(frozen=True)
@@ -96,35 +98,37 @@ class Cone:
     face_index
         Position of this face in the `faces` array, which is the value
         `faceIndices` holds for its triangles
-    apex
-        The point where the cone comes to a tip. The face itself usually does
-        not reach it.
-    axis
-        Unit direction of the axis
-    x_dir
-        Unit direction perpendicular to the axis from which angles are measured
-    semi_angle
-        Angle between the axis and the cone's side, in radians. Positive if the
-        cone widens along the axis direction and negative if it narrows.
-    ref_radius
-        Radius of the cone's reference circle, in meters. Its center is on the
-        axis at apex + axis * ref_radius / tan(semi_angle).
     extent_angle
         The angles the face covers around the axis, measured from x_dir, in
         radians
     extent_distance
         How far the face reaches along the cone's slanted side, measured from
         the reference circle in the direction of the axis, in meters
+    apex
+        The point where the cone comes to a tip. The face itself usually does
+        not reach it.
+    axis
+        Unit direction of the axis
+    semi_angle
+        Angle between the axis and the cone's side, in radians. Positive if the
+        cone widens along the axis direction and negative if it narrows.
+    ref_radius
+        Radius of the cone's reference circle, in meters. Its center is on the
+        axis at apex + axis * ref_radius / tan(semi_angle).
+    x_dir
+        Unit direction perpendicular to the axis from which angles are
+        measured. Written by cascadio 0.2 and later; older files do not have
+        it.
     """
 
     face_index: int
-    apex: Point
-    axis: Direction
-    x_dir: Direction
-    semi_angle: float
-    ref_radius: float
     extent_angle: Range
     extent_distance: Range
+    apex: Point
+    axis: Direction
+    semi_angle: float
+    ref_radius: float
+    x_dir: Direction | None = None
 
 
 @dataclass(frozen=True)
@@ -137,30 +141,32 @@ class Sphere:
     face_index
         Position of this face in the `faces` array, which is the value
         `faceIndices` holds for its triangles
-    center
-        The center of the sphere
-    axis
-        Unit direction from the center to the sphere's north pole
-    x_dir
-        Unit direction perpendicular to the axis from which longitude is
-        measured
-    radius
-        Distance from the center to the surface, in meters
     extent_longitude
         The angles the face covers around the axis, measured from x_dir, in
         radians
     extent_latitude
         The angles the face covers above the equator, toward the axis, in
         radians: from -pi/2 at the south pole to pi/2 at the north pole
+    center
+        The center of the sphere
+    radius
+        Distance from the center to the surface, in meters
+    axis
+        Unit direction from the center to the sphere's north pole. Written by
+        cascadio 0.2 and later; older files do not have it.
+    x_dir
+        Unit direction perpendicular to the axis from which longitude is
+        measured. Written by cascadio 0.2 and later; older files do not have
+        it.
     """
 
     face_index: int
-    center: Point
-    axis: Direction
-    x_dir: Direction
-    radius: float
     extent_longitude: Range
     extent_latitude: Range
+    center: Point
+    radius: float
+    axis: Direction | None = None
+    x_dir: Direction | None = None
 
 
 @dataclass(frozen=True)
@@ -173,32 +179,34 @@ class Torus:
     face_index
         Position of this face in the `faces` array, which is the value
         `faceIndices` holds for its triangles
-    center
-        The center of the torus, on its axis
-    axis
-        Unit direction of the axis the tube circles around
-    x_dir
-        Unit direction perpendicular to the axis from which angles are measured
-    major_radius
-        Distance from the axis to the middle of the tube, in meters
-    minor_radius
-        Radius of the tube, in meters
     extent_major_angle
         The angles the face covers around the axis, measured from x_dir, in
         radians
     extent_minor_angle
         The angles the face covers around the tube, in radians: 0 is the outer
         edge of the torus and the angle grows toward the axis direction
+    center
+        The center of the torus, on its axis
+    axis
+        Unit direction of the axis the tube circles around
+    major_radius
+        Distance from the axis to the middle of the tube, in meters
+    minor_radius
+        Radius of the tube, in meters
+    x_dir
+        Unit direction perpendicular to the axis from which angles are
+        measured. Written by cascadio 0.2 and later; older files do not have
+        it.
     """
 
     face_index: int
-    center: Point
-    axis: Direction
-    x_dir: Direction
-    major_radius: float
-    minor_radius: float
     extent_major_angle: Range
     extent_minor_angle: Range
+    center: Point
+    axis: Direction
+    major_radius: float
+    minor_radius: float
+    x_dir: Direction | None = None
 
 
 BrepPrimitive = Plane | Cylinder | Cone | Sphere | Torus
@@ -251,6 +259,8 @@ def parse_primitive(data: dict | None, face_index: int = 0) -> BrepPrimitive | N
             # JSON arrays become tuples so the frozen dataclass is hashable
             f.name: tuple(v) if isinstance(v := values[f.name], list) else v
             for f in fields(kind)
+            # fields added in later versions are absent from older files
+            if f.name in values
         }
     )
 

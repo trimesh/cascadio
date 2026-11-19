@@ -731,3 +731,15 @@ def test_extents_mean_what_the_schema_says(y_up):
     # the test models cover these surface types
     assert {"Plane", "Cylinder"} <= checked
     print("checked:", sorted(checked))
+
+
+def test_materials_stay_in_extras():
+    """With `include_materials`, each mesh's extras carry them, as in 0.1."""
+    for options in (
+        {"include_materials": True},
+        {"include_materials": True, "include_brep": True},
+    ):
+        glb = cascadio.load((MODELS_DIR / "material.stp").read_bytes(), **options)
+        header = json.loads(glb[20 : 20 + struct.unpack("<I", glb[12:16])[0]])
+        materials = header["meshes"][0]["extras"]["cascadio"]["materials"]
+        assert materials[0]["name"] == "Steel"

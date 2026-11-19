@@ -20,13 +20,13 @@ All positions and lengths are in meters and all directions are unit vectors, in 
 
 ## Properties
 
-All of these are required, and no other properties are allowed, here or inside a face or a material.
+Only `faceIndices` is required, and cascadio always writes all three. No other properties are allowed, here or inside a face or a material.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `faceIndices` | integer | Index of an accessor with one value per triangle: the position in `faces` of the BREP face that triangle came from. The accessor is SCALAR with an unsigned integer component type, and its count equals the number of triangles in the primitive. |
 | `faces` | array | One entry per BREP face, in face index order. An entry is null when the face is not one of the analytic surface types, so positions still match face indices. |
-| `materials` | list of Materials | The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead. |
+| `materials` | list of Materials | The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead. Files written before cascadio 0.2 list every material of the model on the first primitive only. |
 
 ## Faces
 
@@ -63,10 +63,10 @@ and, depending on `type`:
 |---|---|---|
 | `origin` | point | A point on the axis, from which heights are measured |
 | `axis` | direction | Unit direction of the axis |
-| `x_dir` | direction | Unit direction perpendicular to the axis from which angles are measured |
 | `radius` | number | Distance from the axis to the surface, in meters |
 | `extent_angle` | range | The angles the face covers around the axis, measured from x_dir, in radians. A full cylinder covers 2 pi. |
 | `extent_height` | range | How far the face reaches along the axis from origin, in meters |
+| `x_dir` | direction | Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it. |
 
 ### cone
 
@@ -74,22 +74,22 @@ and, depending on `type`:
 |---|---|---|
 | `apex` | point | The point where the cone comes to a tip. The face itself usually does not reach it. |
 | `axis` | direction | Unit direction of the axis |
-| `x_dir` | direction | Unit direction perpendicular to the axis from which angles are measured |
 | `semi_angle` | number | Angle between the axis and the cone's side, in radians. Positive if the cone widens along the axis direction and negative if it narrows. |
 | `ref_radius` | number | Radius of the cone's reference circle, in meters. Its center is on the axis at apex + axis * ref_radius / tan(semi_angle). |
 | `extent_angle` | range | The angles the face covers around the axis, measured from x_dir, in radians |
 | `extent_distance` | range | How far the face reaches along the cone's slanted side, measured from the reference circle in the direction of the axis, in meters |
+| `x_dir` | direction | Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it. |
 
 ### sphere
 
 | Field | Type | Meaning |
 |---|---|---|
 | `center` | point | The center of the sphere |
-| `axis` | direction | Unit direction from the center to the sphere's north pole |
-| `x_dir` | direction | Unit direction perpendicular to the axis from which longitude is measured |
 | `radius` | number | Distance from the center to the surface, in meters |
 | `extent_longitude` | range | The angles the face covers around the axis, measured from x_dir, in radians |
 | `extent_latitude` | range | The angles the face covers above the equator, toward the axis, in radians: from -pi/2 at the south pole to pi/2 at the north pole |
+| `axis` | direction | Unit direction from the center to the sphere's north pole. Written by cascadio 0.2 and later; older files do not have it. |
+| `x_dir` | direction | Unit direction perpendicular to the axis from which longitude is measured. Written by cascadio 0.2 and later; older files do not have it. |
 
 ### torus
 
@@ -97,11 +97,11 @@ and, depending on `type`:
 |---|---|---|
 | `center` | point | The center of the torus, on its axis |
 | `axis` | direction | Unit direction of the axis the tube circles around |
-| `x_dir` | direction | Unit direction perpendicular to the axis from which angles are measured |
 | `major_radius` | number | Distance from the axis to the middle of the tube, in meters |
 | `minor_radius` | number | Radius of the tube, in meters |
 | `extent_major_angle` | range | The angles the face covers around the axis, measured from x_dir, in radians |
 | `extent_minor_angle` | range | The angles the face covers around the tube, in radians: 0 is the outer edge of the torus and the angle grows toward the axis direction |
+| `x_dir` | direction | Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it. |
 
 
 ## Materials

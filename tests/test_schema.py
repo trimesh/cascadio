@@ -151,11 +151,10 @@ def test_extension_validates():
     }
     get_validator(EXTENSION_SCHEMA).validate(extension)
 
-    # all three fields are required
-    for key in extension:
-        partial = {k: v for k, v in extension.items() if k != key}
-        with pytest.raises(jsonschema.ValidationError):
-            get_validator(EXTENSION_SCHEMA).validate(partial)
+    # only faceIndices is required: a file may carry just the indices
+    get_validator(EXTENSION_SCHEMA).validate({"faceIndices": 3})
+    with pytest.raises(jsonschema.ValidationError):
+        get_validator(EXTENSION_SCHEMA).validate({"faces": [], "materials": []})
 
 
 def test_extra_fields_rejected():
@@ -259,7 +258,7 @@ def test_dataclasses_match_schema():
     """Each primitive dataclass has exactly the fields the schema defines."""
     face = EXTENSION_SCHEMA["$defs"]["face"]
     cases = {
-        case["if"]["properties"]["type"]["const"]: case["then"]["required"]
+        case["if"]["properties"]["type"]["const"]: list(case["then"]["properties"])
         for case in face["allOf"]
     }
     assert set(cases) == set(face["properties"]["type"]["enum"])
@@ -303,6 +302,63 @@ def test_every_field_is_described():
                 yield from undescribed(value, f"{path}/{i}")
 
     assert list(undescribed(EXTENSION_SCHEMA)) == []
+
+
+@pytest.mark.parametrize("name", ["featuretype", "material"])
+def test_files_from_0_1_still_work(name):
+    """
+    The extension only grows: a GLB written by cascadio 0.1.1 still
+    validates against the schema and still loads through the trimesh plugin.
+    """
+    glb = (MODELS_DIR / f"written_by_0.1.1_{name}.glb").read_bytes()
+
+    found = 0
+    for mesh in extract_glb_json(glb)["meshes"]:
+        for primitive in mesh["primitives"]:
+            extension = primitive["extensions"]["TM_brep_faces"]
+            get_validator(EXTENSION_SCHEMA).validate(extension)
+            found += len(extension["faces"])
+    assert found > 0
+
+    import io
+
+    import trimesh
+
+    scene = trimesh.load(io.BytesIO(glb), file_type="glb")
+    mesh = next(iter(scene.geometry.values()))
+    primitives = mesh.metadata["cascadio"]["brep_primitives"]
+    assert len(mesh.face_attributes["brep_index"]) == len(mesh.faces)
+    kinds = {type(p).__name__ for p in primitives if p is not None}
+    assert "Plane" in kinds
+    # fields added since 0.1 are simply absent
+    for primitive in primitives:
+        if primitive is not None and not isinstance(
+            primitive, cascadio.primitives.Plane
+        ):
+            assert primitive.x_dir is None
+    if name == "material":
+        assert mesh.metadata["cascadio"]["materials"][0]["name"] == "Steel"
+
+
+def test_dataclass_field_order_is_stable():
+    """
+    The order of dataclass fields is public API (positional construction).
+    It is what 0.1 had; anything newer goes on the end with a default.
+    """
+    order = {
+        "Plane": "face_index extent_x extent_y origin normal x_dir",
+        "Cylinder": "face_index extent_angle extent_height origin axis radius | x_dir",
+        "Cone": "face_index extent_angle extent_distance apex axis semi_angle ref_radius | x_dir",
+        "Sphere": "face_index extent_longitude extent_latitude center radius | axis x_dir",
+        "Torus": "face_index extent_major_angle extent_minor_angle center axis major_radius minor_radius | x_dir",
+    }
+    for name, expected in order.items():
+        original, _, added = expected.partition(" | ")
+        found = dataclasses.fields(getattr(cascadio.primitives, name))
+        assert [f.name for f in found] == (original + " " + added).split()
+        for field in found:
+            has_default = field.default is not dataclasses.MISSING
+            assert has_default == (field.name in added.split()), (name, field.name)
 
 
 def test_packaged_schema_is_the_source():

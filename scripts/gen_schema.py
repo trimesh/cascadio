@@ -51,10 +51,25 @@ def face_cases(schema: dict) -> dict:
     }
     if sorted(cases) != sorted(names):
         raise SystemExit(f"face types {names} do not match the cases {list(cases)}")
-    for name, case in cases.items():
-        if list(case["properties"]) != case["required"]:
-            raise SystemExit(f"{name}: every property must be listed in `required`")
     return {name: cases[name]["properties"] for name in names}
+
+
+def optional_fields(schema: dict) -> dict:
+    """
+    Face type name -> the fields a file may leave out.
+
+    These were added after the first release. A writer always writes them
+    (the generated C++ takes every field), but files from older versions
+    lack them, and a reader has to cope.
+    """
+    return {
+        case["if"]["properties"]["type"]["const"]: [
+            field
+            for field in case["then"]["properties"]
+            if field not in case["then"]["required"]
+        ]
+        for case in schema["$defs"]["face"]["allOf"]
+    }
 
 
 def extension_name(schema: dict) -> str:
@@ -208,7 +223,7 @@ README = """\
 
 ## Properties
 
-All of these are required, and no other properties are allowed, here or inside a face or a material.
+Only `faceIndices` is required, and cascadio always writes all three. No other properties are allowed, here or inside a face or a material.
 
 {top}
 
@@ -378,6 +393,8 @@ def parse_primitive(data: dict | None, face_index: int = 0) -> BrepPrimitive | N
             # JSON arrays become tuples so the frozen dataclass is hashable
             f.name: tuple(v) if isinstance(v := values[f.name], list) else v
             for f in fields(kind)
+            # fields added in later versions are absent from older files
+            if f.name in values
         }}
     )
 
@@ -427,7 +444,16 @@ def generate_python(schema: dict, source: str) -> str:
     for kind, properties in face_cases(schema).items():
         name = kind.capitalize()
         names.append(name)
-        members = {"face_index": face["properties"]["face_index"], **properties}
+        optional = optional_fields(schema)[kind]
+        # The order of the dataclass fields is part of the Python API, so it
+        # stays what it was in 0.1: the index, the extents, then the rest.
+        # Fields added since go last, with a default, so old files parse.
+        required = [f for f in properties if f not in optional]
+        ordered = sorted(required, key=lambda f: not f.startswith("extent_")) + optional
+        members = {
+            "face_index": face["properties"]["face_index"],
+            **{f: properties[f] for f in ordered},
+        }
         classes.append(
             CLASS.format(
                 name=name,
@@ -443,6 +469,7 @@ def generate_python(schema: dict, source: str) -> str:
                         if field == "face_index"
                         else PYTHON_TYPES.get(spec.get("$ref"), "float")
                     )
+                    + (" | None = None" if field in optional else "")
                     for field, spec in members.items()
                 ),
             )

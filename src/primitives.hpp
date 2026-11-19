@@ -70,28 +70,29 @@ static rapidjson::Value describeFace(const TopoDS_Face &face, int faceIndex,
     const gp_Ax3 &axes = cylinder.Position();
     described = brep::cylinder(faceIndex, point(axes.Location()),
                                direction(axes.Direction()),
-                               direction(axes.XDirection()),
                                cylinder.Radius() * m,
-                               axes.Direct() ? u : mirrored(u), vMeters, alloc);
+                               axes.Direct() ? u : mirrored(u), vMeters,
+                               direction(axes.XDirection()), alloc);
     break;
   }
   case GeomAbs_Cone: {
     const gp_Cone cone = surface.Cone().Transformed(frame);
     const gp_Ax3 &axes = cone.Position();
     described = brep::cone(faceIndex, point(cone.Apex()),
-                           direction(axes.Direction()),
-                           direction(axes.XDirection()), cone.SemiAngle(),
+                           direction(axes.Direction()), cone.SemiAngle(),
                            cone.RefRadius() * m,
-                           axes.Direct() ? u : mirrored(u), vMeters, alloc);
+                           axes.Direct() ? u : mirrored(u), vMeters,
+                           direction(axes.XDirection()), alloc);
     break;
   }
   case GeomAbs_Sphere: {
     const gp_Sphere sphere = surface.Sphere().Transformed(frame);
     const gp_Ax3 &axes = sphere.Position();
     described = brep::sphere(faceIndex, point(axes.Location()),
+                             sphere.Radius() * m,
+                             axes.Direct() ? u : mirrored(u), v,
                              direction(axes.Direction()),
-                             direction(axes.XDirection()), sphere.Radius() * m,
-                             axes.Direct() ? u : mirrored(u), v, alloc);
+                             direction(axes.XDirection()), alloc);
     break;
   }
   case GeomAbs_Torus: {
@@ -99,9 +100,9 @@ static rapidjson::Value describeFace(const TopoDS_Face &face, int faceIndex,
     const gp_Ax3 &axes = torus.Position();
     described = brep::torus(faceIndex, point(axes.Location()),
                             direction(axes.Direction()),
-                            direction(axes.XDirection()),
                             torus.MajorRadius() * m, torus.MinorRadius() * m,
-                            axes.Direct() ? u : mirrored(u), v, alloc);
+                            axes.Direct() ? u : mirrored(u), v,
+                            direction(axes.XDirection()), alloc);
     break;
   }
   default:

@@ -26,13 +26,13 @@
     },
     "materials": {
       "type": "array",
-      "description": "The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead.",
+      "description": "The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead. Files written before cascadio 0.2 list every material of the model on the first primitive only.",
       "items": {
         "$ref": "#/$defs/material"
       }
     }
   },
-  "required": ["faceIndices", "faces", "materials"],
+  "required": ["faceIndices"],
   "$defs": {
     "point": {
       "title": "point",
@@ -133,10 +133,6 @@
                 "$ref": "#/$defs/direction",
                 "description": "Unit direction of the axis"
               },
-              "x_dir": {
-                "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which angles are measured"
-              },
               "radius": {
                 "type": "number",
                 "description": "Distance from the axis to the surface, in meters",
@@ -149,9 +145,13 @@
               "extent_height": {
                 "$ref": "#/$defs/range",
                 "description": "How far the face reaches along the axis from origin, in meters"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it."
               }
             },
-            "required": ["origin", "axis", "x_dir", "radius", "extent_angle", "extent_height"]
+            "required": ["origin", "axis", "radius", "extent_angle", "extent_height"]
           }
         },
         {
@@ -172,10 +172,6 @@
                 "$ref": "#/$defs/direction",
                 "description": "Unit direction of the axis"
               },
-              "x_dir": {
-                "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which angles are measured"
-              },
               "semi_angle": {
                 "type": "number",
                 "description": "Angle between the axis and the cone's side, in radians. Positive if the cone widens along the axis direction and negative if it narrows.",
@@ -194,9 +190,13 @@
               "extent_distance": {
                 "$ref": "#/$defs/range",
                 "description": "How far the face reaches along the cone's slanted side, measured from the reference circle in the direction of the axis, in meters"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it."
               }
             },
-            "required": ["apex", "axis", "x_dir", "semi_angle", "ref_radius", "extent_angle", "extent_distance"]
+            "required": ["apex", "axis", "semi_angle", "ref_radius", "extent_angle", "extent_distance"]
           }
         },
         {
@@ -213,14 +213,6 @@
                 "$ref": "#/$defs/point",
                 "description": "The center of the sphere"
               },
-              "axis": {
-                "$ref": "#/$defs/direction",
-                "description": "Unit direction from the center to the sphere's north pole"
-              },
-              "x_dir": {
-                "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which longitude is measured"
-              },
               "radius": {
                 "type": "number",
                 "description": "Distance from the center to the surface, in meters",
@@ -233,9 +225,17 @@
               "extent_latitude": {
                 "$ref": "#/$defs/range",
                 "description": "The angles the face covers above the equator, toward the axis, in radians: from -pi/2 at the south pole to pi/2 at the north pole"
+              },
+              "axis": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction from the center to the sphere's north pole. Written by cascadio 0.2 and later; older files do not have it."
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which longitude is measured. Written by cascadio 0.2 and later; older files do not have it."
               }
             },
-            "required": ["center", "axis", "x_dir", "radius", "extent_longitude", "extent_latitude"]
+            "required": ["center", "radius", "extent_longitude", "extent_latitude"]
           }
         },
         {
@@ -256,10 +256,6 @@
                 "$ref": "#/$defs/direction",
                 "description": "Unit direction of the axis the tube circles around"
               },
-              "x_dir": {
-                "$ref": "#/$defs/direction",
-                "description": "Unit direction perpendicular to the axis from which angles are measured"
-              },
               "major_radius": {
                 "type": "number",
                 "description": "Distance from the axis to the middle of the tube, in meters",
@@ -277,9 +273,13 @@
               "extent_minor_angle": {
                 "$ref": "#/$defs/range",
                 "description": "The angles the face covers around the tube, in radians: 0 is the outer edge of the torus and the angle grows toward the axis direction"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which angles are measured. Written by cascadio 0.2 and later; older files do not have it."
               }
             },
-            "required": ["center", "axis", "x_dir", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle"]
+            "required": ["center", "axis", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle"]
           }
         }
       ],

@@ -159,7 +159,8 @@ static std::vector<char> toGlb(const char *data, size_t size,
       frame.SetRotation(gp::OX(), -M_PI / 2);
     }
     glb = injectIntoGlb(glb, loaded.doc, recorded, options.include_brep,
-                        options.brep_types, lengthUnit, frame);
+                        options.include_materials, options.brep_types,
+                        lengthUnit, frame);
   }
   return glb;
 }
