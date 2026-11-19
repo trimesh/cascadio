@@ -3,12 +3,12 @@
   "$id": "mesh.primitive.TM_brep_faces.schema.json",
   "title": "TM_brep_faces mesh primitive extension",
   "type": "object",
-  "description": "Which BREP face each triangle came from, the analytic surface of each face, and the materials of the part",
+  "description": "Which BREP face each triangle came from, the analytic surface of each face, and the materials of the part. All positions and lengths are in meters and all directions are unit vectors, in the same coordinate frame as the primitive's POSITION accessor (before any node transform). All angles are in radians and turn counter-clockwise when seen from the tip of the axis they turn about (the right-hand rule).",
   "properties": {
     "faceIndices": {
       "type": "integer",
       "minimum": 0,
-      "description": "Index of accessor containing per-triangle face indices. Accessor must be SCALAR with unsigned integer component type. Count must equal number of triangles."
+      "description": "Index of an accessor with one value per triangle: the position in `faces` of the BREP face that triangle came from. The accessor is SCALAR with an unsigned integer component type, and its count equals the number of triangles in the primitive."
     },
     "faces": {
       "type": "array",
@@ -18,31 +18,39 @@
           {
             "type": "null"
           },
-          {"$ref": "#/$defs/face"}
+          {
+            "$ref": "#/$defs/face"
+          }
         ]
       }
     },
     "materials": {
       "type": "array",
       "description": "The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead.",
-      "items": {"$ref": "#/$defs/material"}
+      "items": {
+        "$ref": "#/$defs/material"
+      }
     }
   },
   "required": ["faceIndices", "faces", "materials"],
   "$defs": {
     "vec3": {
       "type": "array",
-      "items": {"type": "number"},
+      "items": {
+        "type": "number"
+      },
       "minItems": 3,
       "maxItems": 3,
-      "description": "A 3-component vector [x, y, z]"
+      "description": "Three numbers [x, y, z]: a position in meters or a unit direction"
     },
     "bounds": {
       "type": "array",
-      "items": {"type": "number"},
+      "items": {
+        "type": "number"
+      },
       "minItems": 2,
       "maxItems": 2,
-      "description": "A 2-component bounds array [min, max]"
+      "description": "Two numbers [min, max]: the part of a surface the face covers, along one of the surface's two directions"
     },
     "face": {
       "title": "BREP Face",
@@ -51,12 +59,13 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["plane", "cylinder", "cone", "sphere", "torus"]
+          "enum": ["plane", "cylinder", "cone", "sphere", "torus"],
+          "description": "The kind of surface. It decides which other fields are present."
         },
         "face_index": {
           "type": "integer",
           "minimum": 0,
-          "description": "Index of this face in the BREP model"
+          "description": "Position of this face in the `faces` array, which is the value `faceIndices` holds for its triangles"
         }
       },
       "allOf": [
@@ -70,11 +79,26 @@
           },
           "then": {
             "properties": {
-              "origin": {"$ref": "#/$defs/vec3"},
-              "normal": {"$ref": "#/$defs/vec3"},
-              "x_dir": {"$ref": "#/$defs/vec3"},
-              "extent_x": {"$ref": "#/$defs/bounds", "description": "Extent in local X direction (meters)"},
-              "extent_y": {"$ref": "#/$defs/bounds", "description": "Extent in local Y direction (meters)"}
+              "origin": {
+                "$ref": "#/$defs/vec3",
+                "description": "A point on the plane, from which the extents are measured"
+              },
+              "normal": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction perpendicular to the plane"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction in the plane: the plane's own X axis. Its Y axis is normal cross x_dir."
+              },
+              "extent_x": {
+                "$ref": "#/$defs/bounds",
+                "description": "How far the face reaches along x_dir from origin, in meters"
+              },
+              "extent_y": {
+                "$ref": "#/$defs/bounds",
+                "description": "How far the face reaches along the plane's Y axis from origin, in meters"
+              }
             },
             "required": ["origin", "normal", "x_dir", "extent_x", "extent_y"]
           }
@@ -89,16 +113,33 @@
           },
           "then": {
             "properties": {
-              "origin": {"$ref": "#/$defs/vec3"},
-              "axis": {"$ref": "#/$defs/vec3"},
+              "origin": {
+                "$ref": "#/$defs/vec3",
+                "description": "A point on the axis, from which heights are measured"
+              },
+              "axis": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction of the axis"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction perpendicular to the axis from which angles are measured"
+              },
               "radius": {
                 "type": "number",
+                "description": "Distance from the axis to the surface, in meters",
                 "exclusiveMinimum": 0
               },
-              "extent_angle": {"$ref": "#/$defs/bounds", "description": "Angular extent around axis (radians)"},
-              "extent_height": {"$ref": "#/$defs/bounds", "description": "Height extent along axis (meters)"}
+              "extent_angle": {
+                "$ref": "#/$defs/bounds",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians. A full cylinder covers 2 pi."
+              },
+              "extent_height": {
+                "$ref": "#/$defs/bounds",
+                "description": "How far the face reaches along the axis from origin, in meters"
+              }
             },
-            "required": ["origin", "axis", "radius", "extent_angle", "extent_height"]
+            "required": ["origin", "axis", "x_dir", "radius", "extent_angle", "extent_height"]
           }
         },
         {
@@ -111,21 +152,39 @@
           },
           "then": {
             "properties": {
-              "apex": {"$ref": "#/$defs/vec3"},
-              "axis": {"$ref": "#/$defs/vec3"},
+              "apex": {
+                "$ref": "#/$defs/vec3",
+                "description": "The point where the cone comes to a tip. The face itself usually does not reach it."
+              },
+              "axis": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction of the axis"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction perpendicular to the axis from which angles are measured"
+              },
               "semi_angle": {
                 "type": "number",
-                "exclusiveMinimum": 0,
+                "description": "Angle between the axis and the cone's side, in radians. Positive if the cone widens along the axis direction and negative if it narrows.",
+                "exclusiveMinimum": -1.5707963267948966,
                 "exclusiveMaximum": 1.5707963267948966
               },
               "ref_radius": {
                 "type": "number",
+                "description": "Radius of the cone's reference circle, in meters. Its center is on the axis at apex + axis * ref_radius / tan(semi_angle).",
                 "minimum": 0
               },
-              "extent_angle": {"$ref": "#/$defs/bounds", "description": "Angular extent around axis (radians)"},
-              "extent_distance": {"$ref": "#/$defs/bounds", "description": "Distance extent from apex (meters)"}
+              "extent_angle": {
+                "$ref": "#/$defs/bounds",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians"
+              },
+              "extent_distance": {
+                "$ref": "#/$defs/bounds",
+                "description": "How far the face reaches along the cone's slanted side, measured from the reference circle in the direction of the axis, in meters"
+              }
             },
-            "required": ["apex", "axis", "semi_angle", "ref_radius", "extent_angle", "extent_distance"]
+            "required": ["apex", "axis", "x_dir", "semi_angle", "ref_radius", "extent_angle", "extent_distance"]
           }
         },
         {
@@ -138,15 +197,33 @@
           },
           "then": {
             "properties": {
-              "center": {"$ref": "#/$defs/vec3"},
+              "center": {
+                "$ref": "#/$defs/vec3",
+                "description": "The center of the sphere"
+              },
+              "axis": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction from the center to the sphere's north pole"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction perpendicular to the axis from which longitude is measured"
+              },
               "radius": {
                 "type": "number",
+                "description": "Distance from the center to the surface, in meters",
                 "exclusiveMinimum": 0
               },
-              "extent_longitude": {"$ref": "#/$defs/bounds", "description": "Longitude extent (radians)"},
-              "extent_latitude": {"$ref": "#/$defs/bounds", "description": "Latitude extent (radians)"}
+              "extent_longitude": {
+                "$ref": "#/$defs/bounds",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians"
+              },
+              "extent_latitude": {
+                "$ref": "#/$defs/bounds",
+                "description": "The angles the face covers above the equator, toward the axis, in radians: from -pi/2 at the south pole to pi/2 at the north pole"
+              }
             },
-            "required": ["center", "radius", "extent_longitude", "extent_latitude"]
+            "required": ["center", "axis", "x_dir", "radius", "extent_longitude", "extent_latitude"]
           }
         },
         {
@@ -159,24 +236,43 @@
           },
           "then": {
             "properties": {
-              "center": {"$ref": "#/$defs/vec3"},
-              "axis": {"$ref": "#/$defs/vec3"},
+              "center": {
+                "$ref": "#/$defs/vec3",
+                "description": "The center of the torus, on its axis"
+              },
+              "axis": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction of the axis the tube circles around"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/vec3",
+                "description": "Unit direction perpendicular to the axis from which angles are measured"
+              },
               "major_radius": {
                 "type": "number",
+                "description": "Distance from the axis to the middle of the tube, in meters",
                 "exclusiveMinimum": 0
               },
               "minor_radius": {
                 "type": "number",
+                "description": "Radius of the tube, in meters",
                 "exclusiveMinimum": 0
               },
-              "extent_major_angle": {"$ref": "#/$defs/bounds", "description": "Angle extent around main axis (radians)"},
-              "extent_minor_angle": {"$ref": "#/$defs/bounds", "description": "Angle extent around tube (radians)"}
+              "extent_major_angle": {
+                "$ref": "#/$defs/bounds",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians"
+              },
+              "extent_minor_angle": {
+                "$ref": "#/$defs/bounds",
+                "description": "The angles the face covers around the tube, in radians: 0 is the outer edge of the torus and the angle grows toward the axis direction"
+              }
             },
-            "required": ["center", "axis", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle"]
+            "required": ["center", "axis", "x_dir", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle"]
           }
         }
       ],
-      "unevaluatedProperties": false
+      "unevaluatedProperties": false,
+      "description": "One BREP face whose surface is a plane, cylinder, cone, sphere or torus. The surface is infinite or closed; the `extent_` fields say which part of it the face covers. A face can be smaller than its extents if its outline is not rectangular in those two directions."
     },
     "rgb": {
       "type": "array",
@@ -205,29 +301,59 @@
       "type": "object",
       "description": "Either a physical material (name, density) or a visual one (colors), as the source file defined it. Every field is optional.",
       "properties": {
-        "name": {"type": "string"},
-        "description": {"type": "string"},
+        "name": {
+          "type": "string",
+          "description": "The material's name as written in the source file"
+        },
+        "description": {
+          "type": "string",
+          "description": "Free text about the material from the source file"
+        },
         "density": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "In the unit given by density_name"
+          "description": "Mass per volume as OpenCASCADE reports it. It means grams per cubic centimeter, but ignores a kilo prefix in the source file: a file written in kilograms per cubic meter gives a value 1000 times too small (steel 0.00785 instead of 7.85)."
         },
         "density_name": {
           "type": "string",
-          "description": "What the density value measures and its unit, as written in the source file"
+          "description": "The label the source file gave the density value, for example 'density measure'. It is not a unit."
         },
-        "density_value_type": {"type": "string"},
-        "base_color": {"$ref": "#/$defs/rgba"},
-        "alpha_cutoff": {"type": "number"},
+        "density_value_type": {
+          "type": "string",
+          "description": "The STEP measure type of the density value, for example 'POSITIVE_RATIO_MEASURE'"
+        },
+        "base_color": {
+          "$ref": "#/$defs/rgba",
+          "description": "The material's overall color"
+        },
+        "alpha_cutoff": {
+          "type": "number",
+          "description": "Alpha below this is drawn as fully transparent, as in glTF's alphaCutoff"
+        },
         "pbr": {
           "type": "object",
           "description": "Metallic-roughness parameters, as in glTF",
           "properties": {
-            "base_color": {"$ref": "#/$defs/rgba"},
-            "metallic": {"type": "number"},
-            "roughness": {"type": "number"},
-            "refraction_index": {"type": "number"},
-            "emissive_factor": {"$ref": "#/$defs/vec3"}
+            "base_color": {
+              "$ref": "#/$defs/rgba",
+              "description": "Base color, as in glTF's baseColorFactor"
+            },
+            "metallic": {
+              "type": "number",
+              "description": "0 for a non-metal to 1 for a metal"
+            },
+            "roughness": {
+              "type": "number",
+              "description": "0 for mirror-smooth to 1 for fully rough"
+            },
+            "refraction_index": {
+              "type": "number",
+              "description": "Index of refraction; 1.5 is typical glass or plastic"
+            },
+            "emissive_factor": {
+              "$ref": "#/$defs/vec3",
+              "description": "Color of light the material gives off, [red, green, blue]"
+            }
           },
           "additionalProperties": false
         },
@@ -235,12 +361,30 @@
           "type": "object",
           "description": "Classic ambient/diffuse/specular parameters",
           "properties": {
-            "ambient_color": {"$ref": "#/$defs/rgb"},
-            "diffuse_color": {"$ref": "#/$defs/rgb"},
-            "specular_color": {"$ref": "#/$defs/rgb"},
-            "emissive_color": {"$ref": "#/$defs/rgb"},
-            "shininess": {"type": "number"},
-            "transparency": {"type": "number"}
+            "ambient_color": {
+              "$ref": "#/$defs/rgb",
+              "description": "Color in shadow"
+            },
+            "diffuse_color": {
+              "$ref": "#/$defs/rgb",
+              "description": "Color under direct light"
+            },
+            "specular_color": {
+              "$ref": "#/$defs/rgb",
+              "description": "Color of highlights"
+            },
+            "emissive_color": {
+              "$ref": "#/$defs/rgb",
+              "description": "Color of light the material gives off"
+            },
+            "shininess": {
+              "type": "number",
+              "description": "0 for dull to 1 for a tight, bright highlight"
+            },
+            "transparency": {
+              "type": "number",
+              "description": "0 for opaque to 1 for invisible"
+            }
           },
           "additionalProperties": false
         }

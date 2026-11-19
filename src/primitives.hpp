@@ -5,6 +5,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepTools.hxx>
 #include <TopoDS_Face.hxx>
+#include <gp_Ax3.hxx>
 #include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Pln.hxx>
@@ -47,42 +48,60 @@ static rapidjson::Value describeFace(const TopoDS_Face &face, int faceIndex,
   const brep::Bounds u{uMin, uMax}, v{vMin, vMax};
   const brep::Bounds uMeters{uMin * m, uMax * m}, vMeters{vMin * m, vMax * m};
 
+  // The schema says angles turn counter-clockwise about the axis and a
+  // plane's Y is normal cross X. OpenCASCADE allows a mirrored frame, where
+  // both run the other way; negate that coordinate so the output keeps
+  // its promise.
+  auto mirrored = [](const brep::Bounds &range) {
+    return brep::Bounds{-range.max, -range.min};
+  };
+
   switch (surface.GetType()) {
   case GeomAbs_Plane: {
     const gp_Ax3 axes = surface.Plane().Transformed(frame).Position();
     described = brep::plane(faceIndex, point(axes.Location()),
                             direction(axes.Direction()),
-                            direction(axes.XDirection()), uMeters, vMeters,
-                            alloc);
+                            direction(axes.XDirection()), uMeters,
+                            axes.Direct() ? vMeters : mirrored(vMeters), alloc);
     break;
   }
   case GeomAbs_Cylinder: {
     const gp_Cylinder cylinder = surface.Cylinder().Transformed(frame);
-    described = brep::cylinder(faceIndex, point(cylinder.Location()),
-                               direction(cylinder.Axis().Direction()),
-                               cylinder.Radius() * m, u, vMeters, alloc);
+    const gp_Ax3 &axes = cylinder.Position();
+    described = brep::cylinder(faceIndex, point(axes.Location()),
+                               direction(axes.Direction()),
+                               direction(axes.XDirection()),
+                               cylinder.Radius() * m,
+                               axes.Direct() ? u : mirrored(u), vMeters, alloc);
     break;
   }
   case GeomAbs_Cone: {
     const gp_Cone cone = surface.Cone().Transformed(frame);
+    const gp_Ax3 &axes = cone.Position();
     described = brep::cone(faceIndex, point(cone.Apex()),
-                           direction(cone.Axis().Direction()),
-                           cone.SemiAngle(), cone.RefRadius() * m, u, vMeters,
-                           alloc);
+                           direction(axes.Direction()),
+                           direction(axes.XDirection()), cone.SemiAngle(),
+                           cone.RefRadius() * m,
+                           axes.Direct() ? u : mirrored(u), vMeters, alloc);
     break;
   }
   case GeomAbs_Sphere: {
     const gp_Sphere sphere = surface.Sphere().Transformed(frame);
-    described = brep::sphere(faceIndex, point(sphere.Location()),
-                             sphere.Radius() * m, u, v, alloc);
+    const gp_Ax3 &axes = sphere.Position();
+    described = brep::sphere(faceIndex, point(axes.Location()),
+                             direction(axes.Direction()),
+                             direction(axes.XDirection()), sphere.Radius() * m,
+                             axes.Direct() ? u : mirrored(u), v, alloc);
     break;
   }
   case GeomAbs_Torus: {
     const gp_Torus torus = surface.Torus().Transformed(frame);
-    described = brep::torus(faceIndex, point(torus.Location()),
-                            direction(torus.Axis().Direction()),
+    const gp_Ax3 &axes = torus.Position();
+    described = brep::torus(faceIndex, point(axes.Location()),
+                            direction(axes.Direction()),
+                            direction(axes.XDirection()),
                             torus.MajorRadius() * m, torus.MinorRadius() * m,
-                            u, v, alloc);
+                            axes.Direct() ? u : mirrored(u), v, alloc);
     break;
   }
   default:

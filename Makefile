@@ -15,6 +15,7 @@
 #
 # Housekeeping:
 #   make sdist         build the source distribution into dist/
+#   make schema        regenerate the README and dataclasses of the extension
 #   make lock          update uv.lock to the newest build tools
 #   make clean         delete everything the targets above created
 #
@@ -41,7 +42,7 @@ TOOLS := uv run --frozen --only-group build
 export UV_BUILD_CONSTRAINT := build-constraints.txt
 export CMAKE_BUILD_PARALLEL_LEVEL := $(CPUS)
 
-.PHONY: help occt install test wheel audit manylinux system-occt occt-master sdist lock clean
+.PHONY: help occt install test wheel audit manylinux system-occt occt-master sdist schema lock clean
 
 help:
 	@sed -n '/^#/!q;s/^# \{0,1\}//p' $(MAKEFILE_LIST)
@@ -93,6 +94,10 @@ system-occt: sdist
 occt-master: upstream/OCCT/CMakeLists.txt
 	docker run --rm --cpus $(CPUS) -v "$(CURDIR)":/src:ro $(MANYLINUX) \
 	  bash /src/scripts/test_occt_master.sh
+
+# everything that repeats the TM_brep_faces schema is generated from it
+schema:
+	uv run --no-project python scripts/gen_schema.py
 
 lock:
 	uv lock --upgrade

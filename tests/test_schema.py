@@ -3,6 +3,7 @@ Test that cascadio output validates against the TM_brep_faces JSON schema.
 """
 
 import dataclasses
+import importlib.util
 import json
 import struct
 from pathlib import Path
@@ -60,6 +61,7 @@ def test_cylinder_face_validates():
     cylinder = {
         "type": "cylinder",
         "face_index": 1,
+        "x_dir": [1.0, 0.0, 0.0],
         "extent_angle": [0.0, 6.283],
         "extent_height": [-0.5, 0.5],
         "origin": [0.0, 0.0, 0.0],
@@ -74,6 +76,7 @@ def test_cone_face_validates():
     cone = {
         "type": "cone",
         "face_index": 2,
+        "x_dir": [1.0, 0.0, 0.0],
         "extent_angle": [0.0, 6.283],
         "extent_distance": [0.1, 1.0],
         "apex": [0.0, 0.0, 0.0],
@@ -89,6 +92,8 @@ def test_sphere_face_validates():
     sphere = {
         "type": "sphere",
         "face_index": 3,
+        "axis": [0.0, 0.0, 1.0],
+        "x_dir": [1.0, 0.0, 0.0],
         "extent_longitude": [0.0, 6.283],
         "extent_latitude": [-1.57, 1.57],
         "center": [0.0, 0.0, 0.0],
@@ -102,6 +107,7 @@ def test_torus_face_validates():
     torus = {
         "type": "torus",
         "face_index": 4,
+        "x_dir": [1.0, 0.0, 0.0],
         "extent_major_angle": [0.0, 6.283],
         "extent_minor_angle": [0.0, 6.283],
         "center": [0.0, 0.0, 0.0],
@@ -120,6 +126,7 @@ def test_extension_validates():
             {
                 "type": "cylinder",
                 "face_index": 0,
+                "x_dir": [1.0, 0.0, 0.0],
                 "extent_angle": [0.0, 6.283],
                 "extent_height": [0.0, 0.01],
                 "origin": [0.0, 0.0, 0.0],
@@ -156,6 +163,8 @@ def test_extra_fields_rejected():
     face = {
         "type": "sphere",
         "face_index": 0,
+        "axis": [0.0, 0.0, 1.0],
+        "x_dir": [1.0, 0.0, 0.0],
         "center": [0.0, 0.0, 0.0],
         "radius": 1.0,
         "extent_longitude": [0.0, 6.283],
@@ -195,6 +204,7 @@ def test_invalid_radius_zero():
     invalid_cylinder = {
         "type": "cylinder",
         "face_index": 0,
+        "x_dir": [1.0, 0.0, 0.0],
         "extent_angle": [0.0, 6.283],
         "extent_height": [-0.5, 0.5],
         "origin": [0.0, 0.0, 0.0],
@@ -260,6 +270,39 @@ def test_dataclasses_match_schema():
         kind = cascadio.primitives.PRIMITIVES[name]
         names = {f.name for f in dataclasses.fields(kind)}
         assert names == set(required) | {"face_index"}, name
+
+
+def test_generated_files_are_current():
+    """The README and the dataclasses are what the generator makes today."""
+    script = Path(__file__).parent.parent / "scripts" / "gen_schema.py"
+    spec = importlib.util.spec_from_file_location("gen_schema", script)
+    gen_schema = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen_schema)
+
+    for what, path in gen_schema.TRACKED.items():
+        assert path.read_text() == gen_schema.render(what), (
+            f"{path.name} is out of date: run `make schema`"
+        )
+    # the example shown in the README is a valid extension
+    get_validator(EXTENSION_SCHEMA).validate(gen_schema.EXAMPLE)
+
+
+def test_every_field_is_described():
+    """No field of the extension is left without a description."""
+
+    def undescribed(node, path=""):
+        if isinstance(node, dict):
+            for name, spec in node.get("properties", {}).items():
+                # the `if` blocks only test `type`, they define nothing
+                if "description" not in spec and "const" not in spec:
+                    yield f"{path}/{name}"
+            for key, value in node.items():
+                yield from undescribed(value, f"{path}/{key}")
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                yield from undescribed(value, f"{path}/{i}")
+
+    assert list(undescribed(EXTENSION_SCHEMA)) == []
 
 
 def test_packaged_schema_is_the_source():

@@ -75,9 +75,9 @@ set(brep_schema "${CMAKE_CURRENT_LIST_DIR}/extensions/TM_brep_faces/schema/mesh.
 set(brep_header "${CMAKE_CURRENT_BINARY_DIR}/generated/tm_brep_faces.hpp")
 add_custom_command(
   OUTPUT "${brep_header}"
-  COMMAND Python::Interpreter "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_schema_header.py"
-          "${brep_schema}" "${brep_header}"
-  DEPENDS "${brep_schema}" "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_schema_header.py"
+  COMMAND Python::Interpreter "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_schema.py"
+          header "${brep_header}"
+  DEPENDS "${brep_schema}" "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_schema.py"
   VERBATIM)
 target_sources(cascadio-worker PRIVATE "${brep_header}")
 target_include_directories(cascadio-worker PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")

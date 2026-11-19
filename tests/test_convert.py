@@ -639,3 +639,95 @@ def test_no_materials():
     scene = load_scene("multibody.step", include_brep=True)
     for mesh in scene.geometry.values():
         assert mesh.metadata["cascadio"]["materials"] == []
+
+
+def _within(values, bounds, tolerance, period=None):
+    """Are all values inside [min, max]? Angles may be off by whole turns."""
+    low, high = bounds[0] - tolerance, bounds[1] + tolerance
+    values = np.asarray(values)
+    if period is None:
+        return bool(((values >= low) & (values <= high)).all())
+    return bool(
+        np.any(
+            [
+                (values + k * period >= low) & (values + k * period <= high)
+                for k in (-2, -1, 0, 1, 2)
+            ],
+            axis=0,
+        ).all()
+    )
+
+
+def check_extents(prim, verts) -> None:
+    """
+    Recompute where each vertex sits on its surface, exactly the way the
+    schema describes each field, and check it is inside the stated extents.
+    """
+    P = cascadio.primitives
+    turn = 2 * np.pi
+    if isinstance(prim, P.Plane):
+        d = verts - prim.origin
+        y_dir = np.cross(prim.normal, prim.x_dir)
+        assert _within(d @ prim.x_dir, prim.extent_x, 1e-7)
+        assert _within(d @ y_dir, prim.extent_y, 1e-7)
+        return
+
+    axis, x_dir = np.array(prim.axis), np.array(prim.x_dir)
+    y_dir = np.cross(axis, x_dir)
+    assert abs(np.linalg.norm(axis) - 1) < 1e-9
+    assert abs(np.linalg.norm(x_dir) - 1) < 1e-9
+    assert abs(axis @ x_dir) < 1e-9
+    if isinstance(prim, P.Cylinder):
+        d = verts - prim.origin
+        assert _within(d @ axis, prim.extent_height, 1e-7)
+        assert _within(np.arctan2(d @ y_dir, d @ x_dir), prim.extent_angle, 1e-5, turn)
+    elif isinstance(prim, P.Cone):
+        # the reference circle sits on the axis, this far from the apex
+        reference = prim.apex + axis * prim.ref_radius / np.tan(prim.semi_angle)
+        d = verts - reference
+        # distance along the slanted side, from distance along the axis
+        assert _within((d @ axis) / np.cos(prim.semi_angle), prim.extent_distance, 1e-7)
+        off_axis = np.hypot(d @ x_dir, d @ y_dir) > 1e-9  # the apex has no angle
+        assert _within(
+            np.arctan2(d @ y_dir, d @ x_dir)[off_axis], prim.extent_angle, 1e-5, turn
+        )
+    elif isinstance(prim, P.Sphere):
+        d = verts - prim.center
+        latitude = np.arcsin(np.clip(d @ axis / prim.radius, -1, 1))
+        assert _within(latitude, prim.extent_latitude, 1e-5)
+        off_axis = np.hypot(d @ x_dir, d @ y_dir) > 1e-9  # poles have no longitude
+        assert _within(
+            np.arctan2(d @ y_dir, d @ x_dir)[off_axis],
+            prim.extent_longitude,
+            1e-5,
+            turn,
+        )
+    elif isinstance(prim, P.Torus):
+        d = verts - prim.center
+        assert _within(
+            np.arctan2(d @ y_dir, d @ x_dir), prim.extent_major_angle, 1e-5, turn
+        )
+        # around the tube: 0 at the outer edge, growing toward the axis direction
+        outward = np.hypot(d @ x_dir, d @ y_dir) - prim.major_radius
+        assert _within(
+            np.arctan2(d @ axis, outward), prim.extent_minor_angle, 1e-5, turn
+        )
+
+
+@pytest.mark.parametrize("y_up", [False, True])
+def test_extents_mean_what_the_schema_says(y_up):
+    """Every face's vertices fall inside its extents, measured as documented."""
+    checked = set()
+    for model in sorted(MODELS_DIR.glob("*.st*p")) + [MODELS_DIR / "featuretype.STEP"]:
+        scene = load_scene(model.name, include_brep=True, y_up=y_up)
+        for mesh in scene.geometry.values():
+            triangles = mesh.vertices[mesh.faces]
+            index = mesh.face_attributes["brep_index"]
+            for i, prim in enumerate(mesh.metadata["cascadio"]["brep_primitives"]):
+                verts = triangles[index == i].reshape(-1, 3)
+                if prim is not None and len(verts):
+                    check_extents(prim, verts)
+                    checked.add(type(prim).__name__)
+    # the test models cover these surface types
+    assert {"Plane", "Cylinder"} <= checked
+    print("checked:", sorted(checked))
