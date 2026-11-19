@@ -3,7 +3,6 @@
 #include "inject.hpp"
 #include "filehandle.hpp"
 #include "load.hpp"
-#include "materials.hpp"
 
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
@@ -87,7 +86,7 @@ static double detectLengthUnit(const Handle(TDocStd_Document) & doc,
 /// temp files elsewhere.
 static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
                                   const ConvertOptions &options,
-                                  FacesByAccessor *faces) {
+                                  Recorded *recorded) {
   FileHandle handle(".glb");
   if (!handle.valid()) {
     throw std::runtime_error("could not create a temporary file for the GLB");
@@ -102,7 +101,7 @@ static std::vector<char> writeGlb(const Handle(TDocStd_Document) & doc,
   GltfWriter writer(handle.path(),
                     binHandle && binHandle->valid() ? binHandle->path()
                                                     : nullptr,
-                    faces);
+                    recorded);
   writer.SetMergeFaces(options.merge_primitives);
   writer.SetParallel(options.mesh.use_parallel);
   writer.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
@@ -143,17 +142,9 @@ static std::vector<char> toGlb(const char *data, size_t size,
 
   // BREP data always carries the materials: they are part of the extension
   const bool annotate = options.include_brep || options.include_materials;
-  rapidjson::Document materials;
-  materials.SetArray();
-  if (annotate) {
-    rapidjson::Value extracted =
-        extractMaterials(loaded.doc, materials.GetAllocator());
-    materials.Swap(extracted);
-  }
-
-  FacesByAccessor faces;
+  Recorded recorded;
   std::vector<char> glb =
-      writeGlb(loaded.doc, options, options.include_brep ? &faces : nullptr);
+      writeGlb(loaded.doc, options, annotate ? &recorded : nullptr);
   if (glb.empty()) {
     throw std::runtime_error("OpenCASCADE wrote an empty GLB");
   }
@@ -167,8 +158,8 @@ static std::vector<char> toGlb(const char *data, size_t size,
     if (options.y_up) {
       frame.SetRotation(gp::OX(), -M_PI / 2);
     }
-    glb = injectIntoGlb(glb, options.include_brep ? &faces : nullptr,
-                        options.brep_types, materials, lengthUnit, frame);
+    glb = injectIntoGlb(glb, loaded.doc, recorded, options.include_brep,
+                        options.brep_types, lengthUnit, frame);
   }
   return glb;
 }

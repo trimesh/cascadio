@@ -2,8 +2,10 @@
 
 #include "glb.hpp"
 #include "gltf_writer.hpp"
+#include "materials.hpp"
 #include "primitives.hpp"
 
+#include <TDocStd_Document.hxx>
 #include <gp_Trsf.hxx>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -17,21 +19,22 @@
 #include <string>
 #include <vector>
 
-/// Add the TM_brep_faces extension and/or material metadata to a finished GLB.
+/// Add face and material data to a finished GLB.
 ///
-/// For each index accessor the writer recorded faces for, this appends a
-/// uint32 array (one face index per triangle) to the binary buffer and attaches
-/// the extension object to every primitive that uses that accessor. The
-/// extension's name and keys come from the schema (tm_brep_faces.hpp).
+/// With `withFaces`, every primitive the writer recorded gets the
+/// TM_brep_faces extension: a uint32 array appended to the binary buffer
+/// (one face index per triangle), the surface of each face, and the
+/// materials of the part it belongs to. The extension's name and keys come
+/// from the schema (tm_brep_faces.hpp).
 ///
-/// `faces` is null when BREP data was not asked for. Then only the
-/// materials are written, to the first mesh's `extras.cascadio.materials`,
-/// because there is no extension object to hold them.
-/// `frame` moves the face geometry into the coordinate frame of the mesh.
+/// Without it, only the materials are written, to each mesh's
+/// `extras.cascadio.materials`, because there is no extension to hold them.
+///
+/// @param frame moves the face geometry into the coordinate frame of the mesh
 static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
-                                       const FacesByAccessor *faces,
+                                       const Handle(TDocStd_Document) & document,
+                                       const Recorded &recorded, bool withFaces,
                                        const std::set<std::string> &allowedTypes,
-                                       const rapidjson::Value &materials,
                                        double lengthUnit,
                                        const gp_Trsf &frame) {
   Glb glb = Glb::parse(glbData);
@@ -44,18 +47,37 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
   auto isArray = [&doc](const char *key) {
     return doc.HasMember(key) && doc[key].IsArray();
   };
-  const bool hasMeshes = isArray("meshes") && doc["meshes"].Size() > 0;
+  if (!isArray("meshes") || !isArray("accessors") || !isArray("bufferViews") ||
+      !isArray("buffers") || doc["buffers"].Size() == 0) {
+    return glbData; // an empty scene: nothing to attach anything to
+  }
 
-  if (faces != nullptr && !faces->empty() && hasMeshes &&
-      isArray("accessors") &&
-      isArray("bufferViews") && isArray("buffers") &&
-      doc["buffers"].Size() > 0) {
+  // The materials of each part, by the accessor id of its primitive.
+  // If the file assigns no material to any part, every part gets the list
+  // of all materials the file defines, which is the best that can be said.
+  std::map<int, rapidjson::Value> assigned;
+  bool anyAssigned = false;
+  for (const auto &[accessor, part] : recorded.parts) {
+    rapidjson::Value materials = partMaterials(part, alloc);
+    anyAssigned = anyAssigned || !materials.Empty();
+    assigned.emplace(accessor, std::move(materials));
+  }
+  const rapidjson::Value everything =
+      anyAssigned ? rapidjson::Value(rapidjson::kArrayType)
+                  : allMaterials(document, alloc);
+  auto materialsFor = [&](int accessor) {
+    const auto found = assigned.find(accessor);
+    const rapidjson::Value &source =
+        anyAssigned && found != assigned.end() ? found->second : everything;
+    return rapidjson::Value(source, alloc); // a copy
+  };
+
+  // indices accessor id -> {faceIndices accessor id, faces JSON}
+  std::map<int, std::pair<int, rapidjson::Value>> extensions;
+  if (withFaces) {
     // glTF wants every buffer view to start on a 4-byte boundary
     glb.bin.resize((glb.bin.size() + 3) & ~size_t(3));
-
-    // indices accessor id -> {faceIndices accessor id, faces JSON}
-    std::map<int, std::pair<int, rapidjson::Value>> extensions;
-    for (const auto &[indicesId, list] : *faces) {
+    for (const auto &[indicesId, list] : recorded.faces) {
       std::vector<uint32_t> faceIndices;
       rapidjson::Value facesJson(rapidjson::kArrayType);
       for (size_t i = 0; i < list.size(); ++i) {
@@ -97,65 +119,63 @@ static std::vector<char> injectIntoGlb(const std::vector<char> &glbData,
           indicesId, std::make_pair(static_cast<int>(doc["accessors"].Size()) - 1,
                                     std::move(facesJson)));
     }
-
     doc["buffers"][0].RemoveMember("byteLength");
     doc["buffers"][0].AddMember("byteLength",
                                 static_cast<uint32_t>(glb.bin.size()), alloc);
+  }
 
-    bool attached = false;
-    for (auto &mesh : doc["meshes"].GetArray()) {
-      if (!mesh.HasMember("primitives") || !mesh["primitives"].IsArray()) {
+  bool attached = false;
+  for (auto &mesh : doc["meshes"].GetArray()) {
+    if (!mesh.IsObject() || !mesh.HasMember("primitives") ||
+        !mesh["primitives"].IsArray()) {
+      continue;
+    }
+    for (auto &prim : mesh["primitives"].GetArray()) {
+      if (!prim.HasMember("indices") || !prim["indices"].IsInt()) {
         continue;
       }
-      for (auto &prim : mesh["primitives"].GetArray()) {
-        if (!prim.HasMember("indices") || !prim["indices"].IsInt()) {
-          continue;
-        }
-        auto found = extensions.find(prim["indices"].GetInt());
-        if (found == extensions.end()) {
-          continue;
-        }
-        // copied: instanced parts share one accessor across meshes, and
-        // the material list describes the whole model
-        rapidjson::Value facesCopy(found->second.second, alloc);
-        rapidjson::Value materialsCopy(materials, alloc);
-        rapidjson::Value ext = brep::extension(found->second.first, facesCopy,
-                                               materialsCopy, alloc);
-        if (!prim.HasMember("extensions")) {
-          prim.AddMember("extensions",
-                         rapidjson::Value(rapidjson::kObjectType), alloc);
-        }
-        prim["extensions"].AddMember(rapidjson::StringRef(brep::EXTENSION), ext,
-                                     alloc);
-        attached = true;
-      }
-    }
+      const int indicesId = prim["indices"].GetInt();
 
-    if (attached) {
-      if (!isArray("extensionsUsed")) {
-        doc.RemoveMember("extensionsUsed");
-        doc.AddMember("extensionsUsed",
-                      rapidjson::Value(rapidjson::kArrayType), alloc);
+      if (!withFaces) {
+        // one list per mesh, taken from its first primitive
+        if (!mesh.HasMember("extras") || !mesh["extras"].IsObject()) {
+          mesh.RemoveMember("extras");
+          mesh.AddMember("extras", rapidjson::Value(rapidjson::kObjectType),
+                         alloc);
+        }
+        rapidjson::Value cascadio(rapidjson::kObjectType);
+        cascadio.AddMember("materials", materialsFor(indicesId), alloc);
+        mesh["extras"].RemoveMember("cascadio");
+        mesh["extras"].AddMember("cascadio", cascadio, alloc);
+        break;
       }
-      doc["extensionsUsed"].PushBack(rapidjson::StringRef(brep::EXTENSION),
-                                     alloc);
+
+      auto found = extensions.find(indicesId);
+      if (found == extensions.end()) {
+        continue;
+      }
+      // the faces are copied: instanced parts share one accessor
+      rapidjson::Value faces(found->second.second, alloc);
+      rapidjson::Value materials = materialsFor(indicesId);
+      if (!prim.HasMember("extensions")) {
+        prim.AddMember("extensions", rapidjson::Value(rapidjson::kObjectType),
+                       alloc);
+      }
+      prim["extensions"].AddMember(
+          rapidjson::StringRef(brep::EXTENSION),
+          brep::extension(found->second.first, faces, materials, alloc), alloc);
+      attached = true;
     }
   }
 
-  if (faces == nullptr && hasMeshes && doc["meshes"][0].IsObject()) {
-    auto &mesh = doc["meshes"][0];
-    if (!mesh.HasMember("extras") || !mesh["extras"].IsObject()) {
-      mesh.RemoveMember("extras");
-      mesh.AddMember("extras", rapidjson::Value(rapidjson::kObjectType), alloc);
+  if (attached) {
+    if (!isArray("extensionsUsed")) {
+      doc.RemoveMember("extensionsUsed");
+      doc.AddMember("extensionsUsed", rapidjson::Value(rapidjson::kArrayType),
+                    alloc);
     }
-    auto &extras = mesh["extras"];
-    if (!extras.HasMember("cascadio") || !extras["cascadio"].IsObject()) {
-      extras.RemoveMember("cascadio");
-      extras.AddMember("cascadio", rapidjson::Value(rapidjson::kObjectType),
-                       alloc);
-    }
-    extras["cascadio"].AddMember("materials",
-                                 rapidjson::Value(materials, alloc), alloc);
+    doc["extensionsUsed"].PushBack(rapidjson::StringRef(brep::EXTENSION),
+                                   alloc);
   }
 
   rapidjson::StringBuffer buffer;

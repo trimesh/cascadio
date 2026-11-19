@@ -3,7 +3,7 @@
   "$id": "mesh.primitive.TM_brep_faces.schema.json",
   "title": "TM_brep_faces mesh primitive extension",
   "type": "object",
-  "description": "Which BREP face each triangle came from, the analytic surface of each face, and the materials of the source model",
+  "description": "Which BREP face each triangle came from, the analytic surface of each face, and the materials of the part",
   "properties": {
     "faceIndices": {
       "type": "integer",
@@ -24,7 +24,7 @@
     },
     "materials": {
       "type": "array",
-      "description": "Every material defined in the source model. The list describes the whole model, so it is the same on each primitive. Empty if the model defines none.",
+      "description": "The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead.",
       "items": {"$ref": "#/$defs/material"}
     }
   },

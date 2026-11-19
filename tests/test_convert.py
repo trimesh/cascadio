@@ -618,3 +618,24 @@ def test_brep_includes_materials():
     mesh = next(iter(scene.geometry.values()))
     assert mesh.metadata["cascadio"]["materials"][0]["name"] == "Steel"
     assert len(mesh.metadata["cascadio"]["brep_primitives"]) > 0
+
+
+@pytest.mark.parametrize("option", ["include_brep", "include_materials"])
+def test_materials_per_part(option):
+    """Each mesh carries the materials of its own part, not the whole model's."""
+    # two parts made from material.stp: "Part 1" is Steel, "Part 2" is Aluminum
+    scene = load_scene("two_materials.step", **{option: True})
+    assert len(scene.geometry) == 2
+    found = {
+        name: [m["name"] for m in mesh.metadata["cascadio"]["materials"]]
+        for name, mesh in scene.geometry.items()
+    }
+    assert sorted(found.values()) == [["Aluminum"], ["Steel"]]
+    assert found["Part 1"] == ["Steel"]
+
+
+def test_no_materials():
+    """A model without materials has an empty list on every mesh."""
+    scene = load_scene("multibody.step", include_brep=True)
+    for mesh in scene.geometry.values():
+        assert mesh.metadata["cascadio"]["materials"] == []

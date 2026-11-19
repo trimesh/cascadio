@@ -1,167 +1,178 @@
 #pragma once
 
-
 #include <NCollection_Sequence.hxx>
 #include <Quantity_Color.hxx>
 #include <Quantity_ColorRGBA.hxx>
 #include <TCollection_HAsciiString.hxx>
 #include <TDF_Label.hxx>
+#include <TDataStd_TreeNode.hxx>
 #include <TDocStd_Document.hxx>
+#include <XCAFDoc.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_MaterialTool.hxx>
 #include <XCAFDoc_VisMaterial.hxx>
 #include <XCAFDoc_VisMaterialTool.hxx>
 #include <rapidjson/document.h>
 
-// ============================================================================
-// Material Extraction
-// ============================================================================
+// Materials as JSON, in the shape the TM_brep_faces schema describes
+// (`$defs/material`). A STEP file can define two kinds, and a part can
+// have one of each:
+//   physical: a name and a density
+//   visual:   colors, and optionally PBR or classic shading parameters
 
-/// Helper to add an RGBA color array to a JSON object (values 0-1)
-static void addColorRGBA(rapidjson::Value &obj, const char *name,
-                         const Quantity_ColorRGBA &color,
-                         rapidjson::Document::AllocatorType &alloc) {
-  rapidjson::Value arr(rapidjson::kArrayType);
-  arr.PushBack(color.GetRGB().Red(), alloc)
-      .PushBack(color.GetRGB().Green(), alloc)
-      .PushBack(color.GetRGB().Blue(), alloc)
-      .PushBack(color.Alpha(), alloc);
-  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
+using JsonAllocator = rapidjson::Document::AllocatorType;
+
+/// Add `key` to `object` if the string has any text.
+static void addText(rapidjson::Value &object, const char *key,
+                    const Handle(TCollection_HAsciiString) & text,
+                    JsonAllocator &alloc) {
+  if (!text.IsNull() && text->Length() > 0) {
+    object.AddMember(rapidjson::StringRef(key),
+                     rapidjson::Value(text->ToCString(), alloc), alloc);
+  }
 }
 
-/// Helper to add an RGB color array to a JSON object (values 0-1)
-static void addColorRGB(rapidjson::Value &obj, const char *name,
-                        const Quantity_Color &color,
-                        rapidjson::Document::AllocatorType &alloc) {
-  rapidjson::Value arr(rapidjson::kArrayType);
-  arr.PushBack(color.Red(), alloc)
+static rapidjson::Value colorJson(const Quantity_Color &color,
+                                  JsonAllocator &alloc) {
+  rapidjson::Value array(rapidjson::kArrayType);
+  array.PushBack(color.Red(), alloc)
       .PushBack(color.Green(), alloc)
       .PushBack(color.Blue(), alloc);
-  obj.AddMember(rapidjson::StringRef(name), arr, alloc);
+  return array;
 }
 
-/// Extract all materials from the document into a JSON array
-static rapidjson::Value
-extractMaterials(Handle(TDocStd_Document) doc,
-                 rapidjson::Document::AllocatorType &alloc) {
-  rapidjson::Value materialsArray(rapidjson::kArrayType);
+static rapidjson::Value colorJson(const Quantity_ColorRGBA &color,
+                                  JsonAllocator &alloc) {
+  rapidjson::Value array = colorJson(color.GetRGB(), alloc);
+  array.PushBack(color.Alpha(), alloc);
+  return array;
+}
 
-  TDF_Label mainLabel = doc->Main();
+/// The physical material stored on `label`, or a JSON null if there is none.
+static rapidjson::Value physicalMaterial(const TDF_Label &label,
+                                         JsonAllocator &alloc) {
+  Handle(TCollection_HAsciiString) name, description, densityName, valueType;
+  double density = 0.0;
+  rapidjson::Value material;
+  if (!XCAFDoc_MaterialTool::GetMaterial(label, name, description, density,
+                                         densityName, valueType)) {
+    return material;
+  }
+  material.SetObject();
+  addText(material, "name", name, alloc);
+  addText(material, "description", description, alloc);
+  if (density > 0.0) {
+    material.AddMember("density", density, alloc);
+    addText(material, "density_name", densityName, alloc);
+    addText(material, "density_value_type", valueType, alloc);
+  }
+  return material;
+}
 
-  // Extract physical materials (name, description, density)
-  Handle(XCAFDoc_MaterialTool) matTool =
-      XCAFDoc_DocumentTool::MaterialTool(mainLabel);
-  if (!matTool.IsNull()) {
-    NCollection_Sequence<TDF_Label> matLabels;
-    matTool->GetMaterialLabels(matLabels);
+/// A visual material as JSON, or a JSON null if it is missing or empty.
+static rapidjson::Value visualMaterial(const Handle(XCAFDoc_VisMaterial) & visual,
+                                       JsonAllocator &alloc) {
+  rapidjson::Value material;
+  if (visual.IsNull() || visual->IsEmpty()) {
+    return material;
+  }
+  material.SetObject();
+  addText(material, "name", visual->RawName(), alloc);
+  material.AddMember("base_color", colorJson(visual->BaseColor(), alloc), alloc);
+  material.AddMember("alpha_cutoff", static_cast<double>(visual->AlphaCutOff()),
+                     alloc);
 
-    for (int i = 1; i <= matLabels.Length(); i++) {
-      Handle(TCollection_HAsciiString) name, description, densName, densValType;
-      double density = 0.0;
+  if (visual->HasPbrMaterial()) {
+    const XCAFDoc_VisMaterialPBR &pbr = visual->PbrMaterial();
+    rapidjson::Value json(rapidjson::kObjectType);
+    json.AddMember("base_color", colorJson(pbr.BaseColor, alloc), alloc);
+    json.AddMember("metallic", static_cast<double>(pbr.Metallic), alloc);
+    json.AddMember("roughness", static_cast<double>(pbr.Roughness), alloc);
+    json.AddMember("refraction_index",
+                   static_cast<double>(pbr.RefractionIndex), alloc);
+    rapidjson::Value emissive(rapidjson::kArrayType);
+    emissive.PushBack(static_cast<double>(pbr.EmissiveFactor.x()), alloc)
+        .PushBack(static_cast<double>(pbr.EmissiveFactor.y()), alloc)
+        .PushBack(static_cast<double>(pbr.EmissiveFactor.z()), alloc);
+    json.AddMember("emissive_factor", emissive, alloc);
+    material.AddMember("pbr", json, alloc);
+  }
 
-      if (XCAFDoc_MaterialTool::GetMaterial(matLabels.Value(i), name,
-                                            description, density, densName,
-                                            densValType)) {
-        rapidjson::Value matObj(rapidjson::kObjectType);
+  if (visual->HasCommonMaterial()) {
+    const XCAFDoc_VisMaterialCommon &common = visual->CommonMaterial();
+    rapidjson::Value json(rapidjson::kObjectType);
+    json.AddMember("ambient_color", colorJson(common.AmbientColor, alloc), alloc);
+    json.AddMember("diffuse_color", colorJson(common.DiffuseColor, alloc), alloc);
+    json.AddMember("specular_color", colorJson(common.SpecularColor, alloc),
+                   alloc);
+    json.AddMember("emissive_color", colorJson(common.EmissiveColor, alloc),
+                   alloc);
+    json.AddMember("shininess", static_cast<double>(common.Shininess), alloc);
+    json.AddMember("transparency", static_cast<double>(common.Transparency),
+                   alloc);
+    material.AddMember("common", json, alloc);
+  }
+  return material;
+}
 
-        if (!name.IsNull() && name->Length() > 0) {
-          rapidjson::Value nameVal(name->ToCString(), alloc);
-          matObj.AddMember("name", nameVal, alloc);
-        }
-        if (!description.IsNull() && description->Length() > 0) {
-          rapidjson::Value descVal(description->ToCString(), alloc);
-          matObj.AddMember("description", descVal, alloc);
-        }
-        if (density > 0.0) {
-          matObj.AddMember("density", density, alloc);
-          if (!densName.IsNull() && densName->Length() > 0) {
-            rapidjson::Value densNameVal(densName->ToCString(), alloc);
-            matObj.AddMember("density_name", densNameVal, alloc);
-          }
-          if (!densValType.IsNull() && densValType->Length() > 0) {
-            rapidjson::Value densTypeVal(densValType->ToCString(), alloc);
-            matObj.AddMember("density_value_type", densTypeVal, alloc);
-          }
-        }
+/// The materials assigned to one part, given the part's label in the
+/// document. Empty if the part has none of its own.
+static rapidjson::Value partMaterials(const TDF_Label &part,
+                                      JsonAllocator &alloc) {
+  rapidjson::Value materials(rapidjson::kArrayType);
+  if (part.IsNull()) {
+    return materials;
+  }
+  // a part points at its physical material through a tree node:
+  // the node's father sits on the material's label
+  Handle(TDataStd_TreeNode) reference;
+  if (part.FindAttribute(XCAFDoc::MaterialRefGUID(), reference) &&
+      reference->HasFather()) {
+    rapidjson::Value material =
+        physicalMaterial(reference->Father()->Label(), alloc);
+    if (!material.IsNull()) {
+      materials.PushBack(material, alloc);
+    }
+  }
+  rapidjson::Value visual =
+      visualMaterial(XCAFDoc_VisMaterialTool::GetShapeMaterial(part), alloc);
+  if (!visual.IsNull()) {
+    materials.PushBack(visual, alloc);
+  }
+  return materials;
+}
 
-        materialsArray.PushBack(matObj, alloc);
+/// Every material the document defines, whichever part uses it.
+static rapidjson::Value allMaterials(const Handle(TDocStd_Document) & doc,
+                                     JsonAllocator &alloc) {
+  rapidjson::Value materials(rapidjson::kArrayType);
+  const TDF_Label root = doc->Main();
+
+  NCollection_Sequence<TDF_Label> labels;
+  Handle(XCAFDoc_MaterialTool) physical =
+      XCAFDoc_DocumentTool::MaterialTool(root);
+  if (!physical.IsNull()) {
+    physical->GetMaterialLabels(labels);
+    for (int i = 1; i <= labels.Length(); i++) {
+      rapidjson::Value material = physicalMaterial(labels.Value(i), alloc);
+      if (!material.IsNull()) {
+        materials.PushBack(material, alloc);
       }
     }
   }
 
-  // Extract visual materials (colors, PBR properties)
-  Handle(XCAFDoc_VisMaterialTool) visMatTool =
-      XCAFDoc_DocumentTool::VisMaterialTool(mainLabel);
-  if (!visMatTool.IsNull()) {
-    NCollection_Sequence<TDF_Label> visMatLabels;
-    visMatTool->GetMaterials(visMatLabels);
-
-    for (int i = 1; i <= visMatLabels.Length(); i++) {
-      Handle(XCAFDoc_VisMaterial) visMat =
-          XCAFDoc_VisMaterialTool::GetMaterial(visMatLabels.Value(i));
-      if (visMat.IsNull() || visMat->IsEmpty()) {
-        continue;
+  labels.Clear();
+  Handle(XCAFDoc_VisMaterialTool) visual =
+      XCAFDoc_DocumentTool::VisMaterialTool(root);
+  if (!visual.IsNull()) {
+    visual->GetMaterials(labels);
+    for (int i = 1; i <= labels.Length(); i++) {
+      rapidjson::Value material = visualMaterial(
+          XCAFDoc_VisMaterialTool::GetMaterial(labels.Value(i)), alloc);
+      if (!material.IsNull()) {
+        materials.PushBack(material, alloc);
       }
-
-      rapidjson::Value matObj(rapidjson::kObjectType);
-
-      // Get material name if available
-      Handle(TCollection_HAsciiString) rawName = visMat->RawName();
-      if (!rawName.IsNull() && rawName->Length() > 0) {
-        rapidjson::Value nameVal(rawName->ToCString(), alloc);
-        matObj.AddMember("name", nameVal, alloc);
-      }
-
-      // Get base color (works for both common and PBR materials)
-      Quantity_ColorRGBA baseColor = visMat->BaseColor();
-      addColorRGBA(matObj, "base_color", baseColor, alloc);
-
-      // Alpha mode
-      matObj.AddMember("alpha_cutoff",
-                       static_cast<double>(visMat->AlphaCutOff()), alloc);
-
-      // PBR material properties
-      if (visMat->HasPbrMaterial()) {
-        const XCAFDoc_VisMaterialPBR &pbr = visMat->PbrMaterial();
-        rapidjson::Value pbrObj(rapidjson::kObjectType);
-
-        addColorRGBA(pbrObj, "base_color", pbr.BaseColor, alloc);
-        pbrObj.AddMember("metallic", static_cast<double>(pbr.Metallic), alloc);
-        pbrObj.AddMember("roughness", static_cast<double>(pbr.Roughness),
-                         alloc);
-        pbrObj.AddMember("refraction_index",
-                         static_cast<double>(pbr.RefractionIndex), alloc);
-
-        // Emissive factor as RGB array
-        rapidjson::Value emissiveArr(rapidjson::kArrayType);
-        emissiveArr.PushBack(static_cast<double>(pbr.EmissiveFactor.x()), alloc)
-            .PushBack(static_cast<double>(pbr.EmissiveFactor.y()), alloc)
-            .PushBack(static_cast<double>(pbr.EmissiveFactor.z()), alloc);
-        pbrObj.AddMember("emissive_factor", emissiveArr, alloc);
-
-        matObj.AddMember("pbr", pbrObj, alloc);
-      }
-
-      // Common (legacy) material properties
-      if (visMat->HasCommonMaterial()) {
-        const XCAFDoc_VisMaterialCommon &common = visMat->CommonMaterial();
-        rapidjson::Value commonObj(rapidjson::kObjectType);
-
-        addColorRGB(commonObj, "ambient_color", common.AmbientColor, alloc);
-        addColorRGB(commonObj, "diffuse_color", common.DiffuseColor, alloc);
-        addColorRGB(commonObj, "specular_color", common.SpecularColor, alloc);
-        addColorRGB(commonObj, "emissive_color", common.EmissiveColor, alloc);
-        commonObj.AddMember("shininess", static_cast<double>(common.Shininess),
-                            alloc);
-        commonObj.AddMember("transparency",
-                            static_cast<double>(common.Transparency), alloc);
-
-        matObj.AddMember("common", commonObj, alloc);
-      }
-
-      materialsArray.PushBack(matObj, alloc);
     }
   }
-
-  return materialsArray;
+  return materials;
 }

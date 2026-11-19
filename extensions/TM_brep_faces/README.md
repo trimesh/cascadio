@@ -27,7 +27,7 @@ Per-triangle BREP face indices and analytic surface definitions for glTF mesh pr
 |----------|------|-------------|
 | `faceIndices` | integer | Accessor index for per-triangle face indices (SCALAR, unsigned int) |
 | `faces` | array | One entry per face, in face index order: a definition with `type` and geometry parameters, or `null` for a face that is not one of the types below |
-| `materials` | array | Every material the source model defines; empty if it defines none. The list describes the whole model, so it is the same on each primitive |
+| `materials` | array | The materials of the part this primitive belongs to; empty if it has none |
 
 All three are required, and no other fields are allowed, here or inside a face or a material. A writer that adds a field the schema does not describe produces an invalid file.
 
@@ -50,7 +50,9 @@ All three are required, and no other fields are allowed, here or inside a face o
 
 ## Materials
 
-Each entry is either a physical material or a visual one, as the source file defined it. Every field is optional.
+A part can have a physical material, a visual one, or both, as the source file defined them. Every field of an entry is optional.
+
+If the source file defines materials but does not say which part they belong to, cascadio lists all of them on every primitive rather than dropping them.
 
 - Physical: `name`, `description`, `density`, `density_name` (what the value measures and its unit), `density_value_type`
 - Visual: `name`, `base_color` (RGBA), `alpha_cutoff`, `pbr` (`base_color`, `metallic`, `roughness`, `refraction_index`, `emissive_factor`), `common` (`ambient_color`, `diffuse_color`, `specular_color`, `emissive_color`, `shininess`, `transparency`)
