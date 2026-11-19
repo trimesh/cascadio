@@ -13,8 +13,12 @@ the tip of the axis they turn about (the right-hand rule).
 from dataclasses import dataclass, fields
 from typing import List, Optional, Tuple, Union
 
-Vec3 = Tuple[float, float, float]
-Bounds = Tuple[float, float]
+# a position [x, y, z] in meters
+Point = Tuple[float, float, float]
+# a direction [x, y, z] of length 1
+Direction = Tuple[float, float, float]
+# [min, max] along one of a surface's two directions
+Range = Tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -42,11 +46,11 @@ class Plane:
     """
 
     face_index: int
-    origin: Vec3
-    normal: Vec3
-    x_dir: Vec3
-    extent_x: Bounds
-    extent_y: Bounds
+    origin: Point
+    normal: Direction
+    x_dir: Direction
+    extent_x: Range
+    extent_y: Range
 
 
 @dataclass(frozen=True)
@@ -75,12 +79,12 @@ class Cylinder:
     """
 
     face_index: int
-    origin: Vec3
-    axis: Vec3
-    x_dir: Vec3
+    origin: Point
+    axis: Direction
+    x_dir: Direction
     radius: float
-    extent_angle: Bounds
-    extent_height: Bounds
+    extent_angle: Range
+    extent_height: Range
 
 
 @dataclass(frozen=True)
@@ -115,13 +119,13 @@ class Cone:
     """
 
     face_index: int
-    apex: Vec3
-    axis: Vec3
-    x_dir: Vec3
+    apex: Point
+    axis: Direction
+    x_dir: Direction
     semi_angle: float
     ref_radius: float
-    extent_angle: Bounds
-    extent_distance: Bounds
+    extent_angle: Range
+    extent_distance: Range
 
 
 @dataclass(frozen=True)
@@ -152,12 +156,12 @@ class Sphere:
     """
 
     face_index: int
-    center: Vec3
-    axis: Vec3
-    x_dir: Vec3
+    center: Point
+    axis: Direction
+    x_dir: Direction
     radius: float
-    extent_longitude: Bounds
-    extent_latitude: Bounds
+    extent_longitude: Range
+    extent_latitude: Range
 
 
 @dataclass(frozen=True)
@@ -189,13 +193,13 @@ class Torus:
     """
 
     face_index: int
-    center: Vec3
-    axis: Vec3
-    x_dir: Vec3
+    center: Point
+    axis: Direction
+    x_dir: Direction
     major_radius: float
     minor_radius: float
-    extent_major_angle: Bounds
-    extent_minor_angle: Bounds
+    extent_major_angle: Range
+    extent_minor_angle: Range
 
 
 BrepPrimitive = Union[Plane, Cylinder, Cone, Sphere, Torus]

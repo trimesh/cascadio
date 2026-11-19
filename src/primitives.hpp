@@ -40,20 +40,20 @@ static rapidjson::Value describeFace(const TopoDS_Face &face, int faceIndex,
   // positions and lengths are scaled to meters; directions and angles are not
   const double m = lengthUnit;
   auto point = [m](const gp_Pnt &p) {
-    return brep::Vec3{p.X() * m, p.Y() * m, p.Z() * m};
+    return brep::Point{p.X() * m, p.Y() * m, p.Z() * m};
   };
   auto direction = [](const gp_Dir &d) {
-    return brep::Vec3{d.X(), d.Y(), d.Z()};
+    return brep::Direction{d.X(), d.Y(), d.Z()};
   };
-  const brep::Bounds u{uMin, uMax}, v{vMin, vMax};
-  const brep::Bounds uMeters{uMin * m, uMax * m}, vMeters{vMin * m, vMax * m};
+  const brep::Range u{uMin, uMax}, v{vMin, vMax};
+  const brep::Range uMeters{uMin * m, uMax * m}, vMeters{vMin * m, vMax * m};
 
   // The schema says angles turn counter-clockwise about the axis and a
   // plane's Y is normal cross X. OpenCASCADE allows a mirrored frame, where
   // both run the other way; negate that coordinate so the output keeps
   // its promise.
-  auto mirrored = [](const brep::Bounds &range) {
-    return brep::Bounds{-range.max, -range.min};
+  auto mirrored = [](const brep::Range &range) {
+    return brep::Range{-range.max, -range.min};
   };
 
   switch (surface.GetType()) {

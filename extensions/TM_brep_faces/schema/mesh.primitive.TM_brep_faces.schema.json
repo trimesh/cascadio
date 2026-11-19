@@ -34,23 +34,35 @@
   },
   "required": ["faceIndices", "faces", "materials"],
   "$defs": {
-    "vec3": {
+    "point": {
+      "title": "point",
       "type": "array",
       "items": {
         "type": "number"
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Three numbers [x, y, z]: a position in meters or a unit direction"
+      "description": "A position [x, y, z] in meters, in the frame of the primitive's vertices"
     },
-    "bounds": {
+    "direction": {
+      "title": "direction",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "A direction [x, y, z] of length 1, in the frame of the primitive's vertices"
+    },
+    "range": {
+      "title": "range",
       "type": "array",
       "items": {
         "type": "number"
       },
       "minItems": 2,
       "maxItems": 2,
-      "description": "Two numbers [min, max]: the part of a surface the face covers, along one of the surface's two directions"
+      "description": "[min, max]: the stretch of a surface the face covers along one of the surface's two directions, in meters or radians as the field says"
     },
     "face": {
       "title": "BREP Face",
@@ -80,23 +92,23 @@
           "then": {
             "properties": {
               "origin": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/point",
                 "description": "A point on the plane, from which the extents are measured"
               },
               "normal": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction perpendicular to the plane"
               },
               "x_dir": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction in the plane: the plane's own X axis. Its Y axis is normal cross x_dir."
               },
               "extent_x": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "How far the face reaches along x_dir from origin, in meters"
               },
               "extent_y": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "How far the face reaches along the plane's Y axis from origin, in meters"
               }
             },
@@ -114,15 +126,15 @@
           "then": {
             "properties": {
               "origin": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/point",
                 "description": "A point on the axis, from which heights are measured"
               },
               "axis": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction of the axis"
               },
               "x_dir": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction perpendicular to the axis from which angles are measured"
               },
               "radius": {
@@ -131,11 +143,11 @@
                 "exclusiveMinimum": 0
               },
               "extent_angle": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "The angles the face covers around the axis, measured from x_dir, in radians. A full cylinder covers 2 pi."
               },
               "extent_height": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "How far the face reaches along the axis from origin, in meters"
               }
             },
@@ -153,15 +165,15 @@
           "then": {
             "properties": {
               "apex": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/point",
                 "description": "The point where the cone comes to a tip. The face itself usually does not reach it."
               },
               "axis": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction of the axis"
               },
               "x_dir": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction perpendicular to the axis from which angles are measured"
               },
               "semi_angle": {
@@ -176,11 +188,11 @@
                 "minimum": 0
               },
               "extent_angle": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "The angles the face covers around the axis, measured from x_dir, in radians"
               },
               "extent_distance": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "How far the face reaches along the cone's slanted side, measured from the reference circle in the direction of the axis, in meters"
               }
             },
@@ -198,15 +210,15 @@
           "then": {
             "properties": {
               "center": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/point",
                 "description": "The center of the sphere"
               },
               "axis": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction from the center to the sphere's north pole"
               },
               "x_dir": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction perpendicular to the axis from which longitude is measured"
               },
               "radius": {
@@ -215,11 +227,11 @@
                 "exclusiveMinimum": 0
               },
               "extent_longitude": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "The angles the face covers around the axis, measured from x_dir, in radians"
               },
               "extent_latitude": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "The angles the face covers above the equator, toward the axis, in radians: from -pi/2 at the south pole to pi/2 at the north pole"
               }
             },
@@ -237,15 +249,15 @@
           "then": {
             "properties": {
               "center": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/point",
                 "description": "The center of the torus, on its axis"
               },
               "axis": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction of the axis the tube circles around"
               },
               "x_dir": {
-                "$ref": "#/$defs/vec3",
+                "$ref": "#/$defs/direction",
                 "description": "Unit direction perpendicular to the axis from which angles are measured"
               },
               "major_radius": {
@@ -259,11 +271,11 @@
                 "exclusiveMinimum": 0
               },
               "extent_major_angle": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "The angles the face covers around the axis, measured from x_dir, in radians"
               },
               "extent_minor_angle": {
-                "$ref": "#/$defs/bounds",
+                "$ref": "#/$defs/range",
                 "description": "The angles the face covers around the tube, in radians: 0 is the outer edge of the torus and the angle grows toward the axis direction"
               }
             },
@@ -283,7 +295,8 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "A color [red, green, blue], each from 0 to 1"
+      "description": "A color [red, green, blue], each from 0 to 1",
+      "title": "color"
     },
     "rgba": {
       "type": "array",
@@ -294,7 +307,8 @@
       },
       "minItems": 4,
       "maxItems": 4,
-      "description": "A color [red, green, blue, alpha], each from 0 to 1"
+      "description": "A color [red, green, blue, alpha], each from 0 to 1",
+      "title": "color with alpha"
     },
     "material": {
       "title": "Material",
@@ -351,7 +365,7 @@
               "description": "Index of refraction; 1.5 is typical glass or plastic"
             },
             "emissive_factor": {
-              "$ref": "#/$defs/vec3",
+              "$ref": "#/$defs/rgb",
               "description": "Color of light the material gives off, [red, green, blue]"
             }
           },

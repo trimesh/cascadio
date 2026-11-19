@@ -67,7 +67,11 @@ def extension_name(schema: dict) -> str:
 # ---------------------------------------------------------------------------
 
 # schema type of a field -> C++ argument type
-CPP_TYPES = {"#/$defs/vec3": "const Vec3 &", "#/$defs/bounds": "const Bounds &"}
+CPP_TYPES = {
+    "#/$defs/point": "const Point &",
+    "#/$defs/direction": "const Direction &",
+    "#/$defs/range": "const Range &",
+}
 
 HEADER = """\
 // Generated from {schema} by scripts/gen_schema.py.
@@ -76,27 +80,41 @@ HEADER = """\
 
 #include <rapidjson/document.h>
 
-#include <array>
-
 namespace brep {{
 
-using Vec3 = std::array<double, 3>;
-/// [min, max]; its own type so it cannot be passed where a Vec3 belongs
-struct Bounds {{
+// One C++ type per kind of value in the schema, so that passing a
+// direction where a position belongs does not compile.
+
+/// A position [x, y, z] in meters
+struct Point {{
+  double x, y, z;
+}};
+/// A direction [x, y, z] of length 1
+struct Direction {{
+  double x, y, z;
+}};
+/// [min, max] along one of a surface's two directions
+struct Range {{
   double min, max;
 }};
 using Allocator = rapidjson::Document::AllocatorType;
 using Value = rapidjson::Value;
 
-inline void add(Value &object, const char *key, const Vec3 &v, Allocator &a) {{
+inline void add(Value &object, const char *key, const Point &p, Allocator &a) {{
   Value array(rapidjson::kArrayType);
-  array.PushBack(v[0], a).PushBack(v[1], a).PushBack(v[2], a);
+  array.PushBack(p.x, a).PushBack(p.y, a).PushBack(p.z, a);
   object.AddMember(rapidjson::StringRef(key), array, a);
 }}
 
-inline void add(Value &object, const char *key, const Bounds &b, Allocator &a) {{
+inline void add(Value &object, const char *key, const Direction &d, Allocator &a) {{
   Value array(rapidjson::kArrayType);
-  array.PushBack(b.min, a).PushBack(b.max, a);
+  array.PushBack(d.x, a).PushBack(d.y, a).PushBack(d.z, a);
+  object.AddMember(rapidjson::StringRef(key), array, a);
+}}
+
+inline void add(Value &object, const char *key, const Range &r, Allocator &a) {{
+  Value array(rapidjson::kArrayType);
+  array.PushBack(r.min, a).PushBack(r.max, a);
   object.AddMember(rapidjson::StringRef(key), array, a);
 }}
 
@@ -198,6 +216,10 @@ All of these are required, and no other properties are allowed, here or inside a
 
 {face_description}
 
+The value types used below:
+
+{types}
+
 Every face has:
 
 {face_common}
@@ -239,11 +261,10 @@ EXAMPLE = {
 def type_name(schema: dict, spec: dict) -> str:
     """A short human name for a field's type."""
     if "$ref" in spec:
-        name = spec["$ref"].rsplit("/", 1)[1]
-        target = schema["$defs"][name]
-        if target.get("type") == "array" and "minItems" in target:
-            return f"{target['minItems']} numbers"
-        return name
+        target = schema["$defs"][spec["$ref"].rsplit("/", 1)[1]]
+        return target.get("title", target.get("type", ""))
+    if spec.get("type") == "array" and "$ref" in spec.get("items", {}):
+        return "list of " + type_name(schema, spec["items"]) + "s"
     return spec.get("type", "")
 
 
@@ -282,6 +303,10 @@ def generate_readme(schema: dict, source: str) -> str:
         example=example_json(),
         top=table(schema, schema["properties"]),
         face_description=face["description"],
+        types="\n".join(
+            f"- {schema['$defs'][name]['title']}: {schema['$defs'][name]['description']}"
+            for name in ("point", "direction", "range")
+        ),
         face_common=table(schema, face["properties"]),
         faces=faces,
         material_description=material["description"],
@@ -307,8 +332,12 @@ by scripts/gen_schema.py. Do not edit: change the schema and run `make schema`.
 from dataclasses import dataclass, fields
 from typing import List, Optional, Tuple, Union
 
-Vec3 = Tuple[float, float, float]
-Bounds = Tuple[float, float]
+# a position [x, y, z] in meters
+Point = Tuple[float, float, float]
+# a direction [x, y, z] of length 1
+Direction = Tuple[float, float, float]
+# [min, max] along one of a surface's two directions
+Range = Tuple[float, float]
 {classes}
 
 
@@ -381,7 +410,11 @@ class {name}:
 {members}
 '''
 
-PYTHON_TYPES = {"#/$defs/vec3": "Vec3", "#/$defs/bounds": "Bounds"}
+PYTHON_TYPES = {
+    "#/$defs/point": "Point",
+    "#/$defs/direction": "Direction",
+    "#/$defs/range": "Range",
+}
 
 
 def wrap(text: str, indent: str) -> str:
