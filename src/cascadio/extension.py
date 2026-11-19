@@ -10,7 +10,8 @@ Importing cascadio registers it. When trimesh then loads a GLB made with
   `cascadio.primitives` dataclass, or None if it is not a plane, cylinder,
   cone, sphere or torus
 - `mesh.metadata["cascadio"]["brep_faces"]`: the same as plain dicts
-- `mesh.metadata["cascadio"]["materials"]`: with `include_materials=True`
+- `mesh.metadata["cascadio"]["materials"]`: every material the source
+  model defines
 """
 
 from typing import Optional

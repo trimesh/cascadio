@@ -3,7 +3,7 @@
   "$id": "mesh.primitive.TM_brep_faces.schema.json",
   "title": "TM_brep_faces mesh primitive extension",
   "type": "object",
-  "description": "Per-triangle BREP face indices and optional analytic surface definitions",
+  "description": "Which BREP face each triangle came from, the analytic surface of each face, and the materials of the source model",
   "properties": {
     "faceIndices": {
       "type": "integer",
@@ -15,30 +15,31 @@
       "description": "One entry per BREP face, in face index order. An entry is null when the face is not one of the analytic surface types, so positions still match face indices.",
       "items": {
         "oneOf": [
-          {"type": "null"},
+          {
+            "type": "null"
+          },
           {"$ref": "#/$defs/face"}
         ]
       }
+    },
+    "materials": {
+      "type": "array",
+      "description": "Every material defined in the source model. The list describes the whole model, so it is the same on each primitive. Empty if the model defines none.",
+      "items": {"$ref": "#/$defs/material"}
     }
   },
-  "required": [
-    "faceIndices"
-  ],
+  "required": ["faceIndices", "faces", "materials"],
   "$defs": {
     "vec3": {
       "type": "array",
-      "items": {
-        "type": "number"
-      },
+      "items": {"type": "number"},
       "minItems": 3,
       "maxItems": 3,
       "description": "A 3-component vector [x, y, z]"
     },
     "bounds": {
       "type": "array",
-      "items": {
-        "type": "number"
-      },
+      "items": {"type": "number"},
       "minItems": 2,
       "maxItems": 2,
       "description": "A 2-component bounds array [min, max]"
@@ -174,7 +175,78 @@
             "required": ["center", "axis", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle"]
           }
         }
-      ]
+      ],
+      "unevaluatedProperties": false
+    },
+    "rgb": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "A color [red, green, blue], each from 0 to 1"
+    },
+    "rgba": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "A color [red, green, blue, alpha], each from 0 to 1"
+    },
+    "material": {
+      "title": "Material",
+      "type": "object",
+      "description": "Either a physical material (name, density) or a visual one (colors), as the source file defined it. Every field is optional.",
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "density": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "In the unit given by density_name"
+        },
+        "density_name": {
+          "type": "string",
+          "description": "What the density value measures and its unit, as written in the source file"
+        },
+        "density_value_type": {"type": "string"},
+        "base_color": {"$ref": "#/$defs/rgba"},
+        "alpha_cutoff": {"type": "number"},
+        "pbr": {
+          "type": "object",
+          "description": "Metallic-roughness parameters, as in glTF",
+          "properties": {
+            "base_color": {"$ref": "#/$defs/rgba"},
+            "metallic": {"type": "number"},
+            "roughness": {"type": "number"},
+            "refraction_index": {"type": "number"},
+            "emissive_factor": {"$ref": "#/$defs/vec3"}
+          },
+          "additionalProperties": false
+        },
+        "common": {
+          "type": "object",
+          "description": "Classic ambient/diffuse/specular parameters",
+          "properties": {
+            "ambient_color": {"$ref": "#/$defs/rgb"},
+            "diffuse_color": {"$ref": "#/$defs/rgb"},
+            "specular_color": {"$ref": "#/$defs/rgb"},
+            "emissive_color": {"$ref": "#/$defs/rgb"},
+            "shininess": {"type": "number"},
+            "transparency": {"type": "number"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "additionalProperties": false
 }

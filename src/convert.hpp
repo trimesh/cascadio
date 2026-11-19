@@ -141,9 +141,11 @@ static std::vector<char> toGlb(const char *data, size_t size,
   Loaded loaded;
   load(loaded, data, size, file_type, options.mesh);
 
+  // BREP data always carries the materials: they are part of the extension
+  const bool annotate = options.include_brep || options.include_materials;
   rapidjson::Document materials;
   materials.SetArray();
-  if (options.include_materials) {
+  if (annotate) {
     rapidjson::Value extracted =
         extractMaterials(loaded.doc, materials.GetAllocator());
     materials.Swap(extracted);
@@ -156,7 +158,7 @@ static std::vector<char> toGlb(const char *data, size_t size,
     throw std::runtime_error("OpenCASCADE wrote an empty GLB");
   }
 
-  if (options.include_brep || options.include_materials) {
+  if (annotate) {
     Span span("face data");
     // scale factor from the file's unit to meters, the unit of glTF
     const double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
@@ -165,9 +167,8 @@ static std::vector<char> toGlb(const char *data, size_t size,
     if (options.y_up) {
       frame.SetRotation(gp::OX(), -M_PI / 2);
     }
-    glb = injectIntoGlb(glb, faces, options.brep_types,
-                        options.include_materials ? &materials : nullptr,
-                        lengthUnit, frame);
+    glb = injectIntoGlb(glb, options.include_brep ? &faces : nullptr,
+                        options.brep_types, materials, lengthUnit, frame);
   }
   return glb;
 }

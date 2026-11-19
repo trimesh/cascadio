@@ -166,13 +166,15 @@ use_parallel
     Use multiple threads for meshing and export.
 include_brep
     Add the `TM_brep_faces` extension: for every triangle the index of
-    the CAD face it came from, and the exact plane, cylinder, cone,
-    sphere or torus of that face. Turns `merge_primitives` on.
+    the CAD face it came from, the exact plane, cylinder, cone, sphere
+    or torus of that face, and the materials of the model.
+    Turns `merge_primitives` on.
 brep_types
     If given, only these surface types are described. Any of "plane",
     "cylinder", "cone", "sphere" and "torus".
 include_materials
-    Add material names, densities and colors from the file.
+    Add material names, densities and colors from the file without the
+    rest of the extension. `include_brep` already includes them.
     Turns `merge_primitives` on.
 node_name_format
     Which name each GLB node gets: the instance label, the product

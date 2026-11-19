@@ -610,3 +610,11 @@ def test_y_up_brep():
         mesh = next(iter(scene.geometry.values()))
         normals = [p.normal for p in mesh.metadata["cascadio"]["brep_primitives"]]
         assert any(np.allclose(n, up) for n in normals)
+
+
+def test_brep_includes_materials():
+    """`include_brep` alone brings the materials: they are part of the extension."""
+    scene = load_scene("material.stp", include_brep=True)
+    mesh = next(iter(scene.geometry.values()))
+    assert mesh.metadata["cascadio"]["materials"][0]["name"] == "Steel"
+    assert len(mesh.metadata["cascadio"]["brep_primitives"]) > 0

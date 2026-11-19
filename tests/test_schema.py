@@ -135,9 +135,45 @@ def test_extension_validates():
                 "normal": [0.0, 0.0, -1.0],
                 "x_dir": [1.0, 0.0, 0.0],
             },
+            None,  # a face that is not one of the analytic types
+        ],
+        "materials": [
+            {"name": "Steel", "density": 7850.0, "density_name": "kg/m3"},
+            {"base_color": [0.5, 0.5, 0.5, 1.0], "pbr": {"metallic": 1.0}},
         ],
     }
     get_validator(EXTENSION_SCHEMA).validate(extension)
+
+    # all three fields are required
+    for key in extension:
+        partial = {k: v for k, v in extension.items() if k != key}
+        with pytest.raises(jsonschema.ValidationError):
+            get_validator(EXTENSION_SCHEMA).validate(partial)
+
+
+def test_extra_fields_rejected():
+    """Nothing the schema does not describe is allowed, at any level."""
+    face = {
+        "type": "sphere",
+        "face_index": 0,
+        "center": [0.0, 0.0, 0.0],
+        "radius": 1.0,
+        "extent_longitude": [0.0, 6.283],
+        "extent_latitude": [-1.57, 1.57],
+    }
+    valid = {"faceIndices": 0, "faces": [face], "materials": [{"name": "Steel"}]}
+    get_validator(EXTENSION_SCHEMA).validate(valid)
+
+    for broken in (
+        {**valid, "extra": 1},
+        {**valid, "faces": [{**face, "extra": 1}]},
+        # a field that belongs to another face type
+        {**valid, "faces": [{**face, "major_radius": 2.0}]},
+        {**valid, "materials": [{"name": "Steel", "extra": 1}]},
+        {**valid, "materials": [{"pbr": {"extra": 1}}]},
+    ):
+        with pytest.raises(jsonschema.ValidationError):
+            get_validator(EXTENSION_SCHEMA).validate(broken)
 
 
 def test_invalid_plane_missing_fields():

@@ -4,9 +4,12 @@ Generate the C++ header that writes TM_brep_faces JSON from the schema.
 
     python scripts/gen_schema_header.py SCHEMA.json OUTPUT.hpp
 
-CMake runs this on every build. For each face type in the schema it emits
-one function taking the schema's required fields as typed arguments:
+CMake runs this on every build. It emits the extension's name, one function
+for the extension object itself, and one per face type, each taking the
+schema's fields as typed arguments:
 
+    brep::EXTENSION                       "TM_brep_faces"
+    brep::extension(faceIndices, faces, materials, alloc)
     brep::plane(face_index, origin, normal, x_dir, extent_x, extent_y, alloc)
 
 The JSON keys exist only in the schema. If the schema gains, loses or
@@ -56,8 +59,18 @@ inline void add(Value &object, const char *key, double number, Allocator &a) {{
   object.AddMember(rapidjson::StringRef(key), number, a);
 }}
 
+/// The name of the extension, as it appears in `extensionsUsed`.
+inline constexpr const char *EXTENSION = "{extension}";
+
 /// Every face type the schema defines.
 inline constexpr const char *TYPES[] = {{{types}}};
+
+/// The extension object attached to a mesh primitive: {top_fields}.
+inline Value extension({top_arguments}, Allocator &a) {{
+  Value object(rapidjson::kObjectType);
+{top_body}
+  return object;
+}}
 """
 
 FUNCTION = """
@@ -90,7 +103,23 @@ def generate(schema: dict, source: str) -> str:
     if sorted(cases) != sorted(names):
         raise SystemExit(f"face types {names} do not match the cases {list(cases)}")
 
-    parts = [HEADER.format(schema=source, types=", ".join(f'"{n}"' for n in names))]
+    # "mesh.primitive.TM_brep_faces.schema.json" -> "TM_brep_faces"
+    extension = schema["$id"].split(".")[2]
+    top = schema["properties"]
+    kinds = {"integer": "int ", "array": "Value &"}
+    for field, spec in top.items():
+        if spec.get("type") not in kinds:
+            raise SystemExit(f"extension field {field!r}: no C++ type for {spec}")
+    parts = [
+        HEADER.format(
+            schema=source,
+            extension=extension,
+            types=", ".join(f'"{n}"' for n in names),
+            top_fields=", ".join(top),
+            top_arguments=", ".join(kinds[spec["type"]] + f for f, spec in top.items()),
+            top_body="\n".join(f'  object.AddMember("{f}", {f}, a);' for f in top),
+        )
+    ]
     for name in names:
         properties = cases[name]["properties"]
         if list(properties) != cases[name]["required"]:
