@@ -369,10 +369,13 @@ inline void confine() {
 #include <io.h>
 #include <psapi.h>
 
-// The one function used from userenv.h, which would bring all of OLE
-// along with it (and fails to, after a trimmed <windows.h>).
+// The two functions used from userenv.h, which would bring all of OLE
+// along with it (and fails to, after OCCT's trimmed <windows.h>).
 extern "C" __declspec(dllimport) HRESULT WINAPI
 DeriveAppContainerSidFromAppContainerName(PCWSTR name, PSID *sid);
+extern "C" __declspec(dllimport) HRESULT WINAPI CreateAppContainerProfile(
+    PCWSTR name, PCWSTR displayName, PCWSTR description,
+    PSID_AND_ATTRIBUTES capabilities, DWORD capabilityCount, PSID *sid);
 
 namespace os {
 
@@ -503,7 +506,20 @@ inline void enterContainer() {
                           nullptr, system, &startup.StartupInfo,
                           &child) != 0;
   };
+  // The first time for this user, Windows does not know the AppContainer
+  // yet; and the program may not be the container's to read. Each is
+  // fixed once, when it is in the way.
   bool started = start();
+  if (!started && GetLastError() == ERROR_FILE_NOT_FOUND) {
+    PSID registered = nullptr;
+    if (SUCCEEDED(CreateAppContainerProfile(
+            L"cascadio.worker", L"cascadio worker",
+            L"Converts one CAD file with nothing else allowed", nullptr, 0,
+            &registered))) {
+      FreeSid(registered);
+    }
+    started = start();
+  }
   if (!started && GetLastError() == ERROR_ACCESS_DENIED) {
     shareWith(container, program);
     started = start();
