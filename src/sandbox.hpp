@@ -365,11 +365,14 @@ inline void confine() {
 #include <winsock2.h> // before windows.h, which would bring the old one
 #include <windows.h> // NOMINMAX and WIN32_LEAN_AND_MEAN come from CMake
 
-#include <aclapi.h>  // file permissions
 #include <fcntl.h>
 #include <io.h>
 #include <psapi.h>
-#include <userenv.h> // AppContainers
+
+// The one function used from userenv.h, which would bring all of OLE
+// along with it (and fails to, after a trimmed <windows.h>).
+extern "C" __declspec(dllimport) HRESULT WINAPI
+DeriveAppContainerSidFromAppContainerName(PCWSTR name, PSID *sid);
 
 namespace os {
 
@@ -387,30 +390,48 @@ inline bool inAppContainer() {
 }
 
 /// Let processes in `container` read and run `program`. Installed under
-/// the user's own folders, it is not theirs to read otherwise.
+/// the user's own folders, it is not theirs to read otherwise. (aclapi.h
+/// would do this in fewer lines, but it brings OLE along, which does not
+/// compile after OCCT has trimmed <windows.h>.)
 inline void shareWith(PSID container, const wchar_t *program) {
-  PACL current = nullptr;
-  PSECURITY_DESCRIPTOR descriptor = nullptr;
-  if (GetNamedSecurityInfoW(program, SE_FILE_OBJECT,
-                            DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                            &current, nullptr, &descriptor) != ERROR_SUCCESS) {
+  DWORD needed = 0;
+  GetFileSecurityW(program, DACL_SECURITY_INFORMATION, nullptr, 0, &needed);
+  std::vector<char> current(needed);
+  BOOL present = FALSE;
+  BOOL defaulted = FALSE;
+  PACL old = nullptr;
+  ACL_SIZE_INFORMATION oldSize = {};
+  if (!GetFileSecurityW(program, DACL_SECURITY_INFORMATION, current.data(),
+                        needed, &needed) ||
+      !GetSecurityDescriptorDacl(current.data(), &present, &old,
+                                 &defaulted) ||
+      !present || old == nullptr ||
+      !GetAclInformation(old, &oldSize, sizeof(oldSize), AclSizeInformation)) {
     return;
   }
-  EXPLICIT_ACCESSW access = {};
-  access.grfAccessPermissions = GENERIC_READ | GENERIC_EXECUTE;
-  access.grfAccessMode = GRANT_ACCESS;
-  access.grfInheritance = NO_INHERITANCE;
-  access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-  access.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
-  access.Trustee.ptstrName = static_cast<LPWSTR>(container);
-  PACL updated = nullptr;
-  if (SetEntriesInAclW(1, &access, current, &updated) == ERROR_SUCCESS) {
-    SetNamedSecurityInfoW(const_cast<wchar_t *>(program), SE_FILE_OBJECT,
-                          DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                          updated, nullptr);
-    LocalFree(updated);
+  // the new entry first, then all the old ones
+  const DWORD size = oldSize.AclBytesInUse + sizeof(ACCESS_ALLOWED_ACE) +
+                     GetLengthSid(container);
+  std::vector<char> buffer(size);
+  PACL updated = reinterpret_cast<PACL>(buffer.data());
+  if (!InitializeAcl(updated, size, ACL_REVISION) ||
+      !AddAccessAllowedAce(updated, ACL_REVISION,
+                           FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                           container)) {
+    return;
   }
-  LocalFree(descriptor);
+  for (DWORD i = 0; i < oldSize.AceCount; i++) {
+    void *entry = nullptr;
+    if (GetAce(old, i, &entry)) {
+      AddAce(updated, ACL_REVISION, MAXDWORD, entry,
+             static_cast<ACE_HEADER *>(entry)->AceSize);
+    }
+  }
+  SECURITY_DESCRIPTOR descriptor;
+  if (InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) &&
+      SetSecurityDescriptorDacl(&descriptor, TRUE, updated, FALSE)) {
+    SetFileSecurityW(program, DACL_SECURITY_INFORMATION, &descriptor);
+  }
 }
 
 /// Windows can put a process in an AppContainer only when it starts it.
