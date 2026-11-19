@@ -110,6 +110,14 @@ No patches to OpenCASCADE are needed. If CMake does not find it, point `CMAKE_PR
 
 `uv.lock` records the exact version and checksum of every tool that takes part in building a wheel (the `build` group in `pyproject.toml`). Local and CI builds refuse anything that does not match. `make lock` takes updates.
 
+#### Bug hunting
+
+```bash
+make bughunt   # lint, sanitizers and a fuzzer; for maintainers, takes a few minutes
+```
+
+This runs the tests against a worker compiled with memory and undefined-behavior checkers, then converts randomly damaged files with it and saves the ones that crash or hang. OpenCASCADE has crashes of its own on damaged files; cascadio survives them because every conversion runs in a separate process.
+
 #### Release checks
 
 These run in Docker and are kept out of CI on purpose:

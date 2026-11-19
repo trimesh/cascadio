@@ -5,8 +5,10 @@
 #include "trace.hpp"
 #include "zstd.hpp"
 
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <Bnd_Box.hxx>
 #include <IGESControl_Reader.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <Standard_Version.hxx>
@@ -16,9 +18,13 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
+#include <cctype>
+#include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <istream>
 #include <stdexcept>
+#include <string>
 #include <streambuf>
 #include <vector>
 
@@ -46,6 +52,33 @@ private:
   } buffer_;
 };
 
+/// Refuse a shape that cannot be meshed in any reasonable time or memory,
+/// before trying. A corrupt file can hold coordinates like 1e300; meshing
+/// that to an absolute tolerance would run until it is killed.
+static void checkMeshable(const TopoDS_Shape &shape, const MeshOptions &mesh) {
+  Bnd_Box box;
+  BRepBndLib::Add(shape, box, false);
+  if (box.IsVoid()) {
+    return; // nothing to mesh
+  }
+  const double size = box.IsOpen() ? HUGE_VAL : std::sqrt(box.SquareExtent());
+  // 1e12 is a million kilometers if the file is in millimeters
+  if (!std::isfinite(size) || size > 1e12) {
+    throw std::invalid_argument(
+        "the model has no sensible size: its coordinates are infinite or "
+        "absurdly large");
+  }
+  // Curved surfaces need about sqrt(size / tolerance) segments per arc.
+  // Past this ratio that is tens of thousands, squared, per surface.
+  if (!mesh.tol_relative && mesh.tol_linear > 0 &&
+      size / mesh.tol_linear > 1e9) {
+    throw std::invalid_argument(
+        "tol_linear is too fine for a model this large (the model is more "
+        "than a billion times the tolerance across); use a larger "
+        "tol_linear, or tol_relative=True");
+  }
+}
+
 /// A meshed CAD document. Closes the document when it goes out of scope,
 /// including when an exception is thrown part way through a conversion.
 struct Loaded {
@@ -70,6 +103,7 @@ struct Loaded {
     if (shape.IsNull()) {
       return;
     }
+    checkMeshable(shape, mesh);
     shapes.push_back(shape);
     Span span("mesh");
     // the constructor runs the meshing
@@ -78,11 +112,77 @@ struct Loaded {
   }
 };
 
+/// A STEP file is text that starts with "ISO-10303-21". Anything else is
+/// refused here, so that OpenCASCADE's parser never sees binary junk.
+/// Returns where the file really starts: a byte order mark and blank lines
+/// before the header are harmless, but OpenCASCADE refuses them.
+static size_t checkLooksLikeStep(const char *data, size_t size) {
+  static const char magic[] = "ISO-10303-21";
+  size_t start = 0;
+  if (size >= 3 && std::memcmp(data, "\xEF\xBB\xBF", 3) == 0) {
+    start = 3; // a UTF-8 byte order mark
+  }
+  while (start < size && std::isspace(static_cast<unsigned char>(data[start]))) {
+    start++;
+  }
+  if (size - start < sizeof(magic) - 1 ||
+      std::memcmp(data + start, magic, sizeof(magic) - 1) != 0) {
+    throw std::invalid_argument(
+        "could not parse the data as a STEP file: it does not start with "
+        "ISO-10303-21");
+  }
+  for (size_t i = start; i < size; i++) {
+    const unsigned char c = static_cast<unsigned char>(data[i]);
+    // bytes above 127 are allowed: names are often UTF-8 or Latin-1
+    if ((c < 32 && c != '\t' && c != '\n' && c != '\r' && c != '\f') ||
+        c == 127) {
+      throw std::invalid_argument(
+          "could not parse the data as a STEP file: it contains control "
+          "characters, so it is binary or damaged");
+    }
+  }
+  return start;
+}
+
+/// An IGES file is fixed-width text: every line carries a section letter
+/// in column 73. Anything else is refused before OpenCASCADE parses it.
+static void checkLooksLikeIges(const char *data, size_t size) {
+  size_t lines = 0;
+  for (size_t begin = 0; begin < size;) {
+    const char *newline =
+        static_cast<const char *>(std::memchr(data + begin, '\n', size - begin));
+    size_t end = newline == nullptr ? size : static_cast<size_t>(newline - data);
+    const size_t next = end + 1;
+    while (end > begin &&
+           std::isspace(static_cast<unsigned char>(data[end - 1]))) {
+      end--; // trailing spaces and the carriage return
+    }
+    if (end > begin) {
+      // B and C mark the rare binary and compressed forms
+      if (end - begin < 73 || end - begin > 80 ||
+          std::strchr("SGDPTBC", data[begin + 72]) == nullptr ||
+          data[begin + 72] == '\0') {
+        throw std::invalid_argument(
+            "could not parse the data as an IGES file: line " +
+            std::to_string(lines + 1) +
+            " is not 80 columns with a section letter in column 73");
+      }
+      lines++;
+    }
+    begin = next;
+  }
+  if (lines == 0) {
+    throw std::invalid_argument(
+        "could not parse the data as an IGES file: it is empty");
+  }
+}
+
 /// Read STEP bytes into `loaded`, keeping names, layers and optionally colors.
 static void loadStep(Loaded &loaded, const char *data, size_t size,
                      const MeshOptions &mesh, bool use_colors) {
+  const size_t start = checkLooksLikeStep(data, size);
   STEPCAFControl_Reader reader;
-  imemstream stream(data, size);
+  imemstream stream(data + start, size - start);
   {
     Span span("parse");
     if (reader.ReadStream("data.step", stream) != IFSelect_RetDone) {
@@ -108,6 +208,7 @@ static void loadStep(Loaded &loaded, const char *data, size_t size,
 /// IGES files are usually loose surfaces, so they are sewn into one shape.
 static void loadIges(Loaded &loaded, const char *data, size_t size,
                      const MeshOptions &mesh) {
+  checkLooksLikeIges(data, size);
   IGESControl_Reader reader;
 #if OCC_VERSION_HEX >= 0x080100
   imemstream stream(data, size);

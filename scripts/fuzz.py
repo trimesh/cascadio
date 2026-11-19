@@ -14,7 +14,7 @@ and the input that caused them is saved to `fuzz-findings/`:
     timeout  the conversion ran past the limit
     memory   the conversion ran past the memory limit
 
-Run it through `make fuzz`, which uses a worker built with sanitizers so
+Run it through `make bughunt`, which uses a worker built with sanitizers so
 that memory errors are caught when they happen instead of when they
 happen to crash.
 """

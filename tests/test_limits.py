@@ -242,3 +242,52 @@ def test_trace():
     stages = [line.split()[1] for line in result.stderr.splitlines() if line.strip()]
     for stage in ("parse", "mesh", "total"):
         assert stage in stages
+
+
+@pytest.mark.parametrize(
+    "damage,reason",
+    [
+        (lambda d: b"\x00\x01\x02" + d, "ISO-10303-21"),
+        (lambda d: d.replace(b"\n", b"\x00\n", 1), "control characters"),
+        (lambda d: d[:400] + bytes([7]) + d[400:], "control characters"),
+    ],
+)
+def test_damaged_step_is_refused_early(damage, reason):
+    """Binary junk never reaches OpenCASCADE's STEP parser."""
+    with pytest.raises(ValueError, match=reason):
+        cascadio.load(damage(STEP))
+
+
+def test_step_may_hold_non_ascii_text():
+    """Names in UTF-8 or Latin-1 are fine; only control characters are not."""
+    material = (MODELS_DIR / "material.stp").read_bytes()
+    assert len(cascadio.load(material.replace(b"Steel", "Stähl".encode()))) > 1000
+    # a byte order mark and leading blank lines are fine too
+    assert len(cascadio.load(b"\xef\xbb\xbf\n\n" + STEP)) > 1000
+
+
+def test_damaged_iges_is_refused_early():
+    """IGES is fixed-width; a line that is not is refused before parsing."""
+    iges = (MODELS_DIR / "microstrip.igs").read_bytes()
+    lines = iges.split(b"\n")
+    lines[5] = lines[5][:40]
+    with pytest.raises(ValueError, match="line 6"):
+        cascadio.load(b"\n".join(lines), file_type="iges")
+    # Windows line endings are fine
+    windows = iges.replace(b"\n", b"\r\n")
+    assert len(cascadio.load(windows, file_type="iges")) > 100
+
+
+def test_absurd_size_is_refused_before_meshing():
+    """A model that could never be meshed is refused, not left to time out."""
+    cuboid = (MODELS_DIR / "cuboid_zup.step").read_bytes()
+    assert cuboid.count(b"(1.,") > 0
+    started = time.monotonic()
+    with pytest.raises(ValueError, match="sensible size"):
+        cascadio.load(cuboid.replace(b"(1.,", b"(1.E300,"))
+    # a tolerance a billion times finer than the model
+    with pytest.raises(ValueError, match="tol_linear is too fine"):
+        cascadio.load(STEP, tol_linear=1e-9)
+    assert time.monotonic() - started < 5
+    # a fine tolerance is fine when it is relative to each edge
+    assert len(cascadio.load(STEP, tol_linear=1e-3, tol_relative=True)) > 1000

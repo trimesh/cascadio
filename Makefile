@@ -13,15 +13,12 @@
 #   make system-occt   build the sdist against a system OpenCASCADE and test
 #   make occt-master   build and test against the newest OpenCASCADE commit
 #
-# Bug hunting, on your own machine (needs clang):
-#   make sanitize      run the tests against a worker built with the address
-#                      and undefined-behavior sanitizers
-#   make fuzz          convert randomly damaged files with that worker and
-#                      save the ones that crash or hang (SECONDS=60)
+# For maintainers, before a release (needs clang; takes a few minutes):
+#   make bughunt       lint, then the tests and a fuzzer against a worker
+#                      built with sanitizers; see the target for details
 #
 # Housekeeping:
 #   make sdist         build the source distribution into dist/
-#   make lint          check Python style and likely bugs (ruff)
 #   make schema        regenerate the README and dataclasses of the extension
 #   make lock          update uv.lock to the newest build tools
 #   make clean         delete everything the targets above created
@@ -34,12 +31,12 @@
 #   PYTHON  CPython tag for `make manylinux` (default: cp312)
 #   OCCT    OpenCASCADE version for `make system-occt` (default: 7.9.0,
 #           the oldest one cascadio supports)
-#   SECONDS how long `make fuzz` runs (default: 60)
+#   SECONDS how long the fuzzer in `make bughunt` runs (default: 120)
 
 CPUS ?= $(shell getconf _NPROCESSORS_ONLN)
 PYTHON ?= cp312
 OCCT ?= 7.9.0
-SECONDS ?= 60
+SECONDS ?= 120
 
 MANYLINUX := quay.io/pypa/manylinux_2_28_x86_64
 MICROMAMBA := mambaorg/micromamba:latest
@@ -53,7 +50,7 @@ export CMAKE_BUILD_PARALLEL_LEVEL := $(CPUS)
 # compiler warnings in our own code are errors (see CMakeLists.txt)
 export CASCADIO_STRICT := ON
 
-.PHONY: help occt install test wheel audit sanitize fuzz manylinux system-occt occt-master sdist lint schema lock clean
+.PHONY: help occt install test wheel audit bughunt manylinux system-occt occt-master sdist schema lock clean
 
 help:
 	@sed -n '/^#/!q;s/^# \{0,1\}//p' $(MAKEFILE_LIST)
@@ -84,24 +81,33 @@ audit:
 sdist: build-constraints.txt
 	uv build --sdist --out-dir dist
 
-# A second copy of the worker, compiled so that a memory error or undefined
-# behavior in our code stops it with a report instead of going unnoticed.
-# OpenCASCADE itself is the normal build, but its heap use is checked too.
-# Setting CASCADIO_WORKER makes the installed module start this worker.
+# Everything that looks for bugs nobody has reported yet, in one go:
+#
+#   1. ruff: Python style and likely mistakes.
+#   2. A second copy of the worker is compiled with the address and
+#      undefined-behavior sanitizers, so a memory error in our code stops
+#      it with a report instead of going unnoticed. (Every build already
+#      treats compiler warnings in our code as errors.)
+#   3. The test suite runs against that worker.
+#   4. scripts/fuzz.py converts randomly damaged copies of the test models
+#      with that worker for SECONDS seconds, and saves every input that
+#      crashes, hangs or runs out of memory to fuzz-findings/.
+#
+# Step 4 does not fail the target: OpenCASCADE has known crashes on damaged
+# files, which cascadio survives by design. Read its summary, and look at
+# anything whose stack is in our code rather than OpenCASCADE's.
 SANITIZED := build/sanitize/cascadio-worker
 SANITIZER_ENV := CASCADIO_WORKER=$(CURDIR)/$(SANITIZED) \
 	ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1
 
-$(SANITIZED): install
+bughunt: install
+	uvx ruff check .
+	uvx ruff format --check .
 	$(TOOLS) cmake -S . -B build/sanitize -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
 	  "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer" \
 	  "-Dnanobind_DIR=$$($(TOOLS) python -m nanobind --cmake_dir)"
 	$(TOOLS) cmake --build build/sanitize --target cascadio-worker
-
-sanitize: $(SANITIZED)
 	$(SANITIZER_ENV) uv run --frozen --extra tests pytest tests
-
-fuzz: $(SANITIZED)
 	$(SANITIZER_ENV) uv run --frozen --extra tests python scripts/fuzz.py \
 	  --seconds $(SECONDS) --jobs $(CPUS)
 
@@ -126,10 +132,6 @@ system-occt: sdist
 occt-master: upstream/OCCT/CMakeLists.txt
 	docker run --rm --cpus $(CPUS) -v "$(CURDIR)":/src:ro $(MANYLINUX) \
 	  bash /src/scripts/test_occt_master.sh
-
-lint:
-	uvx ruff check .
-	uvx ruff format --check .
 
 # everything that repeats the TM_brep_faces schema is generated from it
 schema:
