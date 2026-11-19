@@ -228,6 +228,11 @@ inline bool probe(const std::string &name) {
 #include <sched.h>
 #include <sys/prctl.h>
 
+// the kernel headers of manylinux_2_28 predate clone3
+#ifndef __NR_clone3
+#define __NR_clone3 435 // the same on x86-64 and ARM64
+#endif
+
 #if defined(__x86_64__)
 #define CASCADIO_AUDIT_ARCH AUDIT_ARCH_X86_64
 #elif defined(__aarch64__)
