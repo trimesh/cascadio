@@ -102,6 +102,10 @@ def main() -> int:
         f"-DINSTALL_DIR={PREFIX}",
         "-DINSTALL_DIR_LAYOUT=Unix",
         "-DBUILD_LIBRARY_TYPE=Static",
+        # Keep OpenCASCADE's own null and range checks in the release
+        # build. Off, a damaged file reads out of bounds; on, it throws
+        # Standard_Failure, which the worker reports as an error.
+        "-DBUILD_RELEASE_DISABLE_EXCEPTIONS=OFF",
         "-DBUILD_ADDITIONAL_TOOLKITS=" + ";".join(TOOLKITS),
         *(f"-DBUILD_MODULE_{name}=OFF" for name in MODULES),
         *(f"-DUSE_{name}=OFF" for name in UNUSED),
