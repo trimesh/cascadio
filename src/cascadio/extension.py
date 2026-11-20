@@ -10,8 +10,10 @@ Importing cascadio registers it. When trimesh then loads a GLB made with
   `cascadio.primitives` dataclass, or None if it is not a plane, cylinder,
   cone, sphere or torus
 - `mesh.metadata["cascadio"]["brep_faces"]`: the same as plain dicts
-- `mesh.metadata["cascadio"]["materials"]`: the materials of the part
-  the mesh was made from
+- `mesh.metadata["cascadio"]["substance"]`: what the part the mesh was
+  made from is made of, as `{"name": ..., "density": ...}` with the
+  density in kg/m^3, or None if the file does not say. How the part looks
+  is the glTF material, which trimesh loads as `mesh.visual.material`.
 """
 
 from .primitives import parse_brep_faces
@@ -44,8 +46,8 @@ def _import_brep_faces(ctx: dict) -> dict | None:
     if data.get("faces") is not None:
         metadata["brep_primitives"] = parse_brep_faces(data["faces"])
         metadata["brep_faces"] = data["faces"]
-    if data.get("materials") is not None:
-        metadata["materials"] = data["materials"]
+    if "faces" in data:
+        metadata["substance"] = data.get("substance")
 
     if not face_attributes and not metadata:
         return None

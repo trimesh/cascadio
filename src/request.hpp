@@ -57,7 +57,6 @@ struct Request {
   bool use_parallel = true;
   bool include_brep = false;
   std::set<std::string> brep_types;
-  bool include_materials = false;
   NodeNameFormat node_name_format = NodeNameFormat::INSTANCE_OR_PRODUCT;
   bool y_up = false;
   /// Bytes of memory the worker may use before it stops itself; 0 = no limit
@@ -76,8 +75,7 @@ struct Request {
     for (const std::string &type : brep_types) {
       text << "brep_type=" << type << '\n';
     }
-    text << "include_materials=" << include_materials << '\n'
-         << "node_name_format=" << static_cast<int>(node_name_format) << '\n'
+    text << "node_name_format=" << static_cast<int>(node_name_format) << '\n'
          << "y_up=" << y_up << '\n'
          << "memory_limit=" << memory_limit << '\n'
          << '\n';
@@ -114,8 +112,6 @@ struct Request {
         request.include_brep = flag();
       } else if (key == "brep_type") {
         request.brep_types.insert(value);
-      } else if (key == "include_materials") {
-        request.include_materials = flag();
       } else if (key == "node_name_format") {
         request.node_name_format =
             static_cast<NodeNameFormat>(std::stoi(value));

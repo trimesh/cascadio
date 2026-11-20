@@ -1,6 +1,7 @@
 #pragma once
 
 #include "request.hpp"
+#include "substance.hpp"
 #include "trace.hpp"
 #include "zstd.hpp"
 
@@ -22,6 +23,7 @@
 #include <cstddef>
 #include <cstring>
 #include <istream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <streambuf>
@@ -83,6 +85,10 @@ static void checkMeshable(const TopoDS_Shape &shape, const MeshOptions &mesh) {
 struct Loaded {
   Handle(TDocStd_Document) doc;
   std::vector<TopoDS_Shape> shapes;
+  /// turns the document's densities into kg/m^3; nothing if the file's
+  /// mass units disagree so it cannot be known (see substance.hpp).
+  /// Only worked out for a STEP file when substances are asked for.
+  std::optional<double> densityScale = 1000.0;
 
   Loaded() {
     XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
@@ -177,8 +183,9 @@ static void checkLooksLikeIges(const char *data, size_t size) {
 }
 
 /// Read STEP bytes into `loaded`, keeping names, layers and colors.
+/// With `substances`, also work out the units of its densities.
 static void loadStep(Loaded &loaded, const char *data, size_t size,
-                     const MeshOptions &mesh) {
+                     const MeshOptions &mesh, bool substances) {
   const size_t start = checkLooksLikeStep(data, size);
   STEPCAFControl_Reader reader;
   imemstream stream(data + start, size - start);
@@ -198,6 +205,9 @@ static void loadStep(Loaded &loaded, const char *data, size_t size,
     }
   }
   const XSControl_Reader &shapes = reader.Reader();
+  if (substances) {
+    loaded.densityScale = densityScale(shapes.Model());
+  }
   for (int i = 1; i <= shapes.NbShapes(); i++) {
     loaded.addMeshed(shapes.Shape(i), mesh);
   }
@@ -258,7 +268,7 @@ static void loadIges(Loaded &loaded, const char *data, size_t size,
 /// Read and mesh a STEP or IGES file held in memory.
 /// Zstandard-compressed input is recognized and unpacked first.
 static void load(Loaded &loaded, const char *data, size_t size,
-                 FileType file_type, const MeshOptions &mesh) {
+                 FileType file_type, const MeshOptions &mesh, bool substances) {
   std::vector<char> unpacked;
   if (isZstd(data, size)) {
     Span span("decompress");
@@ -268,7 +278,7 @@ static void load(Loaded &loaded, const char *data, size_t size,
   }
   switch (file_type) {
   case FileType::STEP:
-    return loadStep(loaded, data, size, mesh);
+    return loadStep(loaded, data, size, mesh, substances);
   case FileType::IGES:
     return loadIges(loaded, data, size, mesh);
   default:

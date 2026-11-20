@@ -3,7 +3,7 @@
   "$id": "mesh.primitive.TM_brep_faces.schema.json",
   "title": "TM_brep_faces mesh primitive extension",
   "type": "object",
-  "description": "Which BREP face each triangle came from, the analytic surface of each face, and the materials of the part. All positions and lengths are in meters and all directions are unit vectors, in the same coordinate frame as the primitive's POSITION accessor (before any node transform). All angles are in radians and turn counter-clockwise when seen from the tip of the axis they turn about (the right-hand rule).",
+  "description": "Which BREP face each triangle came from, the analytic surface of each face, and what the part is made of. All positions and lengths are in meters and all directions are unit vectors, in the same coordinate frame as the primitive's POSITION accessor (before any node transform). All angles are in radians and turn counter-clockwise when seen from the tip of the axis they turn about (the right-hand rule).",
   "properties": {
     "faceIndices": {
       "type": "integer",
@@ -24,15 +24,19 @@
         ]
       }
     },
-    "materials": {
-      "type": "array",
-      "description": "The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead.",
-      "items": {
-        "$ref": "#/$defs/material"
-      }
+    "substance": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/substance"
+        }
+      ],
+      "description": "What the part this primitive belongs to is made of, or null if the source file does not say. Every instance of the part shares it."
     }
   },
-  "required": ["faceIndices", "faces", "materials"],
+  "required": ["faceIndices", "faces", "substance"],
   "$defs": {
     "point": {
       "title": "point",
@@ -286,123 +290,23 @@
       "unevaluatedProperties": false,
       "description": "One BREP face whose surface is a plane, cylinder, cone, sphere or torus. The surface is infinite or closed; the `extent_` fields say which part of it the face covers. A face can be smaller than its extents if its outline is not rectangular in those two directions."
     },
-    "rgb": {
-      "type": "array",
-      "items": {
-        "type": "number",
-        "minimum": 0,
-        "maximum": 1
-      },
-      "minItems": 3,
-      "maxItems": 3,
-      "description": "A color [red, green, blue], each from 0 to 1",
-      "title": "color"
-    },
-    "rgba": {
-      "type": "array",
-      "items": {
-        "type": "number",
-        "minimum": 0,
-        "maximum": 1
-      },
-      "minItems": 4,
-      "maxItems": 4,
-      "description": "A color [red, green, blue, alpha], each from 0 to 1",
-      "title": "color with alpha"
-    },
-    "material": {
-      "title": "Material",
+    "substance": {
+      "title": "Substance",
       "type": "object",
-      "description": "Either a physical material (name, density) or a visual one (colors), as the source file defined it. Every field is optional.",
+      "description": "What a part is made of, as the CAD file names it, such as steel or ABS. Not how it looks: that is the primitive's glTF `material`.",
       "properties": {
         "name": {
           "type": "string",
-          "description": "The material's name as written in the source file"
-        },
-        "description": {
-          "type": "string",
-          "description": "Free text about the material from the source file"
+          "minLength": 1,
+          "description": "The name the source file gives it"
         },
         "density": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "Mass per volume as OpenCASCADE reports it. It means grams per cubic centimeter, but ignores a kilo prefix in the source file: a file written in kilograms per cubic meter gives a value 1000 times too small (steel 0.00785 instead of 7.85)."
-        },
-        "density_name": {
-          "type": "string",
-          "description": "The label the source file gave the density value, for example 'density measure'. It is not a unit."
-        },
-        "density_value_type": {
-          "type": "string",
-          "description": "The STEP measure type of the density value, for example 'POSITIVE_RATIO_MEASURE'"
-        },
-        "base_color": {
-          "$ref": "#/$defs/rgba",
-          "description": "The material's overall color"
-        },
-        "alpha_cutoff": {
-          "type": "number",
-          "description": "Alpha below this is drawn as fully transparent, as in glTF's alphaCutoff"
-        },
-        "pbr": {
-          "type": "object",
-          "description": "Metallic-roughness parameters, as in glTF",
-          "properties": {
-            "base_color": {
-              "$ref": "#/$defs/rgba",
-              "description": "Base color, as in glTF's baseColorFactor"
-            },
-            "metallic": {
-              "type": "number",
-              "description": "0 for a non-metal to 1 for a metal"
-            },
-            "roughness": {
-              "type": "number",
-              "description": "0 for mirror-smooth to 1 for fully rough"
-            },
-            "refraction_index": {
-              "type": "number",
-              "description": "Index of refraction; 1.5 is typical glass or plastic"
-            },
-            "emissive_factor": {
-              "$ref": "#/$defs/rgb",
-              "description": "Color of light the material gives off, [red, green, blue]"
-            }
-          },
-          "additionalProperties": false
-        },
-        "common": {
-          "type": "object",
-          "description": "Classic ambient/diffuse/specular parameters",
-          "properties": {
-            "ambient_color": {
-              "$ref": "#/$defs/rgb",
-              "description": "Color in shadow"
-            },
-            "diffuse_color": {
-              "$ref": "#/$defs/rgb",
-              "description": "Color under direct light"
-            },
-            "specular_color": {
-              "$ref": "#/$defs/rgb",
-              "description": "Color of highlights"
-            },
-            "emissive_color": {
-              "$ref": "#/$defs/rgb",
-              "description": "Color of light the material gives off"
-            },
-            "shininess": {
-              "type": "number",
-              "description": "0 for dull to 1 for a tight, bright highlight"
-            },
-            "transparency": {
-              "type": "number",
-              "description": "0 for opaque to 1 for invisible"
-            }
-          },
-          "additionalProperties": false
+          "description": "Mass per volume in kilograms per cubic meter, if the source file gives one: 7850 for steel"
         }
       },
+      "required": ["name"],
       "additionalProperties": false
     }
   },

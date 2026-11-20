@@ -45,8 +45,7 @@ scene = trimesh.load(io.BytesIO(glb), file_type="glb")
 
 `load` never reads or writes files. Useful options (see the docstring for all of them):
 
-- `include_brep=True` adds, for every triangle, which CAD face it came from and the exact plane, cylinder, cone, sphere or torus of that face, plus the materials of each part. This is the [`TM_brep_faces`](extensions/TM_brep_faces/README.md) glTF extension.
-- `include_materials=True` adds only each part's material names, densities and colors. `include_brep` already includes them.
+- `include_brep=True` adds, for every triangle, which CAD face it came from and the exact plane, cylinder, cone, sphere or torus of that face, plus what each part is made of. This is the [`TM_brep_faces`](extensions/TM_brep_faces/README.md) glTF extension.
 - `y_up=True` rotates the model into glTF's Y-up frame. CAD files are almost always Z-up, and by default the coordinates are left as they are. Viewers that follow the glTF convention, such as Blender, rotate on import, so use this if the model shows up lying on its side.
 
 #### Limits and errors

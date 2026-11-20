@@ -9,11 +9,12 @@ Generate everything that repeats the TM_brep_faces schema, from the schema.
                                                      kept in the repository
 
 The header is written by CMake on every build. It holds the extension's
-name, one function for the extension object, and one per face type, each
-taking the schema's fields as typed arguments:
+name, one function for the extension object, one for a substance, and
+one per face type, each taking the schema's fields as typed arguments:
 
     brep::EXTENSION                       "TM_brep_faces"
-    brep::extension(faceIndices, faces, materials, alloc)
+    brep::extension(faceIndices, faces, substance, alloc)
+    brep::substance(name, density, alloc)
     brep::plane(face_index, origin, normal, x_dir, extent_x, extent_y, alloc)
 
 The JSON keys exist only in the schema. If the schema gains, loses or
@@ -93,6 +94,9 @@ HEADER = """\
 // Do not edit: change the schema instead.
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include <rapidjson/document.h>
 
 namespace brep {{
@@ -137,6 +141,20 @@ inline void add(Value &object, const char *key, double number, Allocator &a) {{
   object.AddMember(rapidjson::StringRef(key), number, a);
 }}
 
+inline void add(Value &object, const char *key, const std::string &text,
+                Allocator &a) {{
+  object.AddMember(rapidjson::StringRef(key), Value(text.c_str(), a), a);
+}}
+
+/// An optional field is left out when it has no value.
+template <typename T>
+inline void add(Value &object, const char *key, const std::optional<T> &value,
+                Allocator &a) {{
+  if (value) {{
+    add(object, key, *value, a);
+  }}
+}}
+
 /// The name of the extension, as it appears in `extensionsUsed`.
 inline constexpr const char *EXTENSION = "{extension}";
 
@@ -147,6 +165,13 @@ inline constexpr const char *TYPES[] = {{{types}}};
 inline Value extension({top_arguments}, Allocator &a) {{
   Value object(rapidjson::kObjectType);
 {top_body}
+  return object;
+}}
+
+/// {substance_description}
+inline Value substance({substance_arguments}, Allocator &a) {{
+  Value object(rapidjson::kObjectType);
+{substance_body}
   return object;
 }}
 """
@@ -163,29 +188,49 @@ inline Value {name}(int face_index, {arguments}, Allocator &a) {{
 """
 
 
-def cpp_type(name: str, spec: dict) -> str:
+def cpp_type(name: str, spec: dict, required: bool = True) -> str:
     if spec.get("$ref") in CPP_TYPES:
-        return CPP_TYPES[spec["$ref"]]
-    if spec.get("type") == "number":
-        return "double "
-    raise SystemExit(f"field {name!r}: no C++ type for schema {spec}")
+        kind = CPP_TYPES[spec["$ref"]]
+    elif spec.get("type") == "number":
+        kind = "double "
+    elif spec.get("type") == "string":
+        kind = "const std::string &"
+    else:
+        raise SystemExit(f"field {name!r}: no C++ type for schema {spec}")
+    if required:
+        return kind
+    return f"const std::optional<{kind.strip(' &').removeprefix('const ')}> &"
 
 
 def generate_header(schema: dict, source: str) -> str:
     cases = face_cases(schema)
     top = schema["properties"]
     kinds = {"integer": "int ", "array": "Value &"}
-    for field, spec in top.items():
-        if spec.get("type") not in kinds:
-            raise SystemExit(f"extension field {field!r}: no C++ type for {spec}")
+
+    def top_type(field: str, spec: dict) -> str:
+        if "oneOf" in spec:  # null or an object: a JSON value either way
+            return "Value &"
+        if spec.get("type") in kinds:
+            return kinds[spec["type"]]
+        raise SystemExit(f"extension field {field!r}: no C++ type for {spec}")
+
+    substance = schema["$defs"]["substance"]
     parts = [
         HEADER.format(
             schema=source,
             extension=extension_name(schema),
             types=", ".join(f'"{n}"' for n in cases),
             top_fields=", ".join(top),
-            top_arguments=", ".join(kinds[spec["type"]] + f for f, spec in top.items()),
+            top_arguments=", ".join(top_type(f, spec) + f for f, spec in top.items()),
             top_body="\n".join(f'  object.AddMember("{f}", {f}, a);' for f in top),
+            substance_description=substance["description"],
+            substance_arguments=", ".join(
+                cpp_type(f, spec, f in substance["required"]) + f
+                for f, spec in substance["properties"].items()
+            ),
+            substance_body="\n".join(
+                f'  add(object, "{f}", {f}, a);' for f in substance["properties"]
+            ),
         )
     ]
     for name, properties in cases.items():
@@ -227,7 +272,7 @@ The picture is a mesh, not CAD geometry. Faces are tinted by their `type`. The o
 
 ## Properties
 
-All of these are required, and no other properties are allowed, here or inside a face or a material.
+All of these are required, and no other properties are allowed, here or inside a face or a substance.
 
 {top}
 
@@ -246,12 +291,12 @@ Every face has:
 and, depending on `type`:
 
 {faces}
-## Materials
+## Substance
 
-{material_description}
+{substance_description}
 
-{material}
-{nested}
+{substance}
+
 ## Schema
 
 [`schema/{schema}`](schema/{schema}) is the single source of truth. This page, the code in cascadio that writes the extension, and its Python dataclasses are all generated from it.
@@ -273,7 +318,7 @@ EXAMPLE = {
         },
         None,
     ],
-    "materials": [{"name": "Steel", "density": 7.85}],
+    "substance": {"name": "Steel", "density": 7850},
 }
 
 
@@ -282,6 +327,8 @@ def type_name(schema: dict, spec: dict) -> str:
     if "$ref" in spec:
         target = schema["$defs"][spec["$ref"].rsplit("/", 1)[1]]
         return target.get("title", target.get("type", ""))
+    if "oneOf" in spec:
+        return " or ".join(type_name(schema, option) for option in spec["oneOf"])
     if spec.get("type") == "array" and "$ref" in spec.get("items", {}):
         return "list of " + type_name(schema, spec["items"]) + "s"
     return spec.get("type", "")
@@ -299,21 +346,16 @@ def example_json() -> str:
     faces = [json.dumps(face) for face in EXAMPLE["faces"]]
     lines = ["{", f'  "faceIndices": {EXAMPLE["faceIndices"]},', '  "faces": [']
     lines += [f"    {face}," for face in faces[:-1]] + [f"    {faces[-1]}"]
-    lines += ["  ],", f'  "materials": {json.dumps(EXAMPLE["materials"])}', "}"]
+    lines += ["  ],", f'  "substance": {json.dumps(EXAMPLE["substance"])}', "}"]
     return "\n".join(lines)
 
 
 def generate_readme(schema: dict, source: str) -> str:
     face = schema["$defs"]["face"]
-    material = schema["$defs"]["material"]
+    substance = schema["$defs"]["substance"]
     faces = "".join(
         f"### {name}\n\n{table(schema, properties)}\n\n"
         for name, properties in face_cases(schema).items()
-    )
-    nested = "".join(
-        f"\n`{name}`: {spec['description']}\n\n{table(schema, spec['properties'])}\n"
-        for name, spec in material["properties"].items()
-        if spec.get("type") == "object"
     )
     return README.format(
         schema=source,
@@ -328,9 +370,8 @@ def generate_readme(schema: dict, source: str) -> str:
         ),
         face_common=table(schema, face["properties"]),
         faces=faces,
-        material_description=material["description"],
-        material=table(schema, material["properties"]),
-        nested=nested,
+        substance_description=substance["description"] + " Only `name` is required.",
+        substance=table(schema, substance["properties"]),
     )
 
 

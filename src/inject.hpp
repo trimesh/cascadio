@@ -2,10 +2,9 @@
 
 #include "glb.hpp"
 #include "gltf_writer.hpp"
-#include "materials.hpp"
 #include "primitives.hpp"
+#include "substance.hpp"
 
-#include <TDocStd_Document.hxx>
 #include <gp_Trsf.hxx>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -14,29 +13,26 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-/// Add face and material data to a finished GLB.
+/// Add face and substance data to a finished GLB.
 ///
-/// With `withFaces`, every primitive the writer recorded gets the
-/// TM_brep_faces extension: a uint32 array appended to the binary buffer
-/// (one face index per triangle), the surface of each face, and the
-/// materials of the part it belongs to. The extension's name and keys come
-/// from the schema (tm_brep_faces.hpp).
+/// Every primitive the writer recorded gets the TM_brep_faces extension:
+/// a uint32 array appended to the binary buffer (one face index per
+/// triangle), the surface of each face, and the substance of the part it
+/// belongs to. The extension's name and keys come from the schema
+/// (tm_brep_faces.hpp).
 ///
-/// With `withExtras`, each mesh's materials are also written to its
-/// `extras.cascadio.materials`. That is the only place for them without the
-/// extension, and it is where earlier versions put them.
-///
+/// @param densityScale turns stored densities into kg/m^3 (see substance.hpp)
 /// @param frame moves the face geometry into the coordinate frame of the mesh
-static void injectIntoGlb(Glb &glb, const Handle(TDocStd_Document) & document,
-                          const Recorded &recorded, bool withFaces,
-                          bool withExtras,
+static void injectIntoGlb(Glb &glb, const Recorded &recorded,
                           const std::set<std::string> &allowedTypes,
-                          double lengthUnit, const gp_Trsf &frame) {
+                          double lengthUnit, std::optional<double> densityScale,
+                          const gp_Trsf &frame) {
   rapidjson::Document doc;
   doc.Parse(glb.json.data(), glb.json.size());
   if (doc.HasParseError() || !doc.IsObject()) {
@@ -51,78 +47,65 @@ static void injectIntoGlb(Glb &glb, const Handle(TDocStd_Document) & document,
     return; // an empty scene: nothing to attach anything to
   }
 
-  // The materials of each part, by the accessor id of its primitive.
-  // If the file assigns no material to any part, every part gets the list
-  // of all materials the file defines, which is the best that can be said.
-  std::map<int, rapidjson::Value> assigned;
-  bool anyAssigned = false;
-  for (const auto &[accessor, part] : recorded.parts) {
-    rapidjson::Value materials = partMaterials(part, alloc);
-    anyAssigned = anyAssigned || !materials.Empty();
-    assigned.emplace(accessor, std::move(materials));
-  }
-  const rapidjson::Value everything =
-      anyAssigned ? rapidjson::Value(rapidjson::kArrayType)
-                  : allMaterials(document, alloc);
-  auto materialsFor = [&](int accessor) {
-    const auto found = assigned.find(accessor);
-    const rapidjson::Value &source =
-        anyAssigned && found != assigned.end() ? found->second : everything;
-    return rapidjson::Value(source, alloc); // a copy
+  // The substance of a primitive is that of the part it was made from.
+  // Instances of a part share its primitive, so they share this too.
+  auto substanceFor = [&](int accessor) {
+    const auto found = recorded.parts.find(accessor);
+    return found == recorded.parts.end()
+               ? rapidjson::Value()
+               : partSubstance(found->second, densityScale, alloc);
   };
 
   // indices accessor id -> {faceIndices accessor id, faces JSON}
   std::map<int, std::pair<int, rapidjson::Value>> extensions;
-  if (withFaces) {
-    // glTF wants every buffer view to start on a 4-byte boundary
-    glb.bin.resize((glb.bin.size() + 3) & ~size_t(3));
-    for (const auto &[indicesId, list] : recorded.faces) {
-      std::vector<uint32_t> faceIndices;
-      rapidjson::Value facesJson(rapidjson::kArrayType);
-      for (size_t i = 0; i < list.size(); ++i) {
-        const FaceTriangles &f = list[i];
-        faceIndices.resize(
-            std::max(faceIndices.size(), size_t(f.triStart + f.triCount)),
-            UINT32_MAX);
-        std::fill_n(faceIndices.begin() + f.triStart, f.triCount,
-                    static_cast<uint32_t>(i));
-        facesJson.PushBack(describeFace(f.face, static_cast<int>(i), alloc,
-                                        allowedTypes, lengthUnit, frame),
-                           alloc);
-      }
-
-      const size_t byteOffset = glb.bin.size();
-      const size_t byteLength = faceIndices.size() * sizeof(uint32_t);
-      if (byteOffset + byteLength > UINT32_MAX) {
-        throw std::runtime_error("the GLB would be over 4 GB, the format's "
-                                 "limit; use a larger tol_linear");
-      }
-      const char *raw = reinterpret_cast<const char *>(faceIndices.data());
-      glb.bin.insert(glb.bin.end(), raw, raw + byteLength);
-
-      rapidjson::Value view(rapidjson::kObjectType);
-      view.AddMember("buffer", 0, alloc);
-      view.AddMember("byteOffset", static_cast<uint32_t>(byteOffset), alloc);
-      view.AddMember("byteLength", static_cast<uint32_t>(byteLength), alloc);
-      doc["bufferViews"].PushBack(view, alloc);
-
-      rapidjson::Value accessor(rapidjson::kObjectType);
-      accessor.AddMember("bufferView", doc["bufferViews"].Size() - 1, alloc);
-      accessor.AddMember("byteOffset", 0, alloc);
-      accessor.AddMember("componentType", 5125, alloc); // UNSIGNED_INT
-      accessor.AddMember("count", static_cast<uint32_t>(faceIndices.size()),
+  // glTF wants every buffer view to start on a 4-byte boundary
+  glb.bin.resize((glb.bin.size() + 3) & ~size_t(3));
+  for (const auto &[indicesId, list] : recorded.faces) {
+    std::vector<uint32_t> faceIndices;
+    rapidjson::Value facesJson(rapidjson::kArrayType);
+    for (size_t i = 0; i < list.size(); ++i) {
+      const FaceTriangles &f = list[i];
+      faceIndices.resize(
+          std::max(faceIndices.size(), size_t(f.triStart + f.triCount)),
+          UINT32_MAX);
+      std::fill_n(faceIndices.begin() + f.triStart, f.triCount,
+                  static_cast<uint32_t>(i));
+      facesJson.PushBack(describeFace(f.face, static_cast<int>(i), alloc,
+                                      allowedTypes, lengthUnit, frame),
                          alloc);
-      accessor.AddMember("type", "SCALAR", alloc);
-      doc["accessors"].PushBack(accessor, alloc);
-
-      extensions.emplace(
-          indicesId, std::make_pair(static_cast<int>(doc["accessors"].Size()) - 1,
-                                    std::move(facesJson)));
     }
-    doc["buffers"][0].RemoveMember("byteLength");
-    doc["buffers"][0].AddMember("byteLength",
-                                static_cast<uint32_t>(glb.bin.size()), alloc);
+
+    const size_t byteOffset = glb.bin.size();
+    const size_t byteLength = faceIndices.size() * sizeof(uint32_t);
+    if (byteOffset + byteLength > UINT32_MAX) {
+      throw std::runtime_error("the GLB would be over 4 GB, the format's "
+                               "limit; use a larger tol_linear");
+    }
+    const char *raw = reinterpret_cast<const char *>(faceIndices.data());
+    glb.bin.insert(glb.bin.end(), raw, raw + byteLength);
+
+    rapidjson::Value view(rapidjson::kObjectType);
+    view.AddMember("buffer", 0, alloc);
+    view.AddMember("byteOffset", static_cast<uint32_t>(byteOffset), alloc);
+    view.AddMember("byteLength", static_cast<uint32_t>(byteLength), alloc);
+    doc["bufferViews"].PushBack(view, alloc);
+
+    rapidjson::Value accessor(rapidjson::kObjectType);
+    accessor.AddMember("bufferView", doc["bufferViews"].Size() - 1, alloc);
+    accessor.AddMember("byteOffset", 0, alloc);
+    accessor.AddMember("componentType", 5125, alloc); // UNSIGNED_INT
+    accessor.AddMember("count", static_cast<uint32_t>(faceIndices.size()),
+                       alloc);
+    accessor.AddMember("type", "SCALAR", alloc);
+    doc["accessors"].PushBack(accessor, alloc);
+
+    extensions.emplace(
+        indicesId, std::make_pair(static_cast<int>(doc["accessors"].Size()) - 1,
+                                  std::move(facesJson)));
   }
+  doc["buffers"][0].RemoveMember("byteLength");
+  doc["buffers"][0].AddMember("byteLength",
+                              static_cast<uint32_t>(glb.bin.size()), alloc);
 
   bool attached = false;
   for (auto &mesh : doc["meshes"].GetArray()) {
@@ -136,36 +119,20 @@ static void injectIntoGlb(Glb &glb, const Handle(TDocStd_Document) & document,
       }
       const int indicesId = prim["indices"].GetInt();
 
-      if (withExtras && &prim == mesh["primitives"].Begin()) {
-        // one list per mesh, taken from its first primitive
-        if (!mesh.HasMember("extras") || !mesh["extras"].IsObject()) {
-          mesh.RemoveMember("extras");
-          mesh.AddMember("extras", rapidjson::Value(rapidjson::kObjectType),
-                         alloc);
-        }
-        rapidjson::Value cascadio(rapidjson::kObjectType);
-        cascadio.AddMember("materials", materialsFor(indicesId), alloc);
-        mesh["extras"].RemoveMember("cascadio");
-        mesh["extras"].AddMember("cascadio", cascadio, alloc);
-      }
-      if (!withFaces) {
-        break;
-      }
-
       auto found = extensions.find(indicesId);
       if (found == extensions.end()) {
         continue;
       }
       // the faces are copied: instanced parts share one accessor
       rapidjson::Value faces(found->second.second, alloc);
-      rapidjson::Value materials = materialsFor(indicesId);
+      rapidjson::Value substance = substanceFor(indicesId);
       if (!prim.HasMember("extensions")) {
         prim.AddMember("extensions", rapidjson::Value(rapidjson::kObjectType),
                        alloc);
       }
       prim["extensions"].AddMember(
           rapidjson::StringRef(brep::EXTENSION),
-          brep::extension(found->second.first, faces, materials, alloc), alloc);
+          brep::extension(found->second.first, faces, substance, alloc), alloc);
       attached = true;
     }
   }

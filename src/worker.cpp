@@ -81,7 +81,6 @@ static Glb run(const Locked &locked, const Request &request, const char *data,
   options.merge_primitives = request.merge_primitives;
   options.include_brep = request.include_brep;
   options.brep_types = request.brep_types;
-  options.include_materials = request.include_materials;
   options.node_name_format =
       static_cast<RWMesh_NameFormat>(request.node_name_format);
   options.y_up = request.y_up;

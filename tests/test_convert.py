@@ -342,17 +342,16 @@ def test_brep_forces_merge_primitives():
     assert_brep_surfaces(mesh)
 
 
-def test_convert_step_to_glb_with_materials():
-    """Test that include_materials=True extracts material data from STEP."""
+def test_convert_step_to_glb_with_substance():
+    """`include_brep` gives each part's substance, with its density in kg/m^3."""
     step_data = (MODELS_DIR / "material.stp").read_bytes()
 
-    # Convert with materials
     glb_data = cascadio.load(
         step_data,
         file_type="step",
         tol_linear=0.1,
         tol_angular=0.5,
-        include_materials=True,
+        include_brep=True,
     )
 
     assert len(glb_data) > 0
@@ -361,27 +360,18 @@ def test_convert_step_to_glb_with_materials():
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
     mesh = next(iter(scene.geometry.values()))
 
-    # Materials should be in mesh.metadata.cascadio.materials
-    assert "cascadio" in mesh.metadata
-    assert "materials" in mesh.metadata["cascadio"]
+    # the file says 7850 kg/m^3; OpenCASCADE alone reports 0.00785
+    substance = mesh.metadata["cascadio"]["substance"]
+    assert substance["name"] == "Steel"
+    assert substance["density"] == pytest.approx(7850)
+    assert set(substance) == {"name", "density"}
 
-    materials = mesh.metadata["cascadio"]["materials"]
-    assert len(materials) == 1
-
-    # Materials are arbitrary dicts - check the raw data
-    mat = materials[0]
-    assert mat["name"] == "Steel"
-    assert mat["description"] == "Steel"
-    assert "density" in mat
-    assert 0.007 < mat["density"] < 0.008  # ~0.00785 g/mm³ for steel
-
-    # Test with both materials and BREP data (plane filter)
+    # filtering the face types keeps the substance
     glb_data_with_brep = cascadio.load(
         step_data,
         file_type="step",
         tol_linear=0.1,
         tol_angular=0.5,
-        include_materials=True,
         include_brep=True,
         brep_types={"plane"},
     )
@@ -393,11 +383,8 @@ def test_convert_step_to_glb_with_materials():
     )
     mesh_brep = next(iter(scene_brep.geometry.values()))
 
-    # Materials should still be present
-    assert "cascadio" in mesh_brep.metadata
-    assert "materials" in mesh_brep.metadata["cascadio"]
-    assert len(mesh_brep.metadata["cascadio"]["materials"]) == 1
-    assert mesh_brep.metadata["cascadio"]["materials"][0]["name"] == "Steel"
+    # the substance should still be present
+    assert mesh_brep.metadata["cascadio"]["substance"]["name"] == "Steel"
 
     # BREP data should be present with only planes
     assert "brep_faces" in mesh_brep.metadata["cascadio"]
@@ -564,33 +551,86 @@ def test_y_up_brep():
         assert any(np.allclose(n, up) for n in normals)
 
 
-def test_brep_includes_materials():
-    """`include_brep` alone brings the materials: they are part of the extension."""
+def test_brep_includes_substance():
+    """`include_brep` alone brings the substance: it is part of the extension."""
     scene = load_scene("material.stp", include_brep=True)
     mesh = next(iter(scene.geometry.values()))
-    assert mesh.metadata["cascadio"]["materials"][0]["name"] == "Steel"
+    assert mesh.metadata["cascadio"]["substance"]["name"] == "Steel"
     assert len(mesh.metadata["cascadio"]["brep_primitives"]) > 0
 
 
 @pytest.mark.parametrize("option", ["include_brep", "include_materials"])
-def test_materials_per_part(option):
-    """Each mesh carries the materials of its own part, not the whole model's."""
+def test_substance_per_part(option):
+    """Each mesh carries the substance of its own part, not the whole model's."""
     # two parts made from material.stp: "Part 1" is Steel, "Part 2" is Aluminum
     scene = load_scene("two_materials.step", **{option: True})
     assert len(scene.geometry) == 2
     found = {
-        name: [m["name"] for m in mesh.metadata["cascadio"]["materials"]]
+        name: mesh.metadata["cascadio"]["substance"]
         for name, mesh in scene.geometry.items()
     }
-    assert sorted(found.values()) == [["Aluminum"], ["Steel"]]
-    assert found["Part 1"] == ["Steel"]
+    assert sorted(s["name"] for s in found.values()) == ["Aluminum", "Steel"]
+    assert found["Part 1"]["name"] == "Steel"
+    # the file gives both the same density, in kilograms per cubic meter
+    assert all(s["density"] == pytest.approx(7850) for s in found.values())
 
 
-def test_no_materials():
-    """A model without materials has an empty list on every mesh."""
-    scene = load_scene("multibody.step", include_brep=True)
-    for mesh in scene.geometry.values():
-        assert mesh.metadata["cascadio"]["materials"] == []
+def test_appearance_is_a_gltf_material():
+    """
+    How a part looks is in the GLB's own materials, and nothing of it is in
+    the extension: the substance is what the part is made of.
+    """
+    glb = cascadio.load((MODELS_DIR / "colored.step").read_bytes(), include_brep=True)
+    header = json.loads(glb[20 : 20 + struct.unpack("<I", glb[12:16])[0]])
+    for mesh in header["meshes"]:
+        for primitive in mesh["primitives"]:
+            assert primitive["extensions"]["TM_brep_faces"]["substance"] is None
+            material = header["materials"][primitive["material"]]
+            assert len(material["pbrMetallicRoughness"]["baseColorFactor"]) == 4
+
+
+def test_instances_share_a_substance():
+    """
+    A substance belongs to a part, so every node that shows the part
+    reaches the same one, through its mesh's primitive.
+    """
+    # multibody.step places the "gusset" part (#8805) four times. Give it a
+    # substance, with its density written as kg * m^-3 this time.
+    gusset = b"""
+#90001=PROPERTY_DEFINITION('material property','material name',#8805);
+#90002=DESCRIPTIVE_REPRESENTATION_ITEM('Brass','Brass');
+#90003=REPRESENTATION('material name',(#90002),#2455);
+#90004=PROPERTY_DEFINITION_REPRESENTATION(#90001,#90003);
+#90005=(MASS_UNIT() NAMED_UNIT(*) SI_UNIT(.KILO.,.GRAM.));
+#90006=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.));
+#90007=DERIVED_UNIT_ELEMENT(#90005,1.);
+#90008=DERIVED_UNIT_ELEMENT(#90006,-3.);
+#90009=DERIVED_UNIT((#90007,#90008));
+#90010=MEASURE_REPRESENTATION_ITEM('density measure',
+POSITIVE_RATIO_MEASURE(8500.),#90009);
+#90011=REPRESENTATION('density',(#90010),#2455);
+#90012=PROPERTY_DEFINITION('material property','density of part',#8805);
+#90013=PROPERTY_DEFINITION_REPRESENTATION(#90012,#90011);
+ENDSEC;
+END-ISO-10303-21;"""
+    data = (MODELS_DIR / "multibody.step").read_bytes()
+    data = data[: data.rindex(b"ENDSEC;")] + gusset
+    glb = cascadio.load(data, include_brep=True)
+    header = json.loads(glb[20 : 20 + struct.unpack("<I", glb[12:16])[0]])
+
+    found = {}
+    for node in header["nodes"]:
+        if "mesh" not in node:
+            continue
+        mesh = header["meshes"][node["mesh"]]
+        for primitive in mesh["primitives"]:
+            substance = primitive["extensions"]["TM_brep_faces"]["substance"]
+            found.setdefault(mesh["name"], []).append(substance)
+    brass = {"name": "Brass", "density": pytest.approx(8500)}
+    assert found["gusset"] == [brass] * 4
+    # the other parts are made of nothing the file names
+    others = [s for name, found_ in found.items() if name != "gusset" for s in found_]
+    assert others and all(s is None for s in others)
 
 
 def _within(values, bounds, tolerance, period=None):
@@ -685,13 +725,9 @@ def test_extents_mean_what_the_schema_says(y_up):
     print("checked:", sorted(checked))
 
 
-def test_materials_stay_in_extras():
-    """With `include_materials`, each mesh's extras carry them, as in 0.1."""
-    for options in (
-        {"include_materials": True},
-        {"include_materials": True, "include_brep": True},
-    ):
-        glb = cascadio.load((MODELS_DIR / "material.stp").read_bytes(), **options)
-        header = json.loads(glb[20 : 20 + struct.unpack("<I", glb[12:16])[0]])
-        materials = header["meshes"][0]["extras"]["cascadio"]["materials"]
-        assert materials[0]["name"] == "Steel"
+def test_include_materials_is_include_brep():
+    """The option from cascadio 0.1 is now the same as `include_brep`."""
+    data = (MODELS_DIR / "material.stp").read_bytes()
+    assert cascadio.load(data, include_materials=True) == cascadio.load(
+        data, include_brep=True
+    )

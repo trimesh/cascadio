@@ -32,7 +32,6 @@ struct ConvertOptions {
   bool merge_primitives = true;
   bool include_brep = false;
   std::set<std::string> brep_types;
-  bool include_materials = false;
   RWMesh_NameFormat node_name_format = RWMesh_NameFormat_InstanceOrProduct;
   /// Rotate from CAD's Z-up into glTF's Y-up: (x, y, z) -> (x, z, -y)
   bool y_up = false;
@@ -186,20 +185,18 @@ static Glb toGlb(const Locked &, const char *data, size_t size,
       throw std::invalid_argument("unknown brep_types entry: " + type);
     }
   }
-  // face and material metadata is attached per part,
+  // face and substance data is attached per part,
   // which needs one merged primitive per part
-  if (options.include_brep || options.include_materials) {
+  if (options.include_brep) {
     options.merge_primitives = true;
   }
 
   Loaded loaded;
-  load(loaded, data, size, file_type, options.mesh);
-
-  // BREP data always carries the materials: they are part of the extension
-  const bool annotate = options.include_brep || options.include_materials;
+  load(loaded, data, size, file_type, options.mesh, options.include_brep);
   Recorded recorded;
-  Glb glb = writeGlb(loaded.doc, options, annotate ? &recorded : nullptr);
-  if (annotate) {
+  Glb glb =
+      writeGlb(loaded.doc, options, options.include_brep ? &recorded : nullptr);
+  if (options.include_brep) {
     Span span("face data");
     // scale factor from the file's unit to meters, the unit of glTF
     const double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
@@ -208,9 +205,12 @@ static Glb toGlb(const Locked &, const char *data, size_t size,
     if (options.y_up) {
       frame.SetRotation(gp::OX(), -M_PI / 2);
     }
-    injectIntoGlb(glb, loaded.doc, recorded, options.include_brep,
-                  options.include_materials, options.brep_types, lengthUnit,
-                  frame);
+    if (!loaded.densityScale) {
+      warn("the file gives densities in mass units with different prefixes, "
+           "so no density is reported");
+    }
+    injectIntoGlb(glb, recorded, options.brep_types, lengthUnit,
+                  loaded.densityScale, frame);
   }
   return glb;
 }

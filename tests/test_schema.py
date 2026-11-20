@@ -144,12 +144,13 @@ def test_extension_validates():
             },
             None,  # a face that is not one of the analytic types
         ],
-        "materials": [
-            {"name": "Steel", "density": 7850.0, "density_name": "kg/m3"},
-            {"base_color": [0.5, 0.5, 0.5, 1.0], "pbr": {"metallic": 1.0}},
-        ],
+        "substance": {"name": "Steel", "density": 7850.0},
     }
     get_validator(EXTENSION_SCHEMA).validate(extension)
+
+    # a file need not say what a part is made of, nor how dense that is
+    for substance in (None, {"name": "Steel"}):
+        get_validator(EXTENSION_SCHEMA).validate({**extension, "substance": substance})
 
     # all three fields are required
     for key in extension:
@@ -170,7 +171,7 @@ def test_extra_fields_rejected():
         "extent_longitude": [0.0, 6.283],
         "extent_latitude": [-1.57, 1.57],
     }
-    valid = {"faceIndices": 0, "faces": [face], "materials": [{"name": "Steel"}]}
+    valid = {"faceIndices": 0, "faces": [face], "substance": {"name": "Steel"}}
     get_validator(EXTENSION_SCHEMA).validate(valid)
 
     for broken in (
@@ -178,8 +179,15 @@ def test_extra_fields_rejected():
         {**valid, "faces": [{**face, "extra": 1}]},
         # a field that belongs to another face type
         {**valid, "faces": [{**face, "major_radius": 2.0}]},
-        {**valid, "materials": [{"name": "Steel", "extra": 1}]},
-        {**valid, "materials": [{"pbr": {"extra": 1}}]},
+        {**valid, "substance": {"name": "Steel", "extra": 1}},
+        # how it looks is the glTF material, not the substance
+        {**valid, "substance": {"name": "Steel", "base_color": [1, 1, 1, 1]}},
+        {**valid, "substance": {"name": "Steel", "pbr": {"metallic": 1.0}}},
+        # a substance has a name, and a part has one substance
+        {**valid, "substance": {"density": 7850.0}},
+        {**valid, "substance": {"name": ""}},
+        {**valid, "substance": [{"name": "Steel"}]},
+        {**valid, "materials": [{"name": "Steel"}]},
     ):
         with pytest.raises(jsonschema.ValidationError):
             get_validator(EXTENSION_SCHEMA).validate(broken)
@@ -332,8 +340,6 @@ def test_files_from_0_1_still_work(name):
             primitive, cascadio.primitives.Plane
         ):
             assert primitive.x_dir is None
-    if name == "material":
-        assert mesh.metadata["cascadio"]["materials"][0]["name"] == "Steel"
 
 
 def test_dataclass_field_order_is_stable():

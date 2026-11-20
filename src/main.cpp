@@ -267,15 +267,14 @@ use_parallel
 include_brep
     Add the `TM_brep_faces` extension: for every triangle the index of
     the CAD face it came from, the exact plane, cylinder, cone, sphere
-    or torus of that face, and the materials of the part.
+    or torus of that face, and what the part is made of.
     Turns `merge_primitives` on.
 brep_types
     If given, only these surface types are described. Any of "plane",
     "cylinder", "cone", "sphere" and "torus".
 include_materials
-    Add each part's material names, densities and colors without the
-    rest of the extension. `include_brep` already includes them.
-    Turns `merge_primitives` on.
+    The same as `include_brep`, which carries what each part is made of.
+    Kept so that calls written for cascadio 0.1 still work.
 node_name_format
     Which name each GLB node gets: the instance label, the product
     name, or a mix.
@@ -375,9 +374,8 @@ NB_MODULE(_core, m) {
     request.tol_relative = tol_relative;
     request.merge_primitives = merge_primitives;
     request.use_parallel = use_parallel;
-    request.include_brep = include_brep;
+    request.include_brep = include_brep || include_materials;
     request.brep_types = brep_types.value_or(std::set<std::string>());
-    request.include_materials = include_materials;
     request.node_name_format = node_name_format;
     request.y_up = y_up;
     const std::vector<char> glb =

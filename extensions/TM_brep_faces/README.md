@@ -1,7 +1,7 @@
 <!-- Generated from schema/mesh.primitive.TM_brep_faces.schema.json by scripts/gen_schema.py. Do not edit. -->
 # TM_brep_faces
 
-Which BREP face each triangle came from, the analytic surface of each face, and the materials of the part.
+Which BREP face each triangle came from, the analytic surface of each face, and what the part is made of.
 
 All positions and lengths are in meters and all directions are unit vectors, in the same coordinate frame as the primitive's POSITION accessor (before any node transform). All angles are in radians and turn counter-clockwise when seen from the tip of the axis they turn about (the right-hand rule).
 
@@ -18,19 +18,19 @@ The picture is a mesh, not CAD geometry. Faces are tinted by their `type`. The o
     {"type": "cylinder", "face_index": 0, "origin": [0, 0, 0], "axis": [0, 0, 1], "x_dir": [1, 0, 0], "radius": 0.005, "extent_angle": [0, 6.2832], "extent_height": [0, 0.01]},
     null
   ],
-  "materials": [{"name": "Steel", "density": 7.85}]
+  "substance": {"name": "Steel", "density": 7850}
 }
 ```
 
 ## Properties
 
-All of these are required, and no other properties are allowed, here or inside a face or a material.
+All of these are required, and no other properties are allowed, here or inside a face or a substance.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `faceIndices` | integer | Index of an accessor with one value per triangle: the position in `faces` of the BREP face that triangle came from. The accessor is SCALAR with an unsigned integer component type, and its count equals the number of triangles in the primitive. |
 | `faces` | array | One entry per BREP face, in face index order. An entry is null when the face is not one of the analytic surface types, so positions still match face indices. |
-| `materials` | list of Materials | The materials of the part this primitive belongs to. Empty if the part has none. A writer that cannot tell which part a material belongs to may list every material of the source model here instead. |
+| `substance` | null or Substance | What the part this primitive belongs to is made of, or null if the source file does not say. Every instance of the part shares it. |
 
 ## Faces
 
@@ -108,42 +108,14 @@ and, depending on `type`:
 | `x_dir` | direction | Unit direction perpendicular to the axis from which angles are measured. |
 
 
-## Materials
+## Substance
 
-Either a physical material (name, density) or a visual one (colors), as the source file defined it. Every field is optional.
-
-| Field | Type | Meaning |
-|---|---|---|
-| `name` | string | The material's name as written in the source file |
-| `description` | string | Free text about the material from the source file |
-| `density` | number | Mass per volume as OpenCASCADE reports it. It means grams per cubic centimeter, but ignores a kilo prefix in the source file: a file written in kilograms per cubic meter gives a value 1000 times too small (steel 0.00785 instead of 7.85). |
-| `density_name` | string | The label the source file gave the density value, for example 'density measure'. It is not a unit. |
-| `density_value_type` | string | The STEP measure type of the density value, for example 'POSITIVE_RATIO_MEASURE' |
-| `base_color` | color with alpha | The material's overall color |
-| `alpha_cutoff` | number | Alpha below this is drawn as fully transparent, as in glTF's alphaCutoff |
-| `pbr` | object | Metallic-roughness parameters, as in glTF |
-| `common` | object | Classic ambient/diffuse/specular parameters |
-
-`pbr`: Metallic-roughness parameters, as in glTF
+What a part is made of, as the CAD file names it, such as steel or ABS. Not how it looks: that is the primitive's glTF `material`. Only `name` is required.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `base_color` | color with alpha | Base color, as in glTF's baseColorFactor |
-| `metallic` | number | 0 for a non-metal to 1 for a metal |
-| `roughness` | number | 0 for mirror-smooth to 1 for fully rough |
-| `refraction_index` | number | Index of refraction; 1.5 is typical glass or plastic |
-| `emissive_factor` | color | Color of light the material gives off, [red, green, blue] |
-
-`common`: Classic ambient/diffuse/specular parameters
-
-| Field | Type | Meaning |
-|---|---|---|
-| `ambient_color` | color | Color in shadow |
-| `diffuse_color` | color | Color under direct light |
-| `specular_color` | color | Color of highlights |
-| `emissive_color` | color | Color of light the material gives off |
-| `shininess` | number | 0 for dull to 1 for a tight, bright highlight |
-| `transparency` | number | 0 for opaque to 1 for invisible |
+| `name` | string | The name the source file gives it |
+| `density` | number | Mass per volume in kilograms per cubic meter, if the source file gives one: 7850 for steel |
 
 ## Schema
 
