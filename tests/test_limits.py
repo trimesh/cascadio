@@ -77,9 +77,9 @@ def test_only_one_limit():
 
 
 def test_missing_worker(monkeypatch):
-    """If the worker program cannot be started, say so."""
+    """If the worker program is missing, say what to do."""
     monkeypatch.setenv("CASCADIO_WORKER", str(MODELS_DIR / "no-such-program"))
-    with pytest.raises(RuntimeError, match="cannot start"):
+    with pytest.raises(RuntimeError, match=r"missing.*reinstall cascadio"):
         cascadio.load(STEP)
 
 
@@ -95,7 +95,7 @@ def test_crashing_worker(monkeypatch):
 def test_segfault_is_survived(fake_worker, monkeypatch):
     """A worker killed by a segmentation fault raises; the interpreter lives."""
     fake_worker("kill -SEGV $$")
-    with pytest.raises(RuntimeError, match=r"crashed.*signal 11"):
+    with pytest.raises(RuntimeError, match=r"crashed.*SIGSEGV"):
         cascadio.load(STEP)
 
     monkeypatch.delenv("CASCADIO_WORKER")
@@ -107,6 +107,53 @@ def test_sandbox_stop_is_explained(fake_worker):
     fake_worker("kill -SYS $$")
     with pytest.raises(RuntimeError, match="sandbox"):
         cascadio.load(STEP)
+
+
+def test_no_sandbox_is_explained(fake_worker):
+    """A worker that cannot lock down refuses, and the reason reaches
+    Python whole, after any other output."""
+    fake_worker('echo "cascadio: parse 1 ms" >&2; echo "a reason" >&2; exit 67')
+    with pytest.raises(RuntimeError, match=r"could not sandbox .* run it: a reason$"):
+        cascadio.load(STEP)
+
+
+def test_version_mismatch_is_explained(fake_worker):
+    """A worker from another version says so, not that the data is bad."""
+    fake_worker('echo "unknown request key: x" >&2; exit 68')
+    with pytest.raises(RuntimeError, match=r"does not match .* reinstall cascadio"):
+        cascadio.load(STEP)
+
+
+def test_warnings_reach_python(fake_worker):
+    """A worker's warning is a Python warning, and the result still comes."""
+    glb = MODELS_DIR / "written_by_0.1.1_material.glb"
+    fake_worker(
+        "cat > /dev/null\n"
+        'echo "cascadio warning: converting without the sandbox" >&2\n'
+        f'cat "{glb}"'
+    )
+    with pytest.warns(RuntimeWarning, match="without the sandbox"):
+        assert cascadio.load(STEP) == glb.read_bytes()
+
+
+def test_ctrl_c(fake_worker):
+    """Ctrl-C during a conversion raises KeyboardInterrupt within moments."""
+    fake_worker("sleep 30")
+    script = """
+import os, signal, sys, threading, time
+import cascadio
+threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGINT)).start()
+started = time.monotonic()
+try:
+    cascadio.load(b"anything", timeout=None)
+except KeyboardInterrupt:
+    print(time.monotonic() - started)
+"""
+    done = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=20
+    )
+    assert done.stderr == ""
+    assert float(done.stdout) < 2
 
 
 def test_environment_is_not_passed_on(fake_worker, monkeypatch, tmp_path):
@@ -128,7 +175,10 @@ def test_environment_is_not_passed_on(fake_worker, monkeypatch, tmp_path):
 # program, read from a thread started afterwards; on Linux and macOS also
 # start a copy of itself and use a descriptor it was handed.
 ATTEMPTS = ["read", "write", "connect", "spawn", "thread-read"]
-if sys.platform != "win32":
+if sys.platform == "win32":
+    # Windows gives each AppContainer a folder of its own to write in
+    ATTEMPTS += ["write-own"]
+else:
     ATTEMPTS += ["fork", "inherited"]
 
 
@@ -148,6 +198,12 @@ def probe(attempt: str, argument: str = "") -> subprocess.CompletedProcess:
     if done.returncode == 77:
         pytest.skip("a sanitizer build has no system call filter")
     return done
+
+
+def test_abort_is_a_crash():
+    """abort() ends the worker as a crash, not as a sandbox stop."""
+    done = probe("abort")
+    assert done.returncode == (3 if sys.platform == "win32" else -signal.SIGABRT)
 
 
 def test_probe_reports_escapes():
@@ -171,6 +227,9 @@ def test_sandbox(attempt, tmp_path):
             "write": str(tmp_path),
             "connect": str(listener.getsockname()[1]),
         }.get(attempt, "")
+        if attempt == "write-own":
+            attempt = "write"
+            argument = os.path.expandvars(r"%LOCALAPPDATA%\Packages\cascadio.worker\AC")
         done = probe(attempt, argument)
     assert b"escaped" not in done.stderr
     assert list(tmp_path.iterdir()) == [secret]

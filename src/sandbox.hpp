@@ -7,22 +7,33 @@
 // because only the worker knows when its set-up is over, and so it holds
 // however the worker was started: by the module, the fuzzer or by hand.
 //
-// Nothing here can be switched off. A sanitizer build leaves out only the
-// system call filter, so that a sanitizer can still print its report.
-//
 // Linux: a fixed seccomp allowlist; any other call kills the process.
 // macOS: Apple's fixed "pure computation" sandbox profile.
 // Windows: an AppContainer with no capabilities, so no network and none
 // of the user's files; a job that allows no other process; and process
 // mitigations.
 //
-// Each platform's section defines the same functions in `os`, and the
-// code shared by all of them is at the end.
+// Nothing here can be switched off. If the lock-down cannot be applied the
+// worker refuses to convert and says why (exit code NO_SANDBOX), with one
+// exception: a Linux kernel that cannot filter system calls at all. There
+// the worker converts without the filter and says so on standard error,
+// which the module turns into a Python warning. A sanitizer build leaves
+// out the filter too, so that a sanitizer can still print its report.
+//
+// Each platform's section defines the same functions in `os`:
+//     int prepare()            set up while files can still be opened;
+//                              returns where the result goes
+//     void confine()           the lock-down itself
+//     long readSome(...), long writeSome(...)
+//     uint64_t peakMemory()
+//     bool attempt(name, argument)   for `--probe`; true if it worked
+// The code all platforms share is at the end.
 
 #include "request.hpp"
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <climits>
 #include <cstdint>
@@ -60,11 +71,19 @@ private:
   template <typename SetUp> friend Locked lockDown(SetUp &&setUp);
 };
 
-/// Stop with a message: the lock-down failed, so nothing may run.
-[[noreturn]] inline void cannotLockDown(const char *what) {
-  std::fprintf(stderr, "cannot lock down the converter: %s\n", what);
+/// Refuse to convert: the lock-down could not be applied. The module puts
+/// "cascadio could not sandbox its converter, so it did not run it: "
+/// before `why`, which should say what to do about it.
+[[noreturn]] inline void cannotLockDown(const std::string &why) {
+  std::fprintf(stderr, "%s\n", why.c_str());
   std::fflush(stderr);
-  std::_Exit(worker_exit::FAILED);
+  std::_Exit(worker_exit::NO_SANDBOX);
+}
+
+/// A line the module shows as a Python warning.
+inline void warn(const char *text) {
+  std::fprintf(stderr, "%s%s\n", worker_warning, text);
+  std::fflush(stderr);
 }
 
 #ifndef _WIN32
@@ -72,8 +91,8 @@ private:
 // POSIX: Linux and macOS
 // ============================================================================
 
-#include <csignal>
 #include <arpa/inet.h>
+#include <csignal>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/resource.h>
@@ -86,45 +105,32 @@ private:
 
 namespace os {
 
-/// Only Windows needs a new process to lock down in (see its section).
-inline void enterContainer() {}
-
-/// Close every descriptor but standard input, output and error, so nothing
-/// the parent leaked stays reachable.
-inline void closeInherited() {
+inline int prepare() {
+  // Close every descriptor but standard input, output and error, so
+  // nothing the parent leaked stays reachable.
 #ifdef SYS_close_range
-  if (syscall(SYS_close_range, 3U, ~0U, 0U) == 0) {
-    return;
-  }
+  if (syscall(SYS_close_range, 3U, ~0U, 0U) != 0)
 #endif
-  rlimit limit = {};
-  getrlimit(RLIMIT_NOFILE, &limit);
-  for (rlim_t fd = 3; fd < limit.rlim_cur && fd < (1U << 20); fd++) {
-    close(static_cast<int>(fd));
+  {
+    rlimit limit = {};
+    getrlimit(RLIMIT_NOFILE, &limit);
+    for (rlim_t fd = 3; fd < limit.rlim_cur && fd < (1U << 20); fd++) {
+      close(static_cast<int>(fd));
+    }
   }
-}
-
-/// Keep the real standard output aside for the result and point descriptor
-/// 1 at standard error, so a stray print from any library cannot corrupt
-/// the result. Returns the descriptor the result goes to.
-inline int keepResultStream() {
+  // Keep the real standard output aside for the result and point
+  // descriptor 1 at standard error, so a stray print from any library
+  // cannot corrupt the result.
   const int result = dup(1);
   dup2(2, 1);
-  return result;
-}
-
-/// OCCT reads message files relative to the working directory: make that
-/// somewhere nobody can plant one.
-inline void leaveWorkingDirectory() {
+  // OCCT reads message files relative to the working directory: make that
+  // somewhere nobody can plant one.
   if (chdir("/") != 0) {
-    cannotLockDown("cannot leave the working directory");
+    cannotLockDown(std::string("cannot leave the working directory (") +
+                   std::strerror(errno) + ")");
   }
-}
-
-/// Set up what the C library would otherwise set up on first use, by
-/// opening a file.
-inline void prepareCLibrary() {
-  // with TZ unset, every localtime() reads /etc/localtime again
+  // What the C library would otherwise set up on first use, by opening a
+  // file. With TZ unset, every localtime() reads /etc/localtime again.
   setenv("TZ", "UTC0", 1);
   tzset();
 #ifdef __GLIBC__
@@ -141,6 +147,7 @@ inline void prepareCLibrary() {
   mallopt(M_TRIM_THRESHOLD, INT_MAX);
   mallopt(M_MMAP_THRESHOLD, 32 << 20);
 #endif
+  return result;
 }
 
 /// Plain reads and writes: the C library's buffered streams ask the system
@@ -163,38 +170,32 @@ inline uint64_t peakMemory() {
 #endif
 }
 
-// What `--probe` tries (see probe() at the end). Each is true if it worked.
-
-inline bool readFile(const std::string &path) {
-  return open(path.c_str(), O_RDONLY) >= 0;
-}
-
-inline bool writeIn(const std::string &folder) {
-  return open((folder + "/cascadio-probe").c_str(),
-              O_WRONLY | O_CREAT | O_EXCL, 0600) >= 0;
-}
-
-inline bool connectTo(int port) {
-  const int fd = socket(AF_INET, SOCK_STREAM, 0);
-  sockaddr_in address = {};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(static_cast<uint16_t>(port));
-  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  return fd >= 0 &&
-         connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0;
-}
-
-inline bool spawn() {
-  char *const arguments[] = {const_cast<char *>("/bin/sh"),
-                             const_cast<char *>("-c"),
-                             const_cast<char *>("echo escaped >&2"), nullptr};
-  char *const environment[] = {nullptr};
-  execve("/bin/sh", arguments, environment);
-  return false; // only reached if it failed
-}
-
-/// The probes only POSIX has.
-inline bool probe(const std::string &name) {
+/// What `--probe` tries (see probe() at the end); true if it worked.
+inline bool attempt(const std::string &name, const std::string &argument) {
+  if (name == "read") {
+    return open(argument.c_str(), O_RDONLY) >= 0;
+  }
+  if (name == "write") {
+    return open((argument + "/cascadio-probe").c_str(),
+                O_WRONLY | O_CREAT | O_EXCL, 0600) >= 0;
+  }
+  if (name == "connect") {
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address = {};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(static_cast<uint16_t>(std::atoi(argument.c_str())));
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    return fd >= 0 && connect(fd, reinterpret_cast<sockaddr *>(&address),
+                              sizeof(address)) == 0;
+  }
+  if (name == "spawn") {
+    char *const arguments[] = {const_cast<char *>("/bin/sh"),
+                               const_cast<char *>("-c"),
+                               const_cast<char *>("echo escaped >&2"), nullptr};
+    char *const environment[] = {nullptr};
+    execve("/bin/sh", arguments, environment);
+    return false; // only reached if it failed
+  }
   if (name == "fork") {
     // the filter allows clone for new threads only
     const pid_t child = fork();
@@ -223,7 +224,6 @@ inline bool probe(const std::string &name) {
 // Linux
 // ----------------------------------------------------------------------------
 
-#include <cerrno>
 #include <cstddef>
 #include <linux/audit.h>
 #include <linux/filter.h>
@@ -260,9 +260,28 @@ static const int ALLOWED[] = {
     __NR_clock_gettime, __NR_gettimeofday,  // when the vDSO falls back
     __NR_times,                             // OSD_Chronometer
     __NR_sched_yield,                       // OSD_ThreadPool
+    __NR_getpid, __NR_gettid, __NR_rt_sigaction, // abort(), with tgkill
 };
 
+/// A kernel that cannot filter system calls: convert anyway, and say so.
+inline void unfiltered() {
+  warn("cascadio is converting without its sandbox: this Linux kernel "
+       "cannot filter system calls (seccomp; WSL 1, kernels before 4.14 "
+       "and some emulators lack it). A damaged or hostile file could "
+       "reach files and the network.");
+}
+
 inline void installFilter() {
+  // Killing the whole process needs Linux 4.14. Before that a forbidden
+  // call would kill one thread and leave the process hanging.
+  unsigned killProcess = SECCOMP_RET_KILL_PROCESS;
+  if (syscall(__NR_seccomp, SECCOMP_GET_ACTION_AVAIL, 0, &killProcess) != 0) {
+    if (errno == EINVAL || errno == ENOSYS) {
+      return unfiltered();
+    }
+    cannotLockDown(std::string("the system call filter is unavailable (") +
+                   std::strerror(errno) + ")");
+  }
   std::vector<sock_filter> program = {
       // a call made through another architecture's entry point is refused
       BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, arch)),
@@ -286,16 +305,26 @@ inline void installFilter() {
   // clone3 passes its flags in memory the filter cannot read; "not
   // implemented" makes glibc fall back to clone, whose flags it can
   answer(__NR_clone3, SECCOMP_RET_ERRNO | ENOSYS);
-  // clone: new threads only, so no process can be started
-  program.insert(
-      program.end(),
-      {
-          BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_clone, 0, 3),
-          BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, args)),
-          BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, CLONE_THREAD, 0, 1),
-          BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-          BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
-      });
+  // Two calls are allowed only for some first arguments:
+  //   clone, for new threads only, so no process can be started;
+  //   tgkill, for this process only, which is how abort() ends it with
+  //   SIGABRT. The process id cannot change: there is no fork.
+  auto allowIf = [&program](long call, unsigned test, unsigned value) {
+    program.insert(
+        program.end(),
+        {
+            BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<unsigned>(call),
+                     0, 4),
+            BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, args)),
+            BPF_JUMP(BPF_JMP | test | BPF_K, value, 0, 1),
+            BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+            BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
+        });
+  };
+  allowIf(__NR_clone, BPF_JSET, CLONE_THREAD);
+  allowIf(__NR_tgkill, BPF_JEQ, static_cast<unsigned>(getpid()));
+  // and anything else
+  program.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS));
 
   const sock_fprog filter = {static_cast<unsigned short>(program.size()),
                              program.data()};
@@ -303,22 +332,27 @@ inline void installFilter() {
   // fails rather than leave one out
   if (syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER,
               SECCOMP_FILTER_FLAG_TSYNC, &filter) != 0) {
-    cannotLockDown(std::strerror(errno));
+    if (errno == EINVAL || errno == ENOSYS) {
+      return unfiltered();
+    }
+    cannotLockDown(std::string("the system call filter could not be "
+                               "installed (") +
+                   std::strerror(errno) + ")");
   }
 }
 
-/// Apply the lock-down itself.
 inline void confine() {
   const pid_t parent = getppid();
   // die with the parent, even if it is killed
   if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0 || getppid() != parent) {
-    cannotLockDown("the parent is gone");
+    cannotLockDown("the program that started it is gone");
   }
   // no debugger can attach and no other process can read our memory
   const rlimit noCore = {0, 0};
   if (prctl(PR_SET_DUMPABLE, 0) != 0 || setrlimit(RLIMIT_CORE, &noCore) != 0 ||
       prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
-    cannotLockDown(std::strerror(errno));
+    cannotLockDown(std::string("could not restrict the process (") +
+                   std::strerror(errno) + ")");
   }
 #ifndef CASCADIO_SANITIZED
   installFilter();
@@ -336,7 +370,6 @@ inline void confine() {
 
 namespace os {
 
-/// Apply the lock-down itself.
 inline void confine() {
   const rlimit noCore = {0, 0};
   setrlimit(RLIMIT_CORE, &noCore);
@@ -346,7 +379,9 @@ inline void confine() {
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
   char *error = nullptr;
   if (sandbox_init(kSBXProfilePureComputation, SANDBOX_NAMED, &error) != 0) {
-    cannotLockDown(error != nullptr ? error : "sandbox_init failed");
+    cannotLockDown(std::string("macOS would not apply its sandbox (") +
+                   (error != nullptr ? error : "sandbox_init failed") +
+                   "); a program that is itself sandboxed cannot run it");
   }
 #pragma clang diagnostic pop
 }
@@ -369,87 +404,188 @@ inline void confine() {
 #include <io.h>
 #include <psapi.h>
 
-// The two functions used from userenv.h, which would bring all of OLE
-// along with it (and fails to, after OCCT's trimmed <windows.h>).
+// The few functions used from userenv.h and aclapi.h, declared here: both
+// headers bring all of OLE along, which does not compile after OCCT has
+// trimmed <windows.h> (NOMSG, NOUSER, ...).
 extern "C" __declspec(dllimport) HRESULT WINAPI
 DeriveAppContainerSidFromAppContainerName(PCWSTR name, PSID *sid);
 extern "C" __declspec(dllimport) HRESULT WINAPI CreateAppContainerProfile(
     PCWSTR name, PCWSTR displayName, PCWSTR description,
     PSID_AND_ATTRIBUTES capabilities, DWORD capabilityCount, PSID *sid);
+extern "C" __declspec(dllimport) DWORD WINAPI SetNamedSecurityInfoW(
+    LPWSTR name, int objectType /* SE_OBJECT_TYPE: 1 is a file */,
+    SECURITY_INFORMATION what, PSID owner, PSID group, PACL dacl, PACL sacl);
 
 namespace os {
 
-/// True if this process runs in an AppContainer.
-inline bool inAppContainer() {
-  HANDLE token = nullptr;
-  DWORD isContainer = 0;
-  DWORD size = 0;
-  if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-    GetTokenInformation(token, TokenIsAppContainer, &isContainer,
-                        sizeof(isContainer), &size);
-    CloseHandle(token);
+static const wchar_t CONTAINER[] = L"cascadio.worker";
+
+/// The text Windows has for an error code.
+inline std::string systemText(DWORD error) {
+  char *text = nullptr;
+  const DWORD length = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      nullptr, error, 0, reinterpret_cast<LPSTR>(&text), 0, nullptr);
+  std::string result = length > 0 ? std::string(text, length)
+                                  : "error " + std::to_string(error);
+  LocalFree(text);
+  while (!result.empty() && std::strchr(" .\r\n", result.back()) != nullptr) {
+    result.pop_back();
   }
-  return isContainer != 0;
+  return result;
 }
 
-/// Let processes in `container` read and run `program`. Installed under
-/// the user's own folders, it is not theirs to read otherwise. (aclapi.h
-/// would do this in fewer lines, but it brings OLE along, which does not
-/// compile after OCCT has trimmed <windows.h>.)
-inline void shareWith(PSID container, const wchar_t *program) {
+inline std::string narrow(const wchar_t *wide) {
+  const int size =
+      WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+  std::string utf8(static_cast<size_t>(std::max(size, 1)), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8.data(), size, nullptr,
+                      nullptr);
+  utf8.resize(static_cast<size_t>(std::max(size, 1)) - 1);
+  return utf8;
+}
+
+/// Add one entry for `sid` to a file's or folder's permissions: a denial
+/// goes first, an allowance after the explicit denials. Inheritable
+/// entries reach what the folder already holds. (aclapi.h would do this in
+/// fewer lines, but see above.)
+inline bool addPermission(const wchar_t *path, PSID sid, bool allow,
+                          DWORD rights, BYTE inheritance) {
   DWORD needed = 0;
-  GetFileSecurityW(program, DACL_SECURITY_INFORMATION, nullptr, 0, &needed);
+  GetFileSecurityW(path, DACL_SECURITY_INFORMATION, nullptr, 0, &needed);
   std::vector<char> current(needed);
   BOOL present = FALSE;
   BOOL defaulted = FALSE;
   PACL old = nullptr;
   ACL_SIZE_INFORMATION oldSize = {};
-  if (!GetFileSecurityW(program, DACL_SECURITY_INFORMATION, current.data(),
+  if (!GetFileSecurityW(path, DACL_SECURITY_INFORMATION, current.data(),
                         needed, &needed) ||
       !GetSecurityDescriptorDacl(current.data(), &present, &old,
                                  &defaulted) ||
       !present || old == nullptr ||
       !GetAclInformation(old, &oldSize, sizeof(oldSize), AclSizeInformation)) {
-    return;
+    return false;
   }
-  // the new entry first, then all the old ones
   const DWORD size = oldSize.AclBytesInUse + sizeof(ACCESS_ALLOWED_ACE) +
-                     GetLengthSid(container);
+                     GetLengthSid(sid);
   std::vector<char> buffer(size);
   PACL updated = reinterpret_cast<PACL>(buffer.data());
-  if (!InitializeAcl(updated, size, ACL_REVISION) ||
-      !AddAccessAllowedAce(updated, ACL_REVISION,
-                           FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
-                           container)) {
-    return;
+  if (!InitializeAcl(updated, size, ACL_REVISION)) {
+    return false;
   }
+  bool added = false;
+  auto add = [&] {
+    added = allow ? AddAccessAllowedAceEx(updated, ACL_REVISION, inheritance,
+                                          rights, sid) != 0
+                  : AddAccessDeniedAceEx(updated, ACL_REVISION, inheritance,
+                                         rights, sid) != 0;
+    return added;
+  };
   for (DWORD i = 0; i < oldSize.AceCount; i++) {
     void *entry = nullptr;
-    if (GetAce(old, i, &entry)) {
-      AddAce(updated, ACL_REVISION, MAXDWORD, entry,
-             static_cast<ACE_HEADER *>(entry)->AceSize);
+    if (!GetAce(old, i, &entry)) {
+      continue;
     }
+    const ACE_HEADER *header = static_cast<ACE_HEADER *>(entry);
+    const bool explicitDenial = header->AceType == ACCESS_DENIED_ACE_TYPE &&
+                                (header->AceFlags & INHERITED_ACE) == 0;
+    if (!added && !(allow && explicitDenial) && !add()) {
+      return false;
+    }
+    AddAce(updated, ACL_REVISION, MAXDWORD, entry, header->AceSize);
   }
-  SECURITY_DESCRIPTOR descriptor;
-  if (InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) &&
-      SetSecurityDescriptorDacl(&descriptor, TRUE, updated, FALSE)) {
-    SetFileSecurityW(program, DACL_SECURITY_INFORMATION, &descriptor);
+  if (!added && !add()) {
+    return false;
   }
+  return SetNamedSecurityInfoW(const_cast<wchar_t *>(path), 1,
+                               DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                               updated, nullptr) == ERROR_SUCCESS;
+}
+
+/// Register the AppContainer for this user. Windows gives every container
+/// a folder its processes may write to, which every call would share:
+/// deny that too.
+inline void registerContainer(PSID container) {
+  PSID registered = nullptr;
+  const HRESULT made = CreateAppContainerProfile(
+      CONTAINER, L"cascadio worker",
+      L"Converts one CAD file with nothing else allowed", nullptr, 0,
+      &registered);
+  if (FAILED(made) && made != HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) {
+    cannotLockDown(
+        "Windows would not create the sandbox profile 'cascadio.worker' "
+        "for this account (" +
+        systemText(static_cast<DWORD>(made)) +
+        "); accounts without a loaded user profile, such as some services, "
+        "cannot");
+  }
+  if (registered != nullptr) {
+    FreeSid(registered);
+  }
+  wchar_t local[MAX_PATH];
+  const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
+  if (length > 0 && length < MAX_PATH) {
+    const std::wstring folder =
+        std::wstring(local) + L"\\Packages\\cascadio.worker\\AC";
+    addPermission(folder.c_str(), container, false,
+                  FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |
+                      FILE_WRITE_ATTRIBUTES | FILE_DELETE_CHILD | DELETE |
+                      WRITE_DAC | WRITE_OWNER,
+                  OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE);
+  }
+}
+
+/// Whether this process runs in our AppContainer and only that: the
+/// container must be cascadio's and allow nothing (no capabilities).
+/// Inside another app's container the worker refuses.
+inline bool contained(PSID ours) {
+  HANDLE token = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    cannotLockDown("could not inspect its own process (" +
+                   systemText(GetLastError()) + ")");
+  }
+  DWORD isContainer = 0;
+  DWORD size = 0;
+  GetTokenInformation(token, TokenIsAppContainer, &isContainer,
+                      sizeof(isContainer), &size);
+  bool ours_ = false;
+  if (isContainer != 0) {
+    std::vector<char> sid(256);
+    std::vector<char> capabilities(sizeof(TOKEN_GROUPS) + 256);
+    GetTokenInformation(token, TokenAppContainerSid, sid.data(),
+                        static_cast<DWORD>(sid.size()), &size);
+    const bool gotCapabilities =
+        GetTokenInformation(token, TokenCapabilities, capabilities.data(),
+                            static_cast<DWORD>(capabilities.size()), &size) != 0;
+    const auto *container =
+        reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(sid.data());
+    const auto *groups = reinterpret_cast<TOKEN_GROUPS *>(capabilities.data());
+    ours_ = container->TokenAppContainer != nullptr &&
+            EqualSid(container->TokenAppContainer, ours) && gotCapabilities &&
+            groups->GroupCount == 0;
+  }
+  CloseHandle(token);
+  if (isContainer != 0 && !ours_) {
+    cannotLockDown("it is already inside another app's sandbox, which "
+                   "allows more than cascadio's");
+  }
+  return ours_;
 }
 
 /// Windows can put a process in an AppContainer only when it starts it.
 /// So unless this already is that process, start this program again in
-/// an AppContainer with no capabilities, which reaches neither the network
-/// nor the user's files, wait for it and leave with its exit code. It
-/// gets the same standard streams and arguments, and dies with this one.
+/// our AppContainer, wait for it and leave with its exit code. It gets the
+/// same standard streams and arguments, and dies with this one.
 inline void enterContainer() {
-  if (inAppContainer()) {
-    return;
-  }
   PSID container = nullptr;
-  if (FAILED(DeriveAppContainerSidFromAppContainerName(L"cascadio.worker",
+  if (FAILED(DeriveAppContainerSidFromAppContainerName(CONTAINER,
                                                        &container))) {
-    cannotLockDown("cannot name its AppContainer");
+    cannotLockDown("Windows could not name its sandbox (AppContainer)");
+  }
+  if (contained(container)) {
+    FreeSid(container);
+    return;
   }
   SECURITY_CAPABILITIES capabilities = {}; // and no capabilities
   capabilities.AppContainerSid = container;
@@ -489,7 +625,8 @@ inline void enterContainer() {
                                  inherited.data(),
                                  inherited.size() * sizeof(HANDLE), nullptr,
                                  nullptr)) {
-    cannotLockDown("cannot prepare its AppContainer");
+    cannotLockDown("Windows could not prepare its sandbox (" +
+                   systemText(GetLastError()) + ")");
   }
 
   wchar_t program[32768];
@@ -499,38 +636,46 @@ inline void enterContainer() {
   wchar_t system[MAX_PATH];
   GetSystemDirectoryW(system, MAX_PATH);
   std::wstring command = GetCommandLineW();
+  // without a console of its own (the module starts it detached) the
+  // copy gets none either, so no console window is made for it
+  const DWORD flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
+                      (GetConsoleWindow() == nullptr ? DETACHED_PROCESS : 0);
   PROCESS_INFORMATION child = {};
-  auto start = [&] {
-    return CreateProcessW(program, command.data(), nullptr, nullptr, TRUE,
-                          EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
-                          nullptr, system, &startup.StartupInfo,
-                          &child) != 0;
-  };
-  // The first time for this user, Windows does not know the AppContainer
-  // yet; and the program may not be the container's to read. Each is
-  // fixed once, when it is in the way.
-  bool started = start();
-  if (!started && GetLastError() == ERROR_FILE_NOT_FOUND) {
-    PSID registered = nullptr;
-    if (SUCCEEDED(CreateAppContainerProfile(
-            L"cascadio.worker", L"cascadio worker",
-            L"Converts one CAD file with nothing else allowed", nullptr, 0,
-            &registered))) {
-      FreeSid(registered);
+  // The first time for this user Windows does not know the container yet
+  // (error 2), and the program may not be the container's to read (error
+  // 5). Each is fixed once, when it is in the way, in whichever order.
+  bool registered = false;
+  bool shared = false;
+  DWORD error = 0;
+  for (int start = 0; start < 3; start++) {
+    if (CreateProcessW(program, command.data(), nullptr, nullptr, TRUE, flags,
+                       nullptr, system, &startup.StartupInfo, &child)) {
+      error = 0;
+      break;
     }
-    started = start();
+    error = GetLastError();
+    if (error == ERROR_FILE_NOT_FOUND && !registered) {
+      registered = true;
+      registerContainer(container);
+    } else if (error == ERROR_ACCESS_DENIED && !shared) {
+      shared = true;
+      addPermission(program, container, true,
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, 0);
+    } else {
+      break;
+    }
   }
-  if (!started && GetLastError() == ERROR_ACCESS_DENIED) {
-    shareWith(container, program);
-    started = start();
-  }
-  const DWORD error = GetLastError();
   DeleteProcThreadAttributeList(startup.lpAttributeList);
   FreeSid(container);
-  if (!started) {
-    const std::string what =
-        "cannot start in its AppContainer (error " + std::to_string(error) + ")";
-    cannotLockDown(what.c_str());
+  if (error == ERROR_ACCESS_DENIED) {
+    const std::string path = narrow(program);
+    cannotLockDown("Windows would not let the sandbox read " + path +
+                   "; an administrator can run: icacls \"" + path +
+                   "\" /grant *S-1-15-2-1:RX");
+  }
+  if (error != 0) {
+    cannotLockDown("Windows would not start the sandboxed converter (" +
+                   systemText(error) + ")");
   }
 
   // When this process ends, the job's handle closes and kills it: this is
@@ -542,8 +687,10 @@ inline void enterContainer() {
       !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
                                &limits, sizeof(limits)) ||
       !AssignProcessToJobObject(job, child.hProcess)) {
-    TerminateProcess(child.hProcess, worker_exit::FAILED);
-    cannotLockDown("cannot create its job object");
+    error = GetLastError();
+    TerminateProcess(child.hProcess, worker_exit::NO_SANDBOX);
+    cannotLockDown("Windows could not tie the sandboxed converter to it (" +
+                   systemText(error) + ")");
   }
   ResumeThread(child.hThread);
   WaitForSingleObject(child.hProcess, INFINITE);
@@ -552,24 +699,20 @@ inline void enterContainer() {
   ExitProcess(code);
 }
 
-/// The worker in the AppContainer inherits only its standard streams.
-inline void closeInherited() {}
-
-inline int keepResultStream() {
+inline int prepare() {
+  // a crash shows no dialog; the module reports it
+  SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
+               SEM_NOOPENFILEERRORBOX);
+  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+  enterContainer();
   // no translation of line endings in either direction
   _setmode(_fileno(stdin), _O_BINARY);
   const int result = _dup(1);
   _dup2(2, 1);
   _setmode(result, _O_BINARY);
-  return result;
-}
-
-/// enterContainer() started it in the system folder.
-inline void leaveWorkingDirectory() {}
-
-inline void prepareCLibrary() {
   _putenv_s("TZ", "UTC0");
   _tzset();
+  return result;
 }
 
 inline long readSome(int fd, char *data, size_t size) {
@@ -585,7 +728,6 @@ inline uint64_t peakMemory() {
   return counters.PeakWorkingSetSize;
 }
 
-/// Apply the lock-down itself.
 inline void confine() {
   // A job that allows this process alone: it cannot start another, and
   // anything it holds dies with it.
@@ -599,7 +741,8 @@ inline void confine() {
       !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
                                &limits, sizeof(limits)) ||
       !AssignProcessToJobObject(job, GetCurrentProcess())) {
-    cannotLockDown("cannot create its job object");
+    cannotLockDown("Windows could not limit it to one process (" +
+                   systemText(GetLastError()) + ")");
   }
 
   // No generated code, no stray handle use, no injected DLLs.
@@ -621,52 +764,65 @@ inline void confine() {
                                   &extensions, sizeof(extensions)) ||
       !SetProcessMitigationPolicy(ProcessImageLoadPolicy, &images,
                                   sizeof(images))) {
-    cannotLockDown("cannot set its mitigation policies");
+    cannotLockDown("Windows would not apply its process protections (" +
+                   systemText(GetLastError()) + ")");
   }
 }
 
-// What `--probe` tries (see probe() at the end). Each is true if it worked.
-
-inline bool readFile(const std::string &path) {
-  HANDLE file = CreateFileA(path.c_str(), GENERIC_READ,
-                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                            OPEN_EXISTING, 0, nullptr);
-  return file != INVALID_HANDLE_VALUE;
-}
-
-inline bool writeIn(const std::string &folder) {
-  HANDLE file = CreateFileA((folder + "\\cascadio-probe").c_str(),
-                            GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-                            FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-  return file != INVALID_HANDLE_VALUE;
-}
-
-inline bool connectTo(int port) {
-  WSADATA data;
-  if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-    return false;
+/// What `--probe` tries (see probe() at the end); true if it worked.
+inline bool attempt(const std::string &name, const std::string &argument) {
+  if (name == "read") {
+    return CreateFileA(argument.c_str(), GENERIC_READ,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                       OPEN_EXISTING, 0, nullptr) != INVALID_HANDLE_VALUE;
   }
-  const SOCKET fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  sockaddr_in address = {};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(static_cast<u_short>(port));
-  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  return fd != INVALID_SOCKET &&
-         connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0;
-}
-
-inline bool spawn() {
-  STARTUPINFOW startup = {};
-  startup.cb = sizeof(startup);
-  PROCESS_INFORMATION child = {};
-  wchar_t command[] = L"cmd.exe /c exit 0";
-  return CreateProcessW(nullptr, command, nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &startup,
-                        &child) != 0;
-}
-
-/// The probes only Windows has: none.
-inline bool probe(const std::string &name) {
+  if (name == "write") {
+    return CreateFileA((argument + "\\cascadio-probe").c_str(), GENERIC_WRITE,
+                       0, nullptr, CREATE_NEW, FILE_FLAG_DELETE_ON_CLOSE,
+                       nullptr) != INVALID_HANDLE_VALUE;
+  }
+  if (name == "connect") {
+    // ws2_32.dll is delay-loaded (CMakeLists.txt): only this loads it
+    WSADATA data;
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+      return false;
+    }
+    const SOCKET fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd == INVALID_SOCKET) {
+      return false;
+    }
+    // A sandboxed connect is dropped, not refused, and Windows would retry
+    // for 21 seconds: wait 2.
+    u_long nonBlocking = 1;
+    ioctlsocket(fd, static_cast<long>(FIONBIO), &nonBlocking);
+    sockaddr_in address = {};
+    address.sin_family = AF_INET;
+    address.sin_port =
+        htons(static_cast<u_short>(std::atoi(argument.c_str())));
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address));
+    fd_set writable;
+    FD_ZERO(&writable);
+    FD_SET(fd, &writable);
+    timeval wait = {2, 0};
+    if (select(0, nullptr, &writable, nullptr, &wait) != 1) {
+      return false;
+    }
+    int failure = 0;
+    int length = sizeof(failure);
+    getsockopt(fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&failure),
+               &length);
+    return failure == 0;
+  }
+  if (name == "spawn") {
+    STARTUPINFOW startup = {};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION child = {};
+    wchar_t command[] = L"cmd.exe /c exit 0";
+    return CreateProcessW(nullptr, command, nullptr, nullptr, FALSE,
+                          CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+                          &child) != 0;
+  }
   std::fprintf(stderr, "unknown probe: %s\n", name.c_str());
   std::_Exit(2);
 }
@@ -687,15 +843,25 @@ inline std::atomic<uint64_t> memoryLimit{UINT64_MAX};
 /// limit. Memory has to be touched to count, which takes far longer than
 /// the interval, so checking every few milliseconds cannot be outrun.
 inline void startMemoryWatcher() {
-  std::thread([] {
+#ifdef __APPLE__
+  // macOS cannot have a process die with its parent: notice instead
+  const pid_t parent = getppid();
+#endif
+  std::thread([=] {
     while (true) {
       const uint64_t limit = memoryLimit.load();
-      if (limit == 0) {
-        return;
-      }
-      if (limit != UINT64_MAX && os::peakMemory() > limit) {
+      if (limit != UINT64_MAX && limit != 0 && os::peakMemory() > limit) {
         std::_Exit(worker_exit::OUT_OF_MEMORY);
       }
+#ifdef __APPLE__
+      if (getppid() != parent) {
+        std::_Exit(worker_exit::FAILED);
+      }
+#else
+      if (limit == 0) {
+        return; // nothing left to watch
+      }
+#endif
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
   }).detach();
@@ -704,11 +870,7 @@ inline void startMemoryWatcher() {
 /// Set up, then lock down. `setUp` is where the caller does whatever needs
 /// files while it still can.
 template <typename SetUp> Locked lockDown(SetUp &&setUp) {
-  os::enterContainer();
-  os::closeInherited();
-  const int result = os::keepResultStream();
-  os::leaveWorkingDirectory();
-  os::prepareCLibrary();
+  const int result = os::prepare();
   setUp();
   // The watcher is the first thread, which the C library sets up for on
   // the way (glibc installs signal handlers). Starting it before the
@@ -753,7 +915,8 @@ inline void Locked::limitMemory(uint64_t bytes) const {
 /// forbids. If it works this prints "escaped" and exits 0, so a test can
 /// tell; otherwise it exits 1. On Linux the attempt kills the process.
 /// "allowed" does something the lock-down allows, so a test can see that
-/// a probe reports success.
+/// a probe reports success; "abort" calls abort(), which must end as a
+/// crash (SIGABRT, or exit code 3 on Windows).
 [[noreturn]] inline void probe(const Locked &, const std::string &name,
                                const std::string &argument) {
 #if defined(CASCADIO_SANITIZED) && defined(__linux__)
@@ -765,19 +928,13 @@ inline void Locked::limitMemory(uint64_t bytes) const {
   bool escaped = false;
   if (name == "allowed") {
     escaped = os::writeSome(2, "", 0) >= 0;
-  } else if (name == "read") {
-    escaped = os::readFile(argument);
+  } else if (name == "abort") {
+    std::abort();
   } else if (name == "thread-read") {
     // a thread started after the lock-down is held by it too
-    std::thread([&] { escaped = os::readFile(argument); }).join();
-  } else if (name == "write") {
-    escaped = os::writeIn(argument);
-  } else if (name == "connect") {
-    escaped = os::connectTo(std::atoi(argument.c_str()));
-  } else if (name == "spawn") {
-    escaped = os::spawn();
+    std::thread([&] { escaped = os::attempt("read", argument); }).join();
   } else {
-    escaped = os::probe(name);
+    escaped = os::attempt(name, argument);
   }
   if (escaped) {
     os::writeSome(2, "escaped\n", 8);

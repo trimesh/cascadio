@@ -104,7 +104,7 @@ static Glb run(const Locked &locked, const Request &request, const char *data,
     const auto end =
         std::search(input.begin(), input.end(), marker, marker + 2);
     if (end == input.end()) {
-      throw std::invalid_argument("the request has no end marker");
+      throw RequestError("the request has no end marker");
     }
     std::istringstream head(std::string(input.begin(), end + 1));
     const Request request = Request::parse(head);
@@ -122,13 +122,17 @@ static Glb run(const Locked &locked, const Request &request, const char *data,
       }
     }
     code = worker_exit::OK;
+  } catch (const RequestError &error) {
+    std::cerr << error.what() << std::endl;
+    code = worker_exit::MISMATCH;
   } catch (const std::invalid_argument &error) {
     std::cerr << error.what() << std::endl;
     code = worker_exit::INVALID_INPUT;
   } catch (const std::bad_alloc &) {
     code = worker_exit::OUT_OF_MEMORY;
   } catch (const Standard_Failure &failure) {
-    std::cerr << "OpenCASCADE error: " << failureText(failure) << std::endl;
+    std::cerr << "OpenCASCADE could not convert the file: "
+              << failureText(failure) << std::endl;
   } catch (const std::exception &error) {
     std::cerr << error.what() << std::endl;
   }

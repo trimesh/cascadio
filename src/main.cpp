@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <sstream>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
@@ -55,6 +56,49 @@ static std::string workerPath() {
   throw nb::python_error();
 }
 
+/// How a crashed worker ended, for a person: "SIGSEGV, a segmentation
+/// fault", or on Windows "0xC0000005, an access violation".
+static std::string crashName(const ProcessResult &result) {
+#ifdef _WIN32
+  const auto code = static_cast<unsigned>(result.exit_code);
+  switch (code) {
+  case 0xC0000005:
+    return "0xC0000005, an access violation";
+  case 0xC00000FD:
+    return "0xC00000FD, a stack overflow";
+  case 0xC0000409:
+    return "0xC0000409, a buffer overrun";
+  case 3:
+    return "exit code 3, an abort";
+  default:
+    break;
+  }
+  char hex[16];
+  std::snprintf(hex, sizeof(hex), "0x%08X", code);
+  return std::string("exit code ") +
+         (code >= 0xC0000000 ? hex : std::to_string(code));
+#else
+  switch (result.signal) {
+  case 0:
+    return "exit code " + std::to_string(result.exit_code);
+  case SIGSEGV:
+    return "SIGSEGV, a segmentation fault";
+  case SIGBUS:
+    return "SIGBUS, a bus error";
+  case SIGFPE:
+    return "SIGFPE, an arithmetic error";
+  case SIGILL:
+    return "SIGILL, an illegal instruction";
+  case SIGABRT:
+    return "SIGABRT, an abort";
+  case SIGKILL:
+    return "SIGKILL, perhaps the system ran out of memory";
+  default:
+    return "signal " + std::to_string(result.signal);
+  }
+#endif
+}
+
 /// Run one request through the worker and return what it produced,
 /// or raise the Python exception that matches how it ended.
 static std::vector<char> convert(Request request, const char *data, size_t size,
@@ -67,21 +111,58 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
   const std::string program = workerPath();
 
   ProcessResult result;
-  {
+  try {
     // other Python threads keep running while the worker does
     nb::gil_scoped_release release;
-    result = runProcess(program, head, data, size, timeout.value_or(-1.0));
+    result = runProcess(program, head, data, size, timeout.value_or(-1.0), [] {
+      // Ctrl-C: Python's handler runs here, and raises KeyboardInterrupt
+      nb::gil_scoped_acquire acquire;
+      return PyErr_CheckSignals() != 0;
+    });
+  } catch (const StartError &error) {
+    switch (error.kind) {
+    case StartError::MISSING:
+      throw std::runtime_error("cascadio's converter is missing at " +
+                               program +
+                               "; reinstall cascadio, or check CASCADIO_WORKER");
+    case StartError::NOT_RUNNABLE:
+      throw std::runtime_error("cascadio's converter at " + program +
+                               " cannot be run (" + error.what() +
+                               "); the folder may not allow running programs");
+    default:
+      throw std::runtime_error("cascadio's converter at " + program +
+                               " could not be started (" + error.what() + ")");
+    }
   }
-
+  // a signal handler that raised, such as Ctrl-C's, wins over how the
+  // worker ended
+  if (PyErr_CheckSignals() != 0 || PyErr_Occurred() != nullptr) {
+    throw nb::python_error();
+  }
+  if (result.interrupted) {
+    raisePython(PyExc_KeyboardInterrupt, "");
+  }
   if (result.timed_out) {
     raisePython(PyExc_TimeoutError,
           "conversion did not finish within " + std::to_string(*timeout) +
               " seconds; pass a larger `timeout`, or None for no limit");
   }
-  // one line of what the worker said, for the error message
-  std::string said = result.errors;
-  while (!said.empty() && (said.back() == '\n' || said.back() == '\r')) {
-    said.pop_back();
+  // What the worker said: warnings to pass on, and a last line that says
+  // why it failed (anything before it is trace output).
+  std::string said;
+  std::istringstream lines(result.errors);
+  for (std::string line; std::getline(lines, line);) {
+    while (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    if (line.rfind(worker_warning, 0) == 0) {
+      if (PyErr_WarnEx(PyExc_RuntimeWarning,
+                       line.c_str() + sizeof(worker_warning) - 1, 1) != 0) {
+        throw nb::python_error(); // warnings are errors here
+      }
+    } else if (!line.empty()) {
+      said = line;
+    }
   }
   switch (result.exit_code) {
   case worker_exit::OK:
@@ -100,23 +181,30 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
               "or None for no limit");
   case worker_exit::FAILED:
     throw std::runtime_error(said.empty() ? "conversion failed" : said);
-  default: {
-    // not one of our exit codes: the worker crashed, or its lock-down
-    // stopped it for a system call it does not allow (see sandbox.hpp)
-    std::string what =
-        "converter process crashed (" +
-        (result.signal != 0 ? "signal " + std::to_string(result.signal)
-                            : "exit code " + std::to_string(result.exit_code)) +
-        ")";
+  case worker_exit::NO_SANDBOX:
+    throw std::runtime_error(
+        "cascadio could not sandbox its converter, so it did not run it: " +
+        said);
+  case worker_exit::MISMATCH:
+    throw std::runtime_error("the converter at " + program +
+                             " does not match this cascadio (" + said +
+                             "); reinstall cascadio");
+  default:
 #ifdef SIGSYS
     if (result.signal == SIGSYS) {
-      what = "converter process was stopped by its sandbox (signal " +
-             std::to_string(SIGSYS) +
-             "): it made a system call it may not, or aborted";
+      // the lock-down's answer to a system call it does not allow
+      // (sandbox.hpp); run the worker under `strace -f` to see which
+      throw std::runtime_error(
+          "the converter was stopped by its sandbox: it tried something the "
+          "sandbox forbids. This is a bug in cascadio; please report it "
+          "with the file");
     }
 #endif
-    throw std::runtime_error(what + (said.empty() ? "" : ": " + said));
-  }
+    throw std::runtime_error("the converter crashed on this file (" +
+                             crashName(result) +
+                             "); the file is probably damaged, or "
+                             "OpenCASCADE cannot handle it" +
+                             (said.empty() ? "" : ": " + said));
   }
 }
 

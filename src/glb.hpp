@@ -22,7 +22,8 @@ struct Glb {
     const size_t binLen = (bin.size() + 3) & ~size_t(3);
     const size_t total = 12 + 8 + jsonLen + (bin.empty() ? 0 : 8 + binLen);
     if (total > UINT32_MAX) {
-      throw std::runtime_error("GLB would exceed the 4 GB format limit");
+      throw std::runtime_error("the GLB would be over 4 GB, the format's "
+                               "limit; use a larger tol_linear");
     }
     const uint32_t head[] = {MAGIC, 2, static_cast<uint32_t>(total),
                              static_cast<uint32_t>(jsonLen), CHUNK_JSON};

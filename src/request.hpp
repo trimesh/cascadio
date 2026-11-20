@@ -14,8 +14,9 @@
 ///     the request as text, one `key=value` per line, ended by an empty line
 ///     the input file
 /// The worker writes the GLB to standard output and exits with one of the
-/// codes below. On failure it writes a one-line message to standard error
-/// instead.
+/// codes below. On failure the last line it writes to standard error says
+/// why. A line on standard error that starts with `worker_warning` is
+/// something the user should know, shown as a Python warning.
 
 enum class FileType { UNSPECIFIED = 0, STEP = 1, IGES = 2 };
 
@@ -35,7 +36,17 @@ constexpr int OK = 0;
 constexpr int INVALID_INPUT = 64;   // -> ValueError
 constexpr int FAILED = 65;          // -> RuntimeError
 constexpr int OUT_OF_MEMORY = 66;   // -> MemoryError
+constexpr int NO_SANDBOX = 67;      // -> RuntimeError: could not lock down
+constexpr int MISMATCH = 68;        // -> RuntimeError: another version
 } // namespace worker_exit
+
+constexpr char worker_warning[] = "cascadio warning: ";
+
+/// A request the worker cannot read: the module that wrote it is from
+/// another version.
+struct RequestError : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
 
 struct Request {
   FileType file_type = FileType::STEP;
@@ -74,15 +85,15 @@ struct Request {
   }
 
   /// Read the text form from a stream, leaving it at the start of the input
-  /// file. Throws std::invalid_argument on anything unexpected, which means
-  /// the module and the worker come from different versions.
-  static Request parse(std::istream &stream) {
+  /// file. Throws RequestError on anything unexpected, which means the
+  /// module and the worker come from different versions.
+  static Request parse(std::istream &stream) try {
     Request request;
     std::string line;
     while (std::getline(stream, line) && !line.empty()) {
       const size_t split = line.find('=');
       if (split == std::string::npos) {
-        throw std::invalid_argument("malformed request line: " + line);
+        throw RequestError("malformed request line: " + line);
       }
       const std::string key = line.substr(0, split);
       const std::string value = line.substr(split + 1);
@@ -113,9 +124,13 @@ struct Request {
       } else if (key == "memory_limit") {
         request.memory_limit = std::stoull(value);
       } else {
-        throw std::invalid_argument("unknown request key: " + key);
+        throw RequestError("unknown request key: " + key);
       }
     }
     return request;
+  } catch (const std::logic_error &error) {
+    // a number std::stoi and friends could not read
+    throw RequestError(std::string("unreadable request value: ") +
+                       error.what());
   }
 };

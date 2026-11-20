@@ -72,11 +72,19 @@ The worker treats every file as hostile. Before it reads the input it locks itse
 
 | Platform | How |
 |---|---|
-| Linux (x86-64, ARM64) | A short, fixed seccomp allowlist; `clone` only for new threads. Any other call kills the worker, which raises `RuntimeError` |
+| Linux (x86-64, ARM64) | A short, fixed seccomp allowlist; `clone` only for new threads. Any other call kills the worker |
 | macOS | Apple's "pure computation" sandbox profile |
-| Windows | An AppContainer with no capabilities, so no network and none of the user's files; a job that allows no other process; process mitigations. The worker starts itself again inside the container, which costs one more process per conversion |
+| Windows | An AppContainer with no capabilities, so no network and none of the user's files; a job that allows no other process; process mitigations. The worker starts itself again inside the container, a few tens of milliseconds per conversion |
 
-To find out which call stopped a worker, run it by hand under `strace -f` (see `src/worker.cpp`).
+If the sandbox cannot be set up, cascadio does not convert and raises `RuntimeError` saying why and what to do. The one exception is a Linux kernel that cannot filter system calls at all (WSL 1, kernels before 4.14, some emulators): there it converts without the filter and shows a `RuntimeWarning`. Running x86-64 Linux under an emulator such as Rosetta is untested.
+
+On Windows the sandbox needs a profile, which cascadio registers once per user as `cascadio.worker`. It stays after `pip uninstall`; to remove it:
+
+```python
+import ctypes; ctypes.windll.userenv.DeleteAppContainerProfile("cascadio.worker")
+```
+
+A worker stopped by its sandbox is a bug in cascadio; to see which system call it made, run the worker by hand under `strace -f` (see `src/worker.cpp`).
 
 To see where the time goes for a slow file, set `CASCADIO_TRACE=1`. Each stage of the conversion then prints how long it took:
 

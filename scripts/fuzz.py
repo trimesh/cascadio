@@ -12,7 +12,7 @@ and the input that caused them is saved to `fuzz-findings/`:
     crash    the worker died (a segmentation fault, an abort, a sanitizer
              report); cascadio survives these, but they are bugs
     sandbox  the worker made a system call its lock-down does not allow
-             (or aborted, which takes one); see src/sandbox.hpp
+             (see src/sandbox.hpp), or could not be sandboxed at all
     timeout  the conversion ran past the limit
     memory   the conversion ran past the memory limit
 

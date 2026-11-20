@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,18 +19,28 @@
 
 struct ProcessResult {
   bool timed_out = false;   ///< it was killed for running past the limit
+  bool interrupted = false; ///< it was killed because `interrupted` said so
   int exit_code = -1;       ///< valid unless timed out or killed by a signal
   int signal = 0;           ///< POSIX: the signal that killed it, if any
   std::vector<char> output; ///< everything it wrote to standard output
   std::string errors;       ///< everything it wrote to standard error
 };
 
+/// Why a program could not be started.
+struct StartError : std::runtime_error {
+  enum Kind { MISSING, NOT_RUNNABLE, OTHER } kind;
+  StartError(Kind why, const std::string &reason)
+      : std::runtime_error(reason), kind(why) {}
+};
+
 /// Run `program`, writing `head` then `body` to its standard input.
-/// A negative `timeout_seconds` means wait forever.
-/// Throws std::runtime_error if the program cannot be started.
+/// A negative `timeout_seconds` means wait forever. `interrupted` is asked
+/// at least every 100 ms; when it returns true the program is stopped.
+/// Throws StartError if the program cannot be started.
 static ProcessResult runProcess(const std::string &program,
                                 const std::string &head, const char *body,
-                                size_t body_size, double timeout_seconds);
+                                size_t body_size, double timeout_seconds,
+                                const std::function<bool()> &interrupted);
 
 /// The folder holding the shared library or executable this code is in.
 static std::string thisBinaryFolder();
@@ -126,7 +138,8 @@ struct Pipe {
 
 static ProcessResult runProcess(const std::string &program,
                                 const std::string &head, const char *body,
-                                size_t body_size, double timeout_seconds) {
+                                size_t body_size, double timeout_seconds,
+                                const std::function<bool()> &interrupted) {
   Pipe input, output, errors;
 
   // the child gets the three pipe ends as its standard streams
@@ -148,8 +161,11 @@ static ProcessResult runProcess(const std::string &program,
                   environmentPointers.data());
   posix_spawn_file_actions_destroy(&actions);
   if (failed != 0) {
-    throw std::runtime_error("cannot start " + program + ": " +
-                             strerror(failed));
+    throw StartError(failed == ENOENT ? StartError::MISSING
+                     : failed == EACCES || failed == ENOEXEC || failed == EPERM
+                         ? StartError::NOT_RUNNABLE
+                         : StartError::OTHER,
+                     strerror(failed));
   }
 
   // our copies of the child's ends must go, or we never see end-of-file
@@ -164,14 +180,15 @@ static ProcessResult runProcess(const std::string &program,
   const auto deadline =
       Clock::now() + std::chrono::duration_cast<Clock::duration>(
                          std::chrono::duration<double>(timeout_seconds));
+  // never more than 100 ms, so `interrupted` is asked often enough
   auto millisecondsLeft = [&]() -> int {
     if (timeout_seconds < 0) {
-      return -1; // poll and wait forever
+      return 100;
     }
     const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
                           deadline - Clock::now())
                           .count();
-    return left < 0 ? 0 : static_cast<int>(std::min<long long>(left, 60000));
+    return left < 0 ? 0 : static_cast<int>(std::min<long long>(left, 100));
   };
 
   ProcessResult result;
@@ -200,6 +217,10 @@ static ProcessResult runProcess(const std::string &program,
     }
     if (ready == 0 && timeout_seconds >= 0 && millisecondsLeft() == 0) {
       result.timed_out = true;
+      break;
+    }
+    if (interrupted()) {
+      result.interrupted = true;
       break;
     }
 
@@ -235,7 +256,7 @@ static ProcessResult runProcess(const std::string &program,
   // Both streams are closed, so the child is exiting, or the time is up.
   // Give it what is left of the limit, then kill it. Always reap it.
   int status = 0;
-  while (!result.timed_out) {
+  while (!result.timed_out && !result.interrupted) {
     const pid_t done = waitpid(child, &status, WNOHANG);
     if (done == child || (done < 0 && errno != EINTR)) {
       break;
@@ -244,9 +265,10 @@ static ProcessResult runProcess(const std::string &program,
       result.timed_out = true;
       break;
     }
+    result.interrupted = interrupted();
     usleep(500);
   }
-  if (result.timed_out) {
+  if (result.timed_out || result.interrupted) {
     kill(child, SIGKILL);
     while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
     }
@@ -324,9 +346,27 @@ struct Pipe {
   }
 };
 
+/// The text Windows has for an error code. (sandbox.hpp has the same for
+/// the worker, which shares no code with this module but request.hpp.)
+static std::string systemText(DWORD error) {
+  char *text = nullptr;
+  const DWORD length = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      nullptr, error, 0, reinterpret_cast<LPSTR>(&text), 0, nullptr);
+  std::string result = length > 0 ? std::string(text, length)
+                                  : "error " + std::to_string(error);
+  LocalFree(text);
+  while (!result.empty() && std::strchr(" .\r\n", result.back()) != nullptr) {
+    result.pop_back();
+  }
+  return result;
+}
+
 static ProcessResult runProcess(const std::string &program,
                                 const std::string &head, const char *body,
-                                size_t body_size, double timeout_seconds) {
+                                size_t body_size, double timeout_seconds,
+                                const std::function<bool()> &interrupted) {
   Pipe input(true), output(false), errors(false);
 
   auto widen = [](const std::string &utf8) {
@@ -365,21 +405,52 @@ static ProcessResult runProcess(const std::string &program,
       !UpdateProcThreadAttribute(startup.lpAttributeList, 0,
                                  PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
                                  sizeof(inherited), nullptr, nullptr)) {
-    throw std::runtime_error("cannot prepare to start " + program);
+    throw StartError(StartError::OTHER, systemText(GetLastError()));
   }
   PROCESS_INFORMATION child = {};
-  // CREATE_NO_WINDOW: no console window flashing up in GUI applications
+  // DETACHED_PROCESS: no console, so no console window can flash up and
+  // no console host is started for it. Suspended until it is in the job.
   const BOOL started = CreateProcessW(
       wide.c_str(), command.data(), nullptr, nullptr, TRUE,
-      CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT |
+      DETACHED_PROCESS | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT |
           EXTENDED_STARTUPINFO_PRESENT,
       environment.data(), nullptr, &startup.StartupInfo, &child);
   const DWORD error = GetLastError();
   DeleteProcThreadAttributeList(startup.lpAttributeList);
   if (!started) {
-    throw std::runtime_error("cannot start " + program + " (error " +
-                             std::to_string(error) + ")");
+    throw StartError(error == ERROR_FILE_NOT_FOUND ||
+                             error == ERROR_PATH_NOT_FOUND
+                         ? StartError::MISSING
+                     : error == ERROR_ACCESS_DENIED ||
+                             error == ERROR_BAD_EXE_FORMAT
+                         ? StartError::NOT_RUNNABLE
+                         : StartError::OTHER,
+                     systemText(error));
   }
+  // The job's handle closes when this call ends, or when Windows ends this
+  // process however it ends: either way the worker and anything it
+  // started go with it.
+  struct Job {
+    HANDLE handle = CreateJobObjectW(nullptr, nullptr);
+    ~Job() {
+      if (handle != nullptr) {
+        CloseHandle(handle);
+      }
+    }
+  } job;
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (job.handle == nullptr ||
+      !SetInformationJobObject(job.handle, JobObjectExtendedLimitInformation,
+                               &limits, sizeof(limits)) ||
+      !AssignProcessToJobObject(job.handle, child.hProcess)) {
+    const DWORD jobError = GetLastError();
+    TerminateProcess(child.hProcess, 1);
+    CloseHandle(child.hThread);
+    CloseHandle(child.hProcess);
+    throw StartError(StartError::OTHER, systemText(jobError));
+  }
+  ResumeThread(child.hThread);
   CloseHandle(child.hThread);
 
   // our copies of the child's ends must go, or we never see end-of-file
@@ -417,13 +488,22 @@ static ProcessResult runProcess(const std::string &program,
   std::thread outputReader([&] { drain(output.read_end, result.output); });
   std::thread errorReader([&] { drain(errors.read_end, result.errors); });
 
-  const DWORD wait = timeout_seconds < 0
-                         ? INFINITE
-                         : static_cast<DWORD>(timeout_seconds * 1000.0);
-  if (WaitForSingleObject(child.hProcess, wait) == WAIT_TIMEOUT) {
-    result.timed_out = true;
-    TerminateProcess(child.hProcess, 1);
+  // wait in steps of 100 ms, so `interrupted` is asked often enough
+  const auto deadline =
+      std::chrono::steady_clock::now() +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<double>(std::max(timeout_seconds, 0.0)));
+  while (WaitForSingleObject(child.hProcess, 100) == WAIT_TIMEOUT) {
+    if (timeout_seconds >= 0 && std::chrono::steady_clock::now() >= deadline) {
+      result.timed_out = true;
+    } else if (interrupted()) {
+      result.interrupted = true;
+    } else {
+      continue;
+    }
+    TerminateJobObject(job.handle, 1);
     WaitForSingleObject(child.hProcess, INFINITE);
+    break;
   }
   // the child is gone, so its pipe ends are closed and the threads finish
   writer.join();
@@ -433,7 +513,7 @@ static ProcessResult runProcess(const std::string &program,
   DWORD code = 0;
   GetExitCodeProcess(child.hProcess, &code);
   CloseHandle(child.hProcess);
-  if (!result.timed_out) {
+  if (!result.timed_out && !result.interrupted) {
     result.exit_code = static_cast<int>(code);
   }
   return result;

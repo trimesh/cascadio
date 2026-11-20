@@ -94,7 +94,8 @@ static void injectIntoGlb(Glb &glb, const Handle(TDocStd_Document) & document,
       const size_t byteOffset = glb.bin.size();
       const size_t byteLength = faceIndices.size() * sizeof(uint32_t);
       if (byteOffset + byteLength > UINT32_MAX) {
-        throw std::runtime_error("GLB would exceed the 4 GB format limit");
+        throw std::runtime_error("the GLB would be over 4 GB, the format's "
+                                 "limit; use a larger tol_linear");
       }
       const char *raw = reinterpret_cast<const char *>(faceIndices.data());
       glb.bin.insert(glb.bin.end(), raw, raw + byteLength);

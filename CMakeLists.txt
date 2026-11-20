@@ -128,8 +128,10 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(cascadio-worker PRIVATE Threads::Threads)
 if(WIN32)
-  # GetProcessMemoryInfo; AppContainers; sockets for the network probe
-  target_link_libraries(cascadio-worker PRIVATE psapi userenv ws2_32)
+  # GetProcessMemoryInfo; AppContainers; and sockets, which only the
+  # test-only network probe uses, so they are loaded only when it runs
+  target_link_libraries(cascadio-worker PRIVATE psapi userenv ws2_32 delayimp)
+  target_link_options(cascadio-worker PRIVATE /DELAYLOAD:ws2_32.dll)
 endif()
 
 # STABLE_ABI: one wheel serves every regular CPython from 3.12 on.
