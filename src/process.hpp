@@ -488,13 +488,25 @@ static ProcessResult runProcess(const std::string &program,
   std::thread outputReader([&] { drain(output.read_end, result.output); });
   std::thread errorReader([&] { drain(errors.read_end, result.errors); });
 
-  // wait in steps of 100 ms, so `interrupted` is asked often enough
+  // wait in steps of at most 100 ms, so `interrupted` is asked often
+  // enough, and never past the deadline
+  using Clock = std::chrono::steady_clock;
   const auto deadline =
-      std::chrono::steady_clock::now() +
-      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-          std::chrono::duration<double>(std::max(timeout_seconds, 0.0)));
-  while (WaitForSingleObject(child.hProcess, 100) == WAIT_TIMEOUT) {
-    if (timeout_seconds >= 0 && std::chrono::steady_clock::now() >= deadline) {
+      Clock::now() + std::chrono::duration_cast<Clock::duration>(
+                         std::chrono::duration<double>(
+                             std::max(timeout_seconds, 0.0)));
+  while (true) {
+    DWORD step = 100;
+    if (timeout_seconds >= 0) {
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            deadline - Clock::now())
+                            .count();
+      step = static_cast<DWORD>(std::clamp<long long>(left, 0, 100));
+    }
+    if (WaitForSingleObject(child.hProcess, step) != WAIT_TIMEOUT) {
+      break; // it ended
+    }
+    if (timeout_seconds >= 0 && Clock::now() >= deadline) {
       result.timed_out = true;
     } else if (interrupted()) {
       result.interrupted = true;

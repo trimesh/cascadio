@@ -228,9 +228,18 @@ def test_sandbox(attempt, tmp_path):
             "connect": str(listener.getsockname()[1]),
         }.get(attempt, "")
         if attempt == "write-own":
+            # the folder and every folder Windows made in it
             attempt = "write"
-            argument = os.path.expandvars(r"%LOCALAPPDATA%\Packages\cascadio.worker\AC")
-        done = probe(attempt, argument)
+            own = Path(
+                os.path.expandvars(r"%LOCALAPPDATA%\Packages\cascadio.worker\AC")
+            )
+            for folder in [own, *(path for path in own.iterdir() if path.is_dir())]:
+                argument = str(folder)
+                done = probe(attempt, argument)
+                if b"escaped" in done.stderr:
+                    break
+        else:
+            done = probe(attempt, argument)
     # for a write that got through, show who may write there
     where = argument if attempt == "write" else ""
     assert b"escaped" not in done.stderr, (
@@ -267,12 +276,15 @@ def test_gil_released():
     thread = threading.Thread(target=convert)
     ticks = 0
     thread.start()
+    # Spin rather than sleep: a sleeping thread may not be woken on a busy
+    # machine before a short conversion is over, a spinning one keeps
+    # being scheduled, but only if the GIL is free.
     while not done.is_set():
-        time.sleep(0.001)
         ticks += 1
     thread.join()
-    # the conversion takes around 100 ms; with the GIL held this would be ~0
-    assert ticks > 5
+    # the conversion takes around 100 ms; with the GIL held this would be
+    # what little ran before the call started
+    assert ticks > 10_000
 
 
 def test_threads():

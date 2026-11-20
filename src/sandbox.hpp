@@ -436,12 +436,11 @@ inline std::string systemText(DWORD error) {
   return result;
 }
 
-/// Add one entry for `sid` to a file's or folder's permissions: a denial
-/// goes first, an allowance after the explicit denials. Inheritable
-/// entries reach what the folder already holds. Returns 0, or why not.
-/// (aclapi.h would do this in fewer lines, but see above.)
-inline DWORD addPermission(const wchar_t *path, PSID sid, bool allow,
-                           DWORD rights, BYTE inheritance) {
+/// Give `sid` exactly `rights` on a file or folder: every entry it has is
+/// dropped, then, unless `rights` is 0, one allowance is added after the
+/// explicit denials. The folder's contents inherit the change. Returns 0,
+/// or why not. (aclapi.h would do this in fewer lines, but see above.)
+inline DWORD setPermission(const wchar_t *path, PSID sid, DWORD rights) {
   DWORD needed = 0;
   GetFileSecurityW(path, DACL_SECURITY_INFORMATION, nullptr, 0, &needed);
   std::vector<char> current(needed);
@@ -464,28 +463,34 @@ inline DWORD addPermission(const wchar_t *path, PSID sid, bool allow,
   if (!InitializeAcl(updated, size, ACL_REVISION)) {
     return GetLastError();
   }
-  bool added = false;
-  auto add = [&] {
-    added = allow ? AddAccessAllowedAceEx(updated, ACL_REVISION, inheritance,
-                                          rights, sid) != 0
-                  : AddAccessDeniedAceEx(updated, ACL_REVISION, inheritance,
-                                         rights, sid) != 0;
-    return added;
-  };
+  bool added = rights == 0;
   for (DWORD i = 0; i < oldSize.AceCount; i++) {
     void *entry = nullptr;
     if (!GetAce(old, i, &entry)) {
       continue;
     }
     const ACE_HEADER *header = static_cast<ACE_HEADER *>(entry);
-    const bool explicitDenial = header->AceType == ACCESS_DENIED_ACE_TYPE &&
+    // allow and deny entries, plain or with a condition, all keep the
+    // SID in the same place
+    const BYTE type = header->AceType;
+    if ((type == ACCESS_ALLOWED_ACE_TYPE || type == ACCESS_DENIED_ACE_TYPE ||
+         type == ACCESS_ALLOWED_CALLBACK_ACE_TYPE ||
+         type == ACCESS_DENIED_CALLBACK_ACE_TYPE) &&
+        EqualSid(&static_cast<ACCESS_ALLOWED_ACE *>(entry)->SidStart, sid)) {
+      continue;
+    }
+    const bool explicitDenial = (type == ACCESS_DENIED_ACE_TYPE ||
+                                 type == ACCESS_DENIED_CALLBACK_ACE_TYPE) &&
                                 (header->AceFlags & INHERITED_ACE) == 0;
-    if (!added && !(allow && explicitDenial) && !add()) {
-      return GetLastError();
+    if (!added && !explicitDenial) {
+      if (!AddAccessAllowedAceEx(updated, ACL_REVISION, 0, rights, sid)) {
+        return GetLastError();
+      }
+      added = true;
     }
     AddAce(updated, ACL_REVISION, MAXDWORD, entry, header->AceSize);
   }
-  if (!added && !add()) {
+  if (!added && !AddAccessAllowedAceEx(updated, ACL_REVISION, 0, rights, sid)) {
     return GetLastError();
   }
   return SetNamedSecurityInfoW(const_cast<wchar_t *>(path), 1,
@@ -513,11 +518,12 @@ inline void registerContainer() {
   }
 }
 
-/// Windows gives every container a folder its processes may write to,
-/// which every call would share: deny that. Done once, after the first
-/// start in the container, when the folder exists. If it cannot be done
-/// the conversion goes on, with a warning that says why.
-inline void denyOwnFolder(PSID container) {
+/// Windows gives every container a folder of its own, which every call
+/// would share. A denial for the container is ignored there, so take away
+/// what Windows gave it, on the folder and on the folders it made inside.
+/// Done once, after the first start in the container, when they exist. If
+/// it cannot be done the conversion goes on, with a warning that says why.
+inline void closeOwnFolder(PSID container) {
   wchar_t local[MAX_PATH];
   const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
   if (length == 0 || length >= MAX_PATH) {
@@ -527,12 +533,20 @@ inline void denyOwnFolder(PSID container) {
   }
   const std::wstring folder =
       std::wstring(local) + L"\\Packages\\cascadio.worker\\AC";
-  const DWORD error =
-      addPermission(folder.c_str(), container, false,
-                    FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |
-                        FILE_WRITE_ATTRIBUTES | FILE_DELETE_CHILD | DELETE |
-                        WRITE_DAC | WRITE_OWNER,
-                    OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE);
+  DWORD error = setPermission(folder.c_str(), container, 0);
+  WIN32_FIND_DATAW found;
+  HANDLE search = FindFirstFileW((folder + L"\\*").c_str(), &found);
+  for (bool more = search != INVALID_HANDLE_VALUE; more && error == 0;
+       more = FindNextFileW(search, &found) != 0) {
+    const std::wstring name = found.cFileName;
+    if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+        name != L"." && name != L"..") {
+      error = setPermission((folder + L"\\" + name).c_str(), container, 0);
+    }
+  }
+  if (search != INVALID_HANDLE_VALUE) {
+    FindClose(search);
+  }
   if (error != 0) {
     warn(("cascadio's sandbox can write to its own folder, "
           "%LOCALAPPDATA%\\Packages\\cascadio.worker\\AC (" +
@@ -664,8 +678,8 @@ inline void enterContainer() {
       registerContainer();
     } else if (error == ERROR_ACCESS_DENIED && !shared) {
       shared = true;
-      addPermission(program, container, true,
-                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, 0);
+      setPermission(program, container,
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE);
     } else {
       break;
     }
@@ -698,7 +712,7 @@ inline void enterContainer() {
                    systemText(error) + ")");
   }
   if (registered) {
-    denyOwnFolder(container);
+    closeOwnFolder(container);
   }
   FreeSid(container);
   ResumeThread(child.hThread);
