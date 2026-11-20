@@ -172,14 +172,14 @@ def test_environment_is_not_passed_on(fake_worker, monkeypatch, tmp_path):
 
 # What `cascadio-worker --probe` tries once it is locked down (the probes
 # are in sandbox.hpp): read a file, write one, connect to a port, start a
-# program, read from a thread started afterwards; on Linux and macOS also
-# start a copy of itself and use a descriptor it was handed.
-ATTEMPTS = ["read", "write", "connect", "spawn", "thread-read"]
+# program, read from a thread started afterwards, start a copy of itself
+# and use a descriptor it was handed. Windows lets a process take only
+# writing and starting programs away from itself.
 if sys.platform == "win32":
-    # Windows gives each AppContainer a folder of its own to write in
-    ATTEMPTS += ["write-own"]
+    ATTEMPTS = ["write", "spawn"]
 else:
-    ATTEMPTS += ["fork", "inherited"]
+    ATTEMPTS = ["read", "write", "connect", "spawn", "thread-read", "fork"]
+    ATTEMPTS += ["inherited"]
 
 
 def probe(attempt: str, argument: str = "") -> subprocess.CompletedProcess:
@@ -227,26 +227,8 @@ def test_sandbox(attempt, tmp_path):
             "write": str(tmp_path),
             "connect": str(listener.getsockname()[1]),
         }.get(attempt, "")
-        if attempt == "write-own":
-            # the folder and every folder Windows made in it
-            attempt = "write"
-            own = Path(
-                os.path.expandvars(r"%LOCALAPPDATA%\Packages\cascadio.worker\AC")
-            )
-            for folder in [own, *(path for path in own.iterdir() if path.is_dir())]:
-                argument = str(folder)
-                done = probe(attempt, argument)
-                if b"escaped" in done.stderr:
-                    break
-        else:
-            done = probe(attempt, argument)
-    # for a write that got through, show who may write there
-    where = argument if attempt == "write" else ""
-    assert b"escaped" not in done.stderr, (
-        subprocess.run(["icacls", where], capture_output=True, text=True).stdout
-        if sys.platform == "win32" and where
-        else ""
-    )
+        done = probe(attempt, argument)
+    assert b"escaped" not in done.stderr
     assert list(tmp_path.iterdir()) == [secret]
     if sys.platform.startswith("linux") and attempt != "inherited":
         # the filter kills the process on the spot

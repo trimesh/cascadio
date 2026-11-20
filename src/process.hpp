@@ -58,9 +58,6 @@ static std::vector<std::string> childEnvironment() {
       "CASCADIO_TRACE", "ASAN_OPTIONS", "UBSAN_OPTIONS",
 #ifdef _WIN32
       "SystemRoot", // much of Windows does not work without it
-      // folders, not secrets: Windows makes an AppContainer's own folders
-      // from them when the worker starts itself inside one (sandbox.hpp)
-      "USERPROFILE", "LOCALAPPDATA", "TEMP", "TMP",
 #endif
   };
   std::vector<std::string> kept;

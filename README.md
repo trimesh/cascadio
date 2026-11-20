@@ -68,21 +68,15 @@ Either limit can be `None` to switch it off.
 
 #### The worker is locked down
 
-The worker treats every file as hostile. Before it reads the input it locks itself down, so that even a file that took over the worker could only compute and hand back bytes. It cannot open, create or list files, reach the network, start programs or touch other processes. None of the caller's environment variables are passed to it, so there are no credentials in its memory to leak. Nothing switches this off.
+The worker treats every file as hostile. Before it reads the input it locks itself down, so that even a file that took over the worker could only compute and hand back bytes. On Linux and macOS it cannot open, create or list files, reach the network, start programs or touch other processes; Windows allows less to be taken away (below). None of the caller's environment variables are passed to it, so there are no credentials in its memory to leak. Nothing switches this off, and nothing is left behind on the machine.
 
 | Platform | How |
 |---|---|
 | Linux (x86-64, ARM64) | A short, fixed seccomp allowlist; `clone` only for new threads. Any other call kills the worker |
 | macOS | Apple's "pure computation" sandbox profile |
-| Windows | An AppContainer with no capabilities, so no network and none of the user's files; a job that allows no other process; process mitigations. The worker starts itself again inside the container, a few tens of milliseconds per conversion |
+| Windows | A job that allows no other process, and a low integrity level, so it cannot write anything the user owns. Windows gives a process no way to take reading files or the network away from itself; only its app sandbox (AppContainer) can, which needs a profile registered for every user, so cascadio does not use it |
 
 If the sandbox cannot be set up, cascadio does not convert and raises `RuntimeError` saying why and what to do. The one exception is a Linux kernel that cannot filter system calls at all (WSL 1, kernels before 4.14, some emulators): there it converts without the filter and shows a `RuntimeWarning`. Running x86-64 Linux under an emulator such as Rosetta is untested.
-
-On Windows the sandbox needs a profile, which cascadio registers once per user as `cascadio.worker`. It stays after `pip uninstall`; to remove it:
-
-```python
-import ctypes; ctypes.windll.userenv.DeleteAppContainerProfile("cascadio.worker")
-```
 
 A worker stopped by its sandbox is a bug in cascadio; to see which system call it made, run the worker by hand under `strace -f` (see `src/worker.cpp`).
 

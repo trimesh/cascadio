@@ -9,9 +9,9 @@
 //
 // Linux: a fixed seccomp allowlist; any other call kills the process.
 // macOS: Apple's fixed "pure computation" sandbox profile.
-// Windows: an AppContainer with no capabilities, so no network and none
-// of the user's files; a job that allows no other process; and process
-// mitigations.
+// Windows: a job that allows no other process, and a low integrity level,
+// so no writing. Windows lets a process take no more than that away from
+// itself: reading files and the network stay open there.
 //
 // Nothing here can be switched off. If the lock-down cannot be applied the
 // worker refuses to convert and says why (exit code NO_SANDBOX), with one
@@ -397,28 +397,13 @@ inline void confine() {
 // Windows
 // ============================================================================
 
-#include <winsock2.h> // before windows.h, which would bring the old one
 #include <windows.h> // NOMINMAX and WIN32_LEAN_AND_MEAN come from CMake
 
 #include <fcntl.h>
 #include <io.h>
 #include <psapi.h>
 
-// The few functions used from userenv.h and aclapi.h, declared here: both
-// headers bring all of OLE along, which does not compile after OCCT has
-// trimmed <windows.h> (NOMSG, NOUSER, ...).
-extern "C" __declspec(dllimport) HRESULT WINAPI
-DeriveAppContainerSidFromAppContainerName(PCWSTR name, PSID *sid);
-extern "C" __declspec(dllimport) HRESULT WINAPI CreateAppContainerProfile(
-    PCWSTR name, PCWSTR displayName, PCWSTR description,
-    PSID_AND_ATTRIBUTES capabilities, DWORD capabilityCount, PSID *sid);
-extern "C" __declspec(dllimport) DWORD WINAPI SetNamedSecurityInfoW(
-    LPWSTR name, int objectType /* SE_OBJECT_TYPE: 1 is a file */,
-    SECURITY_INFORMATION what, PSID owner, PSID group, PACL dacl, PACL sacl);
-
 namespace os {
-
-static const wchar_t CONTAINER[] = L"cascadio.worker";
 
 /// The text Windows has for an error code.
 inline std::string systemText(DWORD error) {
@@ -436,298 +421,11 @@ inline std::string systemText(DWORD error) {
   return result;
 }
 
-/// Give `sid` exactly `rights` on a file or folder: every entry it has is
-/// dropped, then, unless `rights` is 0, one allowance is added after the
-/// explicit denials. The folder's contents inherit the change. Returns 0,
-/// or why not. (aclapi.h would do this in fewer lines, but see above.)
-inline DWORD setPermission(const wchar_t *path, PSID sid, DWORD rights) {
-  DWORD needed = 0;
-  GetFileSecurityW(path, DACL_SECURITY_INFORMATION, nullptr, 0, &needed);
-  std::vector<char> current(needed);
-  BOOL present = FALSE;
-  BOOL defaulted = FALSE;
-  PACL old = nullptr;
-  ACL_SIZE_INFORMATION oldSize = {};
-  if (!GetFileSecurityW(path, DACL_SECURITY_INFORMATION, current.data(),
-                        needed, &needed) ||
-      !GetSecurityDescriptorDacl(current.data(), &present, &old,
-                                 &defaulted) ||
-      !present || old == nullptr ||
-      !GetAclInformation(old, &oldSize, sizeof(oldSize), AclSizeInformation)) {
-    return present ? GetLastError() : ERROR_INVALID_SECURITY_DESCR;
-  }
-  const DWORD size = oldSize.AclBytesInUse + sizeof(ACCESS_ALLOWED_ACE) +
-                     GetLengthSid(sid);
-  std::vector<char> buffer(size);
-  PACL updated = reinterpret_cast<PACL>(buffer.data());
-  if (!InitializeAcl(updated, size, ACL_REVISION)) {
-    return GetLastError();
-  }
-  bool added = rights == 0;
-  for (DWORD i = 0; i < oldSize.AceCount; i++) {
-    void *entry = nullptr;
-    if (!GetAce(old, i, &entry)) {
-      continue;
-    }
-    const ACE_HEADER *header = static_cast<ACE_HEADER *>(entry);
-    // allow and deny entries, plain or with a condition, all keep the
-    // SID in the same place
-    const BYTE type = header->AceType;
-    if ((type == ACCESS_ALLOWED_ACE_TYPE || type == ACCESS_DENIED_ACE_TYPE ||
-         type == ACCESS_ALLOWED_CALLBACK_ACE_TYPE ||
-         type == ACCESS_DENIED_CALLBACK_ACE_TYPE) &&
-        EqualSid(&static_cast<ACCESS_ALLOWED_ACE *>(entry)->SidStart, sid)) {
-      continue;
-    }
-    const bool explicitDenial = (type == ACCESS_DENIED_ACE_TYPE ||
-                                 type == ACCESS_DENIED_CALLBACK_ACE_TYPE) &&
-                                (header->AceFlags & INHERITED_ACE) == 0;
-    if (!added && !explicitDenial) {
-      if (!AddAccessAllowedAceEx(updated, ACL_REVISION, 0, rights, sid)) {
-        return GetLastError();
-      }
-      added = true;
-    }
-    AddAce(updated, ACL_REVISION, MAXDWORD, entry, header->AceSize);
-  }
-  if (!added && !AddAccessAllowedAceEx(updated, ACL_REVISION, 0, rights, sid)) {
-    return GetLastError();
-  }
-  return SetNamedSecurityInfoW(const_cast<wchar_t *>(path), 1,
-                               DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                               updated, nullptr);
-}
-
-/// Register the AppContainer for this user.
-inline void registerContainer() {
-  PSID registered = nullptr;
-  const HRESULT made = CreateAppContainerProfile(
-      CONTAINER, L"cascadio worker",
-      L"Converts one CAD file with nothing else allowed", nullptr, 0,
-      &registered);
-  if (FAILED(made) && made != HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) {
-    cannotLockDown(
-        "Windows would not create the sandbox profile 'cascadio.worker' "
-        "for this account (" +
-        systemText(static_cast<DWORD>(made)) +
-        "); accounts without a loaded user profile, such as some services, "
-        "cannot");
-  }
-  if (registered != nullptr) {
-    FreeSid(registered);
-  }
-}
-
-/// Windows gives every container a folder of its own, which every call
-/// would share. A denial for the container is ignored there, so take away
-/// what Windows gave it, on the folder and on the folders it made inside.
-/// Done once, after the first start in the container, when they exist. If
-/// it cannot be done the conversion goes on, with a warning that says why.
-inline void closeOwnFolder(PSID container) {
-  wchar_t local[MAX_PATH];
-  const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
-  if (length == 0 || length >= MAX_PATH) {
-    warn("cascadio's sandbox can write to its own folder: LOCALAPPDATA is "
-         "not set, so the folder could not be found");
-    return;
-  }
-  const std::wstring folder =
-      std::wstring(local) + L"\\Packages\\cascadio.worker\\AC";
-  DWORD error = setPermission(folder.c_str(), container, 0);
-  WIN32_FIND_DATAW found;
-  HANDLE search = FindFirstFileW((folder + L"\\*").c_str(), &found);
-  for (bool more = search != INVALID_HANDLE_VALUE; more && error == 0;
-       more = FindNextFileW(search, &found) != 0) {
-    const std::wstring name = found.cFileName;
-    if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
-        name != L"." && name != L"..") {
-      error = setPermission((folder + L"\\" + name).c_str(), container, 0);
-    }
-  }
-  if (search != INVALID_HANDLE_VALUE) {
-    FindClose(search);
-  }
-  if (error != 0) {
-    warn(("cascadio's sandbox can write to its own folder, "
-          "%LOCALAPPDATA%\\Packages\\cascadio.worker\\AC (" +
-          systemText(error) + ")")
-             .c_str());
-  }
-}
-
-/// Whether this process runs in our AppContainer and only that: the
-/// container must be cascadio's and allow nothing (no capabilities).
-/// Inside another app's container the worker refuses.
-inline bool contained(PSID ours) {
-  HANDLE token = nullptr;
-  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-    cannotLockDown("could not inspect its own process (" +
-                   systemText(GetLastError()) + ")");
-  }
-  DWORD isContainer = 0;
-  DWORD size = 0;
-  GetTokenInformation(token, TokenIsAppContainer, &isContainer,
-                      sizeof(isContainer), &size);
-  bool ours_ = false;
-  if (isContainer != 0) {
-    std::vector<char> sid(256);
-    std::vector<char> capabilities(sizeof(TOKEN_GROUPS) + 256);
-    GetTokenInformation(token, TokenAppContainerSid, sid.data(),
-                        static_cast<DWORD>(sid.size()), &size);
-    const bool gotCapabilities =
-        GetTokenInformation(token, TokenCapabilities, capabilities.data(),
-                            static_cast<DWORD>(capabilities.size()), &size) != 0;
-    const auto *container =
-        reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(sid.data());
-    const auto *groups = reinterpret_cast<TOKEN_GROUPS *>(capabilities.data());
-    ours_ = container->TokenAppContainer != nullptr &&
-            EqualSid(container->TokenAppContainer, ours) && gotCapabilities &&
-            groups->GroupCount == 0;
-  }
-  CloseHandle(token);
-  if (isContainer != 0 && !ours_) {
-    cannotLockDown("it is already inside another app's sandbox, which "
-                   "allows more than cascadio's");
-  }
-  return ours_;
-}
-
-/// Windows can put a process in an AppContainer only when it starts it.
-/// So unless this already is that process, start this program again in
-/// our AppContainer, wait for it and leave with its exit code. It gets the
-/// same standard streams and arguments, and dies with this one.
-inline void enterContainer() {
-  PSID container = nullptr;
-  if (FAILED(DeriveAppContainerSidFromAppContainerName(CONTAINER,
-                                                       &container))) {
-    cannotLockDown("Windows could not name its sandbox (AppContainer)");
-  }
-  if (contained(container)) {
-    FreeSid(container);
-    return;
-  }
-  SECURITY_CAPABILITIES capabilities = {}; // and no capabilities
-  capabilities.AppContainerSid = container;
-
-  // the standard streams are the only handles it inherits
-  const HANDLE streams[] = {GetStdHandle(STD_INPUT_HANDLE),
-                            GetStdHandle(STD_OUTPUT_HANDLE),
-                            GetStdHandle(STD_ERROR_HANDLE)};
-  std::vector<HANDLE> inherited;
-  for (HANDLE stream : streams) {
-    if (stream != nullptr && stream != INVALID_HANDLE_VALUE &&
-        std::find(inherited.begin(), inherited.end(), stream) ==
-            inherited.end()) {
-      SetHandleInformation(stream, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-      inherited.push_back(stream);
-    }
-  }
-  SIZE_T size = 0;
-  InitializeProcThreadAttributeList(nullptr, 2, 0, &size);
-  std::vector<char> attributes(size);
-  STARTUPINFOEXW startup = {};
-  startup.StartupInfo.cb = sizeof(startup);
-  startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-  startup.StartupInfo.hStdInput = streams[0];
-  startup.StartupInfo.hStdOutput = streams[1];
-  startup.StartupInfo.hStdError = streams[2];
-  startup.lpAttributeList =
-      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
-  if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 2, 0,
-                                         &size) ||
-      !UpdateProcThreadAttribute(
-          startup.lpAttributeList, 0,
-          PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &capabilities,
-          sizeof(capabilities), nullptr, nullptr) ||
-      !UpdateProcThreadAttribute(startup.lpAttributeList, 0,
-                                 PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                 inherited.data(),
-                                 inherited.size() * sizeof(HANDLE), nullptr,
-                                 nullptr)) {
-    cannotLockDown("Windows could not prepare its sandbox (" +
-                   systemText(GetLastError()) + ")");
-  }
-
-  wchar_t program[32768];
-  GetModuleFileNameW(nullptr, program, 32768);
-  // OCCT reads message files from the working directory: start it in one
-  // it may read and nobody can plant a file in
-  wchar_t system[MAX_PATH];
-  GetSystemDirectoryW(system, MAX_PATH);
-  std::wstring command = GetCommandLineW();
-  // without a console of its own (the module starts it detached) the
-  // copy gets none either, so no console window is made for it
-  const DWORD flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
-                      (GetConsoleWindow() == nullptr ? DETACHED_PROCESS : 0);
-  PROCESS_INFORMATION child = {};
-  // The first time for this user Windows does not know the container yet
-  // (error 2), and the program may not be the container's to read (error
-  // 5). Each is fixed once, when it is in the way, in whichever order.
-  bool registered = false;
-  bool shared = false;
-  DWORD error = 0;
-  for (int start = 0; start < 3; start++) {
-    if (CreateProcessW(program, command.data(), nullptr, nullptr, TRUE, flags,
-                       nullptr, system, &startup.StartupInfo, &child)) {
-      error = 0;
-      break;
-    }
-    error = GetLastError();
-    if (error == ERROR_FILE_NOT_FOUND && !registered) {
-      registered = true;
-      registerContainer();
-    } else if (error == ERROR_ACCESS_DENIED && !shared) {
-      shared = true;
-      setPermission(program, container,
-                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE);
-    } else {
-      break;
-    }
-  }
-  DeleteProcThreadAttributeList(startup.lpAttributeList);
-  if (error == ERROR_ACCESS_DENIED) {
-    char path[MAX_PATH];
-    GetModuleFileNameA(nullptr, path, MAX_PATH);
-    cannotLockDown(std::string("Windows would not let the sandbox read ") +
-                   path + "; an administrator can run: icacls \"" + path +
-                   "\" /grant *S-1-15-2-1:RX");
-  }
-  if (error != 0) {
-    cannotLockDown("Windows would not start the sandboxed converter (" +
-                   systemText(error) + ")");
-  }
-
-  // When this process ends, the job's handle closes and kills it: this is
-  // the process the module stops on a timeout.
-  HANDLE job = CreateJobObjectW(nullptr, nullptr);
-  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
-  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  if (job == nullptr ||
-      !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-                               &limits, sizeof(limits)) ||
-      !AssignProcessToJobObject(job, child.hProcess)) {
-    error = GetLastError();
-    TerminateProcess(child.hProcess, worker_exit::NO_SANDBOX);
-    cannotLockDown("Windows could not tie the sandboxed converter to it (" +
-                   systemText(error) + ")");
-  }
-  if (registered) {
-    closeOwnFolder(container);
-  }
-  FreeSid(container);
-  ResumeThread(child.hThread);
-  WaitForSingleObject(child.hProcess, INFINITE);
-  DWORD code = worker_exit::FAILED;
-  GetExitCodeProcess(child.hProcess, &code);
-  ExitProcess(code);
-}
-
 inline int prepare() {
   // a crash shows no dialog; the module reports it
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
                SEM_NOOPENFILEERRORBOX);
   _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-  enterContainer();
   // no translation of line endings in either direction
   _setmode(_fileno(stdin), _O_BINARY);
   const int result = _dup(1);
@@ -751,6 +449,10 @@ inline uint64_t peakMemory() {
   return counters.PeakWorkingSetSize;
 }
 
+/// Windows has no way for a process to take reading files or the network
+/// away from itself; only an AppContainer can, and that needs a profile
+/// registered for every user. So it does what a process can do alone,
+/// leaving nothing behind: no other processes, and no writing.
 inline void confine() {
   // A job that allows this process alone: it cannot start another, and
   // anything it holds dies with it.
@@ -767,75 +469,42 @@ inline void confine() {
     cannotLockDown("Windows could not limit it to one process (" +
                    systemText(GetLastError()) + ")");
   }
-
-  // No generated code, no stray handle use, no injected DLLs.
-  PROCESS_MITIGATION_DYNAMIC_CODE_POLICY code = {};
-  code.ProhibitDynamicCode = 1;
-  PROCESS_MITIGATION_STRICT_HANDLE_CHECK_POLICY handles = {};
-  handles.RaiseExceptionOnInvalidHandleReference = 1;
-  handles.HandleExceptionsPermanentlyEnabled = 1;
-  PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY extensions = {};
-  extensions.DisableExtensionPoints = 1;
-  PROCESS_MITIGATION_IMAGE_LOAD_POLICY images = {};
-  images.NoRemoteImages = 1;
-  images.NoLowMandatoryLabelImages = 1;
-  if (!SetProcessMitigationPolicy(ProcessDynamicCodePolicy, &code,
-                                  sizeof(code)) ||
-      !SetProcessMitigationPolicy(ProcessStrictHandleCheckPolicy, &handles,
-                                  sizeof(handles)) ||
-      !SetProcessMitigationPolicy(ProcessExtensionPointDisablePolicy,
-                                  &extensions, sizeof(extensions)) ||
-      !SetProcessMitigationPolicy(ProcessImageLoadPolicy, &images,
-                                  sizeof(images))) {
-    cannotLockDown("Windows would not apply its process protections (" +
-                   systemText(GetLastError()) + ")");
+  // Low integrity: no writing to anything the user owns.
+  HANDLE token = nullptr;
+  SID_IDENTIFIER_AUTHORITY authority = SECURITY_MANDATORY_LABEL_AUTHORITY;
+  PSID low = nullptr;
+  bool lowered = false;
+  if (OpenProcessToken(GetCurrentProcess(),
+                       TOKEN_ADJUST_DEFAULT | TOKEN_QUERY, &token) &&
+      AllocateAndInitializeSid(&authority, 1, SECURITY_MANDATORY_LOW_RID, 0,
+                               0, 0, 0, 0, 0, 0, &low)) {
+    TOKEN_MANDATORY_LABEL label = {};
+    label.Label.Attributes = SE_GROUP_INTEGRITY;
+    label.Label.Sid = low;
+    lowered = SetTokenInformation(
+                  token, TokenIntegrityLevel, &label,
+                  static_cast<DWORD>(sizeof(label) + GetLengthSid(low))) != 0;
+  }
+  const DWORD error = GetLastError();
+  if (low != nullptr) {
+    FreeSid(low);
+  }
+  if (token != nullptr) {
+    CloseHandle(token);
+  }
+  if (!lowered) {
+    cannotLockDown("Windows would not lower its integrity level (" +
+                   systemText(error) + ")");
   }
 }
 
 /// What `--probe` tries (see probe() at the end); true if it worked.
+/// Reading files and the network are not blocked on Windows (above).
 inline bool attempt(const std::string &name, const std::string &argument) {
-  if (name == "read") {
-    return CreateFileA(argument.c_str(), GENERIC_READ,
-                       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                       OPEN_EXISTING, 0, nullptr) != INVALID_HANDLE_VALUE;
-  }
   if (name == "write") {
     return CreateFileA((argument + "\\cascadio-probe").c_str(), GENERIC_WRITE,
                        0, nullptr, CREATE_NEW, FILE_FLAG_DELETE_ON_CLOSE,
                        nullptr) != INVALID_HANDLE_VALUE;
-  }
-  if (name == "connect") {
-    // ws2_32.dll is delay-loaded (CMakeLists.txt): only this loads it
-    WSADATA data;
-    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-      return false;
-    }
-    const SOCKET fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (fd == INVALID_SOCKET) {
-      return false;
-    }
-    // A sandboxed connect is dropped, not refused, and Windows would retry
-    // for 21 seconds: wait 2.
-    u_long nonBlocking = 1;
-    ioctlsocket(fd, static_cast<long>(FIONBIO), &nonBlocking);
-    sockaddr_in address = {};
-    address.sin_family = AF_INET;
-    address.sin_port =
-        htons(static_cast<u_short>(std::atoi(argument.c_str())));
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address));
-    fd_set writable;
-    FD_ZERO(&writable);
-    FD_SET(fd, &writable);
-    timeval wait = {2, 0};
-    if (select(0, nullptr, &writable, nullptr, &wait) != 1) {
-      return false;
-    }
-    int failure = 0;
-    int length = sizeof(failure);
-    getsockopt(fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&failure),
-               &length);
-    return failure == 0;
   }
   if (name == "spawn") {
     STARTUPINFOW startup = {};
