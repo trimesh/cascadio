@@ -231,7 +231,13 @@ def test_sandbox(attempt, tmp_path):
             attempt = "write"
             argument = os.path.expandvars(r"%LOCALAPPDATA%\Packages\cascadio.worker\AC")
         done = probe(attempt, argument)
-    assert b"escaped" not in done.stderr
+    # for a write that got through, show who may write there
+    where = argument if attempt == "write" else ""
+    assert b"escaped" not in done.stderr, (
+        subprocess.run(["icacls", where], capture_output=True, text=True).stdout
+        if sys.platform == "win32" and where
+        else ""
+    )
     assert list(tmp_path.iterdir()) == [secret]
     if sys.platform.startswith("linux") and attempt != "inherited":
         # the filter kills the process on the spot
