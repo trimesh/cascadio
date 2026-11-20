@@ -436,16 +436,6 @@ inline std::string systemText(DWORD error) {
   return result;
 }
 
-inline std::string narrow(const wchar_t *wide) {
-  const int size =
-      WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-  std::string utf8(static_cast<size_t>(std::max(size, 1)), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8.data(), size, nullptr,
-                      nullptr);
-  utf8.resize(static_cast<size_t>(std::max(size, 1)) - 1);
-  return utf8;
-}
-
 /// Add one entry for `sid` to a file's or folder's permissions: a denial
 /// goes first, an allowance after the explicit denials. Inheritable
 /// entries reach what the folder already holds. (aclapi.h would do this in
@@ -668,9 +658,10 @@ inline void enterContainer() {
   DeleteProcThreadAttributeList(startup.lpAttributeList);
   FreeSid(container);
   if (error == ERROR_ACCESS_DENIED) {
-    const std::string path = narrow(program);
-    cannotLockDown("Windows would not let the sandbox read " + path +
-                   "; an administrator can run: icacls \"" + path +
+    char path[MAX_PATH];
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    cannotLockDown(std::string("Windows would not let the sandbox read ") +
+                   path + "; an administrator can run: icacls \"" + path +
                    "\" /grant *S-1-15-2-1:RX");
   }
   if (error != 0) {
