@@ -506,18 +506,6 @@ def test_node_name_format_default():
     )
 
 
-def test_node_name_format_step_to_glb(tmp_path):
-    """The file-based wrapper passes `node_name_format` through."""
-    output = tmp_path / "out.glb"
-    with pytest.warns(DeprecationWarning):
-        cascadio.step_to_glb(
-            str(MODELS_DIR / "multibody.step"),
-            str(output),
-            node_name_format=cascadio.NodeNameFormat.PRODUCT,
-        )
-    assert _node_names(output.read_bytes())[1] == "box_base"
-
-
 def test_y_up_cuboid():
     """
     `y_up` rotates CAD's Z-up into glTF's Y-up: (x, y, z) -> (x, z, -y).

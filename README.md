@@ -88,7 +88,7 @@ cascadio: mesh             538.7 ms
 cascadio: write glb         92.7 ms
 ```
 
-`step_to_glb` works on file paths. It is deprecated and will be removed in the first release after January 2028. `step_to_obj` was removed in 0.2: the converter is not allowed to write files.
+`step_to_glb` and `step_to_obj`, which worked on file paths, were removed in 0.2: cascadio does not read or write files. Read the file yourself and pass the bytes to `load`.
 
 ### Motivation
 

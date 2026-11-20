@@ -349,7 +349,7 @@ for name, kind in (("featuretype.STEP", "step"), ("microstrip.igs", "iges")):
 
 def test_docstrings():
     """Every public function has a numpy-style docstring and a signature."""
-    for name in ("load", "to_glb_bytes", "step_to_glb"):
+    for name in ("load", "to_glb_bytes"):
         doc = getattr(cascadio, name).__doc__
         signature, body = doc.split("\n", 1)
         assert signature.startswith(name + "(") and "->" in signature

@@ -18,7 +18,6 @@ from ._core import (
     NodeNameFormat,
     __version__,
     load,
-    step_to_glb,
     to_glb_bytes,
 )
 
@@ -40,6 +39,5 @@ __all__ = [
     "extension",
     "load",
     "primitives",
-    "step_to_glb",
     "to_glb_bytes",
 ]

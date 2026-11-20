@@ -1,5 +1,4 @@
 import os
-import tempfile
 from io import BytesIO
 
 import pytest
@@ -86,31 +85,6 @@ def test_load_iges_file_extensions(file_type):
     # Verify it loads as valid GLB
     scene = trimesh.load_scene(file_obj=BytesIO(glb_data), file_type="glb")
     assert len(scene.geometry) >= 1, f"No geometry for file_type={file_type}"
-
-
-def test_step_to_glb():
-    """The deprecated file-based wrapper still works, and warns."""
-    step_file = os.path.join(cwd, "models", "featuretype.STEP")
-    assert os.path.exists(step_file)
-
-    with tempfile.TemporaryDirectory() as D:
-        outfile = os.path.join(D, "output.glb")
-        with pytest.warns(DeprecationWarning, match="cascadio.load"):
-            result = cascadio.step_to_glb(
-                step_file, outfile, tol_linear=0.1, tol_angular=0.5
-            )
-        assert result == 0
-        assert os.path.exists(outfile)
-        assert os.path.getsize(outfile) > 1000, "Output file suspiciously small"
-
-        scene = trimesh.load(outfile)
-        assert len(scene.geometry) == 1
-
-        # Verify mesh is valid
-        mesh = next(iter(scene.geometry.values()))
-        assert len(mesh.vertices) > 100, "Mesh should have substantial vertices"
-        assert len(mesh.faces) > 100, "Mesh should have substantial faces"
-        assert mesh.is_winding_consistent, "Mesh should have consistent winding"
 
 
 @pytest.mark.parametrize(

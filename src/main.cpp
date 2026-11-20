@@ -15,7 +15,6 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <iterator>
 #include <optional>
 #include <sstream>
@@ -223,28 +222,6 @@ static FileType parseFileType(std::string name) {
                               ". Use 'step' or 'iges'.");
 }
 
-/// Read a whole file, or throw.
-static std::vector<char> readFile(const std::string &path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    throw std::runtime_error("cannot open input file: " + path);
-  }
-  return std::vector<char>(std::istreambuf_iterator<char>(file), {});
-}
-
-/// Warn that a file-path function is going away. Raises if the caller has
-/// turned warnings into errors.
-static void deprecated(const char *name) {
-  const std::string message =
-      std::string("cascadio.") + name +
-      " reads and writes files and is deprecated: it will be removed in the "
-      "first release after January 2028. Read the file yourself and call "
-      "cascadio.load(data), which takes and returns bytes.";
-  if (PyErr_WarnEx(PyExc_DeprecationWarning, message.c_str(), 1) != 0) {
-    throw nb::python_error();
-  }
-}
-
 // ============================================================================
 // Docstrings, numpy style. The shared parts are written once.
 // ============================================================================
@@ -328,13 +305,6 @@ Returns
 -------
 glb
     The GLB file content.
-)doc";
-
-static const std::string DOC_RETURNS_ZERO = R"doc(
-Returns
--------
-status
-    Always 0. Failures raise.
 )doc";
 
 NB_MODULE(_core, m) {
@@ -432,51 +402,6 @@ Examples
         "node_name_format"_a = NodeNameFormat::INSTANCE_OR_PRODUCT,
         "y_up"_a = false, "timeout"_a = DEFAULT_TIMEOUT,
         "memory_limit"_a = DEFAULT_MEMORY_LIMIT);
-
-  m.def(
-      "step_to_glb",
-      [toGlb](const std::string &input_path, const std::string &output_path,
-              double tol_linear, double tol_angular, bool tol_relative,
-              bool merge_primitives, bool use_parallel, bool include_brep,
-              BrepTypes brep_types, bool include_materials,
-              NodeNameFormat node_name_format, Timeout timeout,
-              MemoryLimit memory_limit) {
-        deprecated("step_to_glb");
-        const std::vector<char> step = readFile(input_path);
-        const nb::bytes glb =
-            toGlb(nb::bytes(step.data(), step.size()), FileType::STEP,
-                  tol_linear, tol_angular, tol_relative, merge_primitives,
-                  use_parallel, include_brep, std::move(brep_types),
-                  include_materials, node_name_format, false, timeout,
-                  memory_limit);
-        std::ofstream file(output_path, std::ios::binary);
-        file.write(glb.c_str(), static_cast<std::streamsize>(glb.size()));
-        if (!file) {
-          throw std::runtime_error("cannot write output file: " + output_path);
-        }
-        return 0;
-      },
-      (R"doc(Deprecated: convert a STEP file on disk to a GLB file on disk.
-
-Use `load`, which takes and returns bytes and never touches the
-filesystem. This function will be removed in the first release after
-January 2028.
-
-Parameters
-----------
-input_path
-    The STEP file to read.
-output_path
-    Where to write the GLB file.
-)doc" + DOC_MESH + DOC_GLB + DOC_LIMITS + DOC_RETURNS_ZERO + DOC_RAISES)
-          .c_str(),
-      "input_path"_a, "output_path"_a, "tol_linear"_a = 0.01,
-      "tol_angular"_a = 0.5, "tol_relative"_a = false,
-      "merge_primitives"_a = true, "use_parallel"_a = true,
-      "include_brep"_a = false, "brep_types"_a = nb::none(),
-      "include_materials"_a = false,
-      "node_name_format"_a = NodeNameFormat::INSTANCE_OR_PRODUCT,
-      "timeout"_a = DEFAULT_TIMEOUT, "memory_limit"_a = DEFAULT_MEMORY_LIMIT);
 
 #ifdef VERSION_INFO
   m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
