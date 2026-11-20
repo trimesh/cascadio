@@ -438,10 +438,10 @@ inline std::string systemText(DWORD error) {
 
 /// Add one entry for `sid` to a file's or folder's permissions: a denial
 /// goes first, an allowance after the explicit denials. Inheritable
-/// entries reach what the folder already holds. (aclapi.h would do this in
-/// fewer lines, but see above.)
-inline bool addPermission(const wchar_t *path, PSID sid, bool allow,
-                          DWORD rights, BYTE inheritance) {
+/// entries reach what the folder already holds. Returns 0, or why not.
+/// (aclapi.h would do this in fewer lines, but see above.)
+inline DWORD addPermission(const wchar_t *path, PSID sid, bool allow,
+                           DWORD rights, BYTE inheritance) {
   DWORD needed = 0;
   GetFileSecurityW(path, DACL_SECURITY_INFORMATION, nullptr, 0, &needed);
   std::vector<char> current(needed);
@@ -455,14 +455,14 @@ inline bool addPermission(const wchar_t *path, PSID sid, bool allow,
                                  &defaulted) ||
       !present || old == nullptr ||
       !GetAclInformation(old, &oldSize, sizeof(oldSize), AclSizeInformation)) {
-    return false;
+    return present ? GetLastError() : ERROR_INVALID_SECURITY_DESCR;
   }
   const DWORD size = oldSize.AclBytesInUse + sizeof(ACCESS_ALLOWED_ACE) +
                      GetLengthSid(sid);
   std::vector<char> buffer(size);
   PACL updated = reinterpret_cast<PACL>(buffer.data());
   if (!InitializeAcl(updated, size, ACL_REVISION)) {
-    return false;
+    return GetLastError();
   }
   bool added = false;
   auto add = [&] {
@@ -481,22 +481,20 @@ inline bool addPermission(const wchar_t *path, PSID sid, bool allow,
     const bool explicitDenial = header->AceType == ACCESS_DENIED_ACE_TYPE &&
                                 (header->AceFlags & INHERITED_ACE) == 0;
     if (!added && !(allow && explicitDenial) && !add()) {
-      return false;
+      return GetLastError();
     }
     AddAce(updated, ACL_REVISION, MAXDWORD, entry, header->AceSize);
   }
   if (!added && !add()) {
-    return false;
+    return GetLastError();
   }
   return SetNamedSecurityInfoW(const_cast<wchar_t *>(path), 1,
                                DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                               updated, nullptr) == ERROR_SUCCESS;
+                               updated, nullptr);
 }
 
-/// Register the AppContainer for this user. Windows gives every container
-/// a folder its processes may write to, which every call would share:
-/// deny that too.
-inline void registerContainer(PSID container) {
+/// Register the AppContainer for this user.
+inline void registerContainer() {
   PSID registered = nullptr;
   const HRESULT made = CreateAppContainerProfile(
       CONTAINER, L"cascadio worker",
@@ -513,16 +511,33 @@ inline void registerContainer(PSID container) {
   if (registered != nullptr) {
     FreeSid(registered);
   }
+}
+
+/// Windows gives every container a folder its processes may write to,
+/// which every call would share: deny that. Done once, after the first
+/// start in the container, when the folder exists. If it cannot be done
+/// the conversion goes on, with a warning that says why.
+inline void denyOwnFolder(PSID container) {
   wchar_t local[MAX_PATH];
   const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
-  if (length > 0 && length < MAX_PATH) {
-    const std::wstring folder =
-        std::wstring(local) + L"\\Packages\\cascadio.worker\\AC";
-    addPermission(folder.c_str(), container, false,
-                  FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |
-                      FILE_WRITE_ATTRIBUTES | FILE_DELETE_CHILD | DELETE |
-                      WRITE_DAC | WRITE_OWNER,
-                  OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE);
+  if (length == 0 || length >= MAX_PATH) {
+    warn("cascadio's sandbox can write to its own folder: LOCALAPPDATA is "
+         "not set, so the folder could not be found");
+    return;
+  }
+  const std::wstring folder =
+      std::wstring(local) + L"\\Packages\\cascadio.worker\\AC";
+  const DWORD error =
+      addPermission(folder.c_str(), container, false,
+                    FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |
+                        FILE_WRITE_ATTRIBUTES | FILE_DELETE_CHILD | DELETE |
+                        WRITE_DAC | WRITE_OWNER,
+                    OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE);
+  if (error != 0) {
+    warn(("cascadio's sandbox can write to its own folder, "
+          "%LOCALAPPDATA%\\Packages\\cascadio.worker\\AC (" +
+          systemText(error) + ")")
+             .c_str());
   }
 }
 
@@ -646,7 +661,7 @@ inline void enterContainer() {
     error = GetLastError();
     if (error == ERROR_FILE_NOT_FOUND && !registered) {
       registered = true;
-      registerContainer(container);
+      registerContainer();
     } else if (error == ERROR_ACCESS_DENIED && !shared) {
       shared = true;
       addPermission(program, container, true,
@@ -656,7 +671,6 @@ inline void enterContainer() {
     }
   }
   DeleteProcThreadAttributeList(startup.lpAttributeList);
-  FreeSid(container);
   if (error == ERROR_ACCESS_DENIED) {
     char path[MAX_PATH];
     GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -683,6 +697,10 @@ inline void enterContainer() {
     cannotLockDown("Windows could not tie the sandboxed converter to it (" +
                    systemText(error) + ")");
   }
+  if (registered) {
+    denyOwnFolder(container);
+  }
+  FreeSid(container);
   ResumeThread(child.hThread);
   WaitForSingleObject(child.hProcess, INFINITE);
   DWORD code = worker_exit::FAILED;
