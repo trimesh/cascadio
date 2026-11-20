@@ -180,6 +180,10 @@ if sys.platform == "win32":
 else:
     ATTEMPTS = ["read", "write", "connect", "spawn", "thread-read", "fork"]
     ATTEMPTS += ["inherited"]
+if sys.platform.startswith("linux"):
+    # a thread created with other flags than glibc's, a futex operation
+    # with priority inheritance, and executable memory made two ways
+    ATTEMPTS += ["clone-flags", "futex-pi", "exec-mmap", "exec-mprotect"]
 
 
 def probe(attempt: str, argument: str = "") -> subprocess.CompletedProcess:

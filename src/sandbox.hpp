@@ -40,6 +40,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <thread>
 #include <vector>
@@ -95,12 +96,15 @@ inline void warn(const char *text) {
 #include <csignal>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #ifdef __linux__
+#include <linux/futex.h>
 #include <malloc.h>
+#include <sched.h>
 #endif
 
 namespace os {
@@ -204,6 +208,32 @@ inline bool attempt(const std::string &name, const std::string &argument) {
     }
     return child > 0;
   }
+#ifdef __linux__
+  if (name == "clone-flags") {
+    // CLONE_THREAD without the flags glibc sends with it; the kernel
+    // refuses this anyway (EINVAL), so only the filter can make it a kill
+    return syscall(SYS_clone, CLONE_THREAD, 0, 0, 0, 0) >= 0;
+  }
+  if (name == "futex-pi") {
+    // the priority-inheritance futex calls, the route of past kernel
+    // exploits; on an unlocked word this takes the lock and returns 0
+    uint32_t word = 0;
+    return syscall(SYS_futex, &word, FUTEX_TRYLOCK_PI | FUTEX_PRIVATE_FLAG,
+                   0, nullptr, nullptr, 0) == 0;
+  }
+  if (name == "exec-mmap") {
+    // new executable memory, the usual home for injected code
+    return mmap(nullptr, 4096, PROT_READ | PROT_EXEC,
+                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) != MAP_FAILED;
+  }
+  if (name == "exec-mprotect") {
+    // or memory made executable after it was written
+    void *page = mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return page != MAP_FAILED &&
+           mprotect(page, 4096, PROT_READ | PROT_EXEC) == 0;
+  }
+#endif
   if (name == "inherited") {
     // any descriptor past the standard ones and the result's copy (3)
     for (int fd = 4; fd < 1024; fd++) {
@@ -228,7 +258,6 @@ inline bool attempt(const std::string &name, const std::string &argument) {
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
-#include <sched.h>
 #include <sys/prctl.h>
 
 // the kernel headers of manylinux_2_28 predate clone3
@@ -243,15 +272,19 @@ inline bool attempt(const std::string &name, const std::string &argument) {
 #else
 #error "cascadio has no system call filter for this architecture"
 #endif
+// the filter reads the low half of 64-bit arguments at their own offset
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "cascadio's system call filter assumes a little-endian machine"
+#endif
 
 namespace os {
 
 /// Every system call the worker makes once it is locked down, and why.
 static const int ALLOWED[] = {
     __NR_read,  __NR_write,                 // stdin; the GLB and messages
-    __NR_brk,   __NR_mmap,  __NR_munmap,    // malloc and thread stacks
-    __NR_mremap, __NR_mprotect, __NR_madvise, //
-    __NR_futex, __NR_set_robust_list,       // threads
+    __NR_brk,   __NR_munmap, __NR_mremap,   // malloc and thread stacks;
+    __NR_madvise,                           // mmap and mprotect are below
+    __NR_set_robust_list,                   // threads; futex is below
     __NR_rseq,  __NR_rt_sigprocmask,        //
     __NR_exit,  __NR_exit_group,            // a thread, the process
     __NR_rt_sigreturn, __NR_restart_syscall, // signals, resumed sleeps
@@ -305,39 +338,66 @@ inline void installFilter() {
   // clone3 passes its flags in memory the filter cannot read; "not
   // implemented" makes glibc fall back to clone, whose flags it can
   answer(__NR_clone3, SECCOMP_RET_ERRNO | ENOSYS);
-  // Two calls are allowed only for some first arguments:
-  //   clone, for new threads only, so no process can be started;
-  //   tgkill, for this process only, which is how abort() ends it with
-  //   SIGABRT. The process id cannot change: there is no fork.
-  auto allowIf = [&program](long call, unsigned test, unsigned value) {
-    program.insert(
-        program.end(),
-        {
-            BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<unsigned>(call),
-                     0, 4),
-            BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, args)),
-            BPF_JUMP(BPF_JMP | test | BPF_K, value, 0, 1),
-            BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-            BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
-        });
+  // Five calls are allowed only with some arguments. `allowOnly` lets
+  // `call` through when its argument `index`, after `mask`, is one of
+  // `values`, and kills the process otherwise.
+  auto allowOnly = [&program](long call, unsigned index, unsigned mask,
+                              std::initializer_list<unsigned> values) {
+    const auto count = static_cast<unsigned char>(values.size());
+    program.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                               static_cast<unsigned>(call), 0,
+                               static_cast<unsigned char>(count + 4)));
+    program.push_back(BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+                               static_cast<unsigned>(
+                                   offsetof(seccomp_data, args) + 8 * index)));
+    program.push_back(BPF_STMT(BPF_ALU | BPF_AND | BPF_K, mask));
+    unsigned char left = count;
+    for (const unsigned value : values) {
+      // on a match, jump over the remaining tests and the kill
+      program.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, value, left, 0));
+      left--;
+    }
+    program.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS));
+    program.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
   };
-  allowIf(__NR_clone, BPF_JSET, CLONE_THREAD);
-  allowIf(__NR_tgkill, BPF_JEQ, static_cast<unsigned>(getpid()));
+  // clone: exactly the flags glibc's pthread_create sends, so only a new
+  // thread, never a process or a namespace
+  allowOnly(__NR_clone, 0, ~0U,
+            {CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD |
+             CLONE_SYSVSEM | CLONE_SETTLS | CLONE_PARENT_SETTID |
+             CLONE_CHILD_CLEARTID});
+  // futex: only waiting and waking, which is all glibc (2.28 and newer)
+  // and libstdc++ use for mutexes, condition variables and atomics. The
+  // requeue and priority-inheritance operations, the route of past kernel
+  // exploits, are refused. The mask drops the private and clock flags.
+  allowOnly(__NR_futex, 1, ~unsigned(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME),
+            {FUTEX_WAIT, FUTEX_WAKE, FUTEX_WAIT_BITSET, FUTEX_WAKE_BITSET});
+  // mmap and mprotect: never executable memory. Every library is loaded
+  // before the lock-down, so new code can only be someone else's.
+  allowOnly(__NR_mmap, 2, PROT_EXEC, {0});
+  allowOnly(__NR_mprotect, 2, PROT_EXEC, {0});
+  // tgkill: this process only, which is how abort() ends it with SIGABRT.
+  // The process id cannot change: there is no fork.
+  allowOnly(__NR_tgkill, 0, ~0U, {static_cast<unsigned>(getpid())});
   // and anything else
   program.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS));
 
   const sock_fprog filter = {static_cast<unsigned short>(program.size()),
                              program.data()};
   // TSYNC: every thread that already runs gets the filter too, and it
-  // fails rather than leave one out
-  if (syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER,
-              SECCOMP_FILTER_FLAG_TSYNC, &filter) != 0) {
-    if (errno == EINVAL || errno == ENOSYS) {
-      return unfiltered();
-    }
+  // fails rather than leave one out. This kernel can filter (it answered
+  // above), so any failure here is ours: refuse, never run unfiltered.
+  const long installed = syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER,
+                                 SECCOMP_FILTER_FLAG_TSYNC, &filter);
+  if (installed < 0) {
     cannotLockDown(std::string("the system call filter could not be "
                                "installed (") +
                    std::strerror(errno) + ")");
+  }
+  if (installed > 0) {
+    // TSYNC names the first thread it could not reach instead of failing
+    cannotLockDown("the system call filter could not reach thread " +
+                   std::to_string(installed));
   }
 }
 
