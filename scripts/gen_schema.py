@@ -360,7 +360,7 @@ def generate_readme(schema: dict, source: str) -> str:
     return README.format(
         schema=source,
         extension=extension_name(schema),
-        description=schema["description"].replace(". ", ".\n\n", 1),
+        description=schema["description"],
         example=example_json(),
         top=table(schema, schema["properties"]),
         face_description=face["description"],
@@ -525,9 +525,9 @@ def generate_python(schema: dict, source: str) -> str:
         [*names, "BrepPrimitive", "PRIMITIVES", "parse_primitive", "parse_brep_faces"],
         key=lambda name: (not name.isupper(), not name[0].isupper(), name),
     )
-    # everything after the first sentence of the schema's description
-    # is about units and conventions
-    units = schema["description"].split(". ", 1)[1]
+    # the last paragraph of the schema's description is about units and
+    # conventions
+    units = schema["description"].split("\n\n")[-1]
     return PYTHON.format(
         schema=source,
         units=wrap(units, ""),

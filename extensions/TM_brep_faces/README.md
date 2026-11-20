@@ -1,7 +1,13 @@
 <!-- Generated from schema/mesh.primitive.TM_brep_faces.schema.json by scripts/gen_schema.py. Do not edit. -->
 # TM_brep_faces
 
-Which BREP face each triangle came from, the analytic surface of each face, and what the part is made of.
+This extension is for CAD exporters. For each triangle in a glTF mesh it has the index for which exact surface of the original CAD model it came from.
+
+CAD programs don't store a part as triangles. They store it as exact surfaces: planes, cylinders, cones, spheres and tori. These are called analytic surfaces, because a few numbers describe each one completely. For example, a cylinder is just an axis and a radius. Each surface is trimmed to a patch called a face, and faces are joined along their edges. This is called boundary representation, or BREP. When every edge is shared by exactly two faces, the faces close up and surround a solid. A watertight mesh works the same way: every edge is shared by exactly two triangles, once in each direction.
+
+To export a mesh, the CAD program tessellates each face, which means it covers the face with small flat triangles that approximate it. The exact surface is lost in that step. Working with the BREP directly would keep it, but that is hard, because you need a CAD kernel: the large geometry library inside a CAD program. A mesh, on the other hand, can be used by almost anything.
+
+This extension keeps both. Each triangle stores the index of the face it came from, and each face stores its analytic surface. Most code can use the mesh as normal, and code that needs the exact surface can look it up by index, with no kernel. The exporter already has each face in hand while it tessellates it, so this information is nearly free to write. A face whose surface is not one of the analytic types (a free-form surface, for example) is stored as null. The extension is implemented for the OpenCASCADE kernel, but other kernels such as ACIS or Parasolid could export the same information.
 
 All positions and lengths are in meters and all directions are unit vectors, in the same coordinate frame as the primitive's POSITION accessor (before any node transform). All angles are in radians and turn counter-clockwise when seen from the tip of the axis they turn about (the right-hand rule).
 
