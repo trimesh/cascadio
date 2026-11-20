@@ -4,7 +4,7 @@
 This script is run by cibuildwheel on Linux with / remounted read-only.
 It verifies:
 1. Filesystem is actually read-only (sanity check on multiple locations)
-2. cascadio.load() works despite this (via memfd)
+2. cascadio.load() works despite this (the worker writes no files)
 """
 
 import os

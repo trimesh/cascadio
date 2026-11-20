@@ -3,20 +3,312 @@
   "$id": "mesh.primitive.TM_brep_faces.schema.json",
   "title": "TM_brep_faces mesh primitive extension",
   "type": "object",
-  "description": "Per-triangle BREP face indices and optional analytic surface definitions",
+  "description": "This extension is for CAD exporters. For each triangle in a glTF mesh it has the index for which exact surface of the original CAD model it came from.\n\nCAD programs don't store a part as triangles. They store it as exact surfaces: planes, cylinders, cones, spheres and tori. These are called analytic surfaces, because a few numbers describe each one completely. For example, a cylinder is just an axis and a radius. Each surface is trimmed to a patch called a face, and faces are joined along their edges. This is called boundary representation, or BREP. When every edge is shared by exactly two faces, the faces close up and surround a solid. A watertight mesh works the same way: every edge is shared by exactly two triangles, once in each direction.\n\nTo export a mesh, the CAD program tessellates each face, which means it covers the face with small flat triangles that approximate it. The exact surface is lost in that step. Working with the BREP directly would keep it, but that is hard, because you need a CAD kernel: the large geometry library inside a CAD program. A mesh, on the other hand, can be used by almost anything.\n\nThis extension keeps both. Each triangle stores the index of the face it came from, and each face stores its analytic surface. Most code can use the mesh as normal, and code that needs the exact surface can look it up by index, with no kernel. The exporter already has each face in hand while it tessellates it, so this information is nearly free to write. A face whose surface is not one of the analytic types (a free-form surface, for example) is stored as null. The extension is implemented for the OpenCASCADE kernel, but other kernels such as ACIS or Parasolid could export the same information.\n\nAll positions and lengths are in meters and all directions are unit vectors, in the same coordinate frame as the primitive's POSITION accessor (before any node transform). All angles are in radians and turn counter-clockwise when seen from the tip of the axis they turn about (the right-hand rule).",
   "properties": {
     "faceIndices": {
       "type": "integer",
       "minimum": 0,
-      "description": "Index of accessor containing per-triangle face indices. Accessor must be SCALAR with unsigned integer component type. Count must equal number of triangles."
+      "description": "Index of an accessor with one value per triangle: the position in `faces` of the BREP face that triangle came from. The accessor is SCALAR with an unsigned integer component type, and its count equals the number of triangles in the primitive."
     },
     "faces": {
       "type": "array",
-      "description": "Array of face definitions with analytic surface geometry",
+      "description": "One entry per BREP face, in face index order. An entry is null when the face is not one of the analytic surface types, so positions still match face indices.",
       "items": {
-        "$ref": "face.schema.json"
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/$defs/face"
+          }
+        ]
       }
+    },
+    "substance": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/substance"
+        }
+      ],
+      "description": "What the part this primitive belongs to is made of, or null if the source file does not say. Every instance of the part shares it."
     }
   },
-  "required": ["faceIndices"]
+  "required": ["faceIndices", "faces", "substance"],
+  "$defs": {
+    "point": {
+      "title": "point",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "A position [x, y, z] in meters, in the frame of the primitive's vertices"
+    },
+    "direction": {
+      "title": "direction",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "A direction [x, y, z] of length 1, in the frame of the primitive's vertices"
+    },
+    "range": {
+      "title": "range",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[min, max]: the stretch of a surface the face covers along one of the surface's two directions, in meters or radians as the field says"
+    },
+    "face": {
+      "title": "BREP Face",
+      "type": "object",
+      "required": ["type", "face_index"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["plane", "cylinder", "cone", "sphere", "torus"],
+          "description": "The kind of surface. It decides which other fields are present."
+        },
+        "face_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Position of this face in the `faces` array, which is the value `faceIndices` holds for its triangles"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "plane"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "origin": {
+                "$ref": "#/$defs/point",
+                "description": "A point on the plane, from which the extents are measured"
+              },
+              "normal": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the plane"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction in the plane: the plane's own X axis. Its Y axis is normal cross x_dir."
+              },
+              "extent_x": {
+                "$ref": "#/$defs/range",
+                "description": "How far the face reaches along x_dir from origin, in meters"
+              },
+              "extent_y": {
+                "$ref": "#/$defs/range",
+                "description": "How far the face reaches along the plane's Y axis from origin, in meters"
+              }
+            },
+            "required": ["origin", "normal", "x_dir", "extent_x", "extent_y"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cylinder"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "origin": {
+                "$ref": "#/$defs/point",
+                "description": "A point on the axis, from which heights are measured"
+              },
+              "axis": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction of the axis"
+              },
+              "radius": {
+                "type": "number",
+                "description": "Distance from the axis to the surface, in meters",
+                "exclusiveMinimum": 0
+              },
+              "extent_angle": {
+                "$ref": "#/$defs/range",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians. A full cylinder covers 2 pi."
+              },
+              "extent_height": {
+                "$ref": "#/$defs/range",
+                "description": "How far the face reaches along the axis from origin, in meters"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which angles are measured."
+              }
+            },
+            "required": ["origin", "axis", "radius", "extent_angle", "extent_height", "x_dir"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cone"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "apex": {
+                "$ref": "#/$defs/point",
+                "description": "The point where the cone comes to a tip. The face itself usually does not reach it."
+              },
+              "axis": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction of the axis"
+              },
+              "semi_angle": {
+                "type": "number",
+                "description": "Angle between the axis and the cone's side, in radians. Positive if the cone widens along the axis direction and negative if it narrows.",
+                "exclusiveMinimum": -1.5707963267948966,
+                "exclusiveMaximum": 1.5707963267948966
+              },
+              "ref_radius": {
+                "type": "number",
+                "description": "Radius of the cone's reference circle, in meters. Its center is on the axis at apex + axis * ref_radius / tan(semi_angle).",
+                "minimum": 0
+              },
+              "extent_angle": {
+                "$ref": "#/$defs/range",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians"
+              },
+              "extent_distance": {
+                "$ref": "#/$defs/range",
+                "description": "How far the face reaches along the cone's slanted side, measured from the reference circle in the direction of the axis, in meters"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which angles are measured."
+              }
+            },
+            "required": ["apex", "axis", "semi_angle", "ref_radius", "extent_angle", "extent_distance", "x_dir"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sphere"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "center": {
+                "$ref": "#/$defs/point",
+                "description": "The center of the sphere"
+              },
+              "radius": {
+                "type": "number",
+                "description": "Distance from the center to the surface, in meters",
+                "exclusiveMinimum": 0
+              },
+              "extent_longitude": {
+                "$ref": "#/$defs/range",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians"
+              },
+              "extent_latitude": {
+                "$ref": "#/$defs/range",
+                "description": "The angles the face covers above the equator, toward the axis, in radians: from -pi/2 at the south pole to pi/2 at the north pole"
+              },
+              "axis": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction from the center to the sphere's north pole."
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which longitude is measured."
+              }
+            },
+            "required": ["center", "radius", "extent_longitude", "extent_latitude", "axis", "x_dir"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "torus"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "center": {
+                "$ref": "#/$defs/point",
+                "description": "The center of the torus, on its axis"
+              },
+              "axis": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction of the axis the tube circles around"
+              },
+              "major_radius": {
+                "type": "number",
+                "description": "Distance from the axis to the middle of the tube, in meters",
+                "exclusiveMinimum": 0
+              },
+              "minor_radius": {
+                "type": "number",
+                "description": "Radius of the tube, in meters",
+                "exclusiveMinimum": 0
+              },
+              "extent_major_angle": {
+                "$ref": "#/$defs/range",
+                "description": "The angles the face covers around the axis, measured from x_dir, in radians"
+              },
+              "extent_minor_angle": {
+                "$ref": "#/$defs/range",
+                "description": "The angles the face covers around the tube, in radians: 0 is the outer edge of the torus and the angle grows toward the axis direction"
+              },
+              "x_dir": {
+                "$ref": "#/$defs/direction",
+                "description": "Unit direction perpendicular to the axis from which angles are measured."
+              }
+            },
+            "required": ["center", "axis", "major_radius", "minor_radius", "extent_major_angle", "extent_minor_angle", "x_dir"]
+          }
+        }
+      ],
+      "unevaluatedProperties": false,
+      "description": "One BREP face whose surface is a plane, cylinder, cone, sphere or torus. The surface is infinite or closed; the `extent_` fields say which part of it the face covers. A face can be smaller than its extents if its outline is not rectangular in those two directions."
+    },
+    "substance": {
+      "title": "Substance",
+      "type": "object",
+      "description": "What a part is made of, as the CAD file names it, such as steel or ABS. Not how it looks: that is the primitive's glTF `material`.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The name the source file gives it"
+        },
+        "density": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Mass per volume in kilograms per cubic meter, if the source file gives one: 7850 for steel"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
 }

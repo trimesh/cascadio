@@ -1,2 +1,3 @@
 - These bindings (`cascadio`) are released under the MIT license.
 - OpenCASCADE is released under the LGPL (`LICENSE-opencascade.md`).
+- The Zstandard decompressor is released under the BSD license (`LICENSE-zstd.md`).

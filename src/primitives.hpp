@@ -1,190 +1,117 @@
 #pragma once
 
-#include "extras.hpp"
+#include "tm_brep_faces.hpp" // generated from the schema at build time
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepTools.hxx>
-#include <GeomAbs_SurfaceType.hxx>
-#include <TopExp_Explorer.hxx>
-#include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
-#include <TopoDS_Shape.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Sphere.hxx>
 #include <gp_Torus.hxx>
+#include <gp_Trsf.hxx>
 
-// ============================================================================
-// BREP Primitive Extraction
-// ============================================================================
+#include <set>
+#include <string>
 
-/// Get the type name for a surface type, or nullptr if not analytical
-static const char *getSurfaceTypeName(GeomAbs_SurfaceType surfType) {
-  switch (surfType) {
-  case GeomAbs_Plane:
-    return "plane";
-  case GeomAbs_Cylinder:
-    return "cylinder";
-  case GeomAbs_Cone:
-    return "cone";
-  case GeomAbs_Sphere:
-    return "sphere";
-  case GeomAbs_Torus:
-    return "torus";
-  default:
-    return nullptr;
-  }
-}
-
-/// Extract BREP primitive info for a face and add to JSON array
-/// If allowedTypes is non-empty, only include faces with types in the set
-/// (filtered faces get a null entry to preserve index mapping)
-/// lengthUnit is the scale factor to convert to meters (from
-/// XCAFDoc_DocumentTool::GetLengthUnit)
-static void extractFacePrimitive(const TopoDS_Face &face, int faceIndex,
-                                 rapidjson::Value &facesArray,
-                                 rapidjson::Document::AllocatorType &alloc,
-                                 const std::set<std::string> &allowedTypes = {},
-                                 double lengthUnit = 1.0) {
-  // Null/empty face -> null entry
+/// Describe one BREP face as TM_brep_faces JSON.
+///
+/// Returns a JSON null when the face is not a plane, cylinder, cone, sphere
+/// or torus, or when `allowedTypes` is non-empty and does not list its type.
+/// Callers keep the null so array positions still match face indices.
+///
+/// @param lengthUnit scale from the file's unit to meters
+/// @param frame      moves the surface into the coordinate frame of the mesh
+static rapidjson::Value describeFace(const TopoDS_Face &face, int faceIndex,
+                                     brep::Allocator &alloc,
+                                     const std::set<std::string> &allowedTypes,
+                                     double lengthUnit, const gp_Trsf &frame) {
+  rapidjson::Value described; // null
   if (face.IsNull()) {
-    facesArray.PushBack(rapidjson::Value(), alloc);
-    return;
+    return described;
   }
 
-  BRepAdaptor_Surface surf(face, Standard_True);
-  GeomAbs_SurfaceType surfType = surf.GetType();
-
-  // Determine type name for filtering
-  const char *typeName = getSurfaceTypeName(surfType);
-
-  // If filtering is enabled, check if this type should be included
-  // Add null entry to preserve index mapping with brep_index
-  if (!allowedTypes.empty()) {
-    // Note: std::set::count with const char* creates a temp string - acceptable
-    // overhead for filtering flexibility. For perf-critical paths, could use
-    // an enum-based filter instead.
-    if (typeName == nullptr || allowedTypes.count(typeName) == 0) {
-      // Add null to preserve index (brep_index references array position)
-      facesArray.PushBack(rapidjson::Value(), alloc);
-      return;
-    }
-  }
-
-  // Get UV bounds
+  const BRepAdaptor_Surface surface(face, true);
   double uMin, uMax, vMin, vMax;
   BRepTools::UVBounds(face, uMin, uMax, vMin, vMax);
 
-  rapidjson::Value obj(rapidjson::kObjectType);
+  // positions and lengths are scaled to meters; directions and angles are not
+  const double m = lengthUnit;
+  auto point = [m](const gp_Pnt &p) {
+    return brep::Point{p.X() * m, p.Y() * m, p.Z() * m};
+  };
+  auto direction = [](const gp_Dir &d) {
+    return brep::Direction{d.X(), d.Y(), d.Z()};
+  };
+  const brep::Range u{uMin, uMax}, v{vMin, vMax};
+  const brep::Range uMeters{uMin * m, uMax * m}, vMeters{vMin * m, vMax * m};
 
-  // Add face_index first (required by schema)
-  obj.AddMember("face_index", faceIndex, alloc);
+  // The schema says angles turn counter-clockwise about the axis and a
+  // plane's Y is normal cross X. OpenCASCADE allows a mirrored frame, where
+  // both run the other way; negate that coordinate so the output keeps
+  // its promise.
+  auto mirrored = [](const brep::Range &range) {
+    return brep::Range{-range.max, -range.min};
+  };
 
-  switch (surfType) {
+  switch (surface.GetType()) {
   case GeomAbs_Plane: {
-    gp_Pln pln = surf.Plane();
-    gp_Ax3 pos = pln.Position();
-    obj.AddMember("type", "plane", alloc);
-    addVec3(obj, "origin", pos.Location().X() * lengthUnit,
-            pos.Location().Y() * lengthUnit, pos.Location().Z() * lengthUnit,
-            alloc);
-    addVec3(obj, "normal", pos.Direction().X(), pos.Direction().Y(),
-            pos.Direction().Z(), alloc);
-    addVec3(obj, "x_dir", pos.XDirection().X(), pos.XDirection().Y(),
-            pos.XDirection().Z(), alloc);
-    // For planes, u and v are both lengths in the plane's local coordinates
-    addBounds(obj, "extent_x", uMin * lengthUnit, uMax * lengthUnit, alloc);
-    addBounds(obj, "extent_y", vMin * lengthUnit, vMax * lengthUnit, alloc);
+    const gp_Ax3 axes = surface.Plane().Transformed(frame).Position();
+    described = brep::plane(faceIndex, point(axes.Location()),
+                            direction(axes.Direction()),
+                            direction(axes.XDirection()), uMeters,
+                            axes.Direct() ? vMeters : mirrored(vMeters), alloc);
     break;
   }
   case GeomAbs_Cylinder: {
-    gp_Cylinder cyl = surf.Cylinder();
-    gp_Ax3 pos = cyl.Position();
-    obj.AddMember("type", "cylinder", alloc);
-    addVec3(obj, "origin", pos.Location().X() * lengthUnit,
-            pos.Location().Y() * lengthUnit, pos.Location().Z() * lengthUnit,
-            alloc);
-    addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
-            pos.Direction().Z(), alloc);
-    obj.AddMember("radius", cyl.Radius() * lengthUnit, alloc);
-    // u is angle around axis (radians), v is height along axis (length)
-    addBounds(obj, "extent_angle", uMin, uMax, alloc);
-    addBounds(obj, "extent_height", vMin * lengthUnit, vMax * lengthUnit, alloc);
+    const gp_Cylinder cylinder = surface.Cylinder().Transformed(frame);
+    const gp_Ax3 &axes = cylinder.Position();
+    described = brep::cylinder(faceIndex, point(axes.Location()),
+                               direction(axes.Direction()),
+                               cylinder.Radius() * m,
+                               axes.Direct() ? u : mirrored(u), vMeters,
+                               direction(axes.XDirection()), alloc);
     break;
   }
   case GeomAbs_Cone: {
-    gp_Cone cone = surf.Cone();
-    gp_Ax3 pos = cone.Position();
-    gp_Pnt apex = cone.Apex();
-    obj.AddMember("type", "cone", alloc);
-    addVec3(obj, "apex", apex.X() * lengthUnit, apex.Y() * lengthUnit,
-            apex.Z() * lengthUnit, alloc);
-    addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
-            pos.Direction().Z(), alloc);
-    obj.AddMember("semi_angle", cone.SemiAngle(), alloc);
-    obj.AddMember("ref_radius", cone.RefRadius() * lengthUnit, alloc);
-    // u is angle around axis (radians), v is distance from apex (length)
-    addBounds(obj, "extent_angle", uMin, uMax, alloc);
-    addBounds(obj, "extent_distance", vMin * lengthUnit, vMax * lengthUnit, alloc);
+    const gp_Cone cone = surface.Cone().Transformed(frame);
+    const gp_Ax3 &axes = cone.Position();
+    described = brep::cone(faceIndex, point(cone.Apex()),
+                           direction(axes.Direction()), cone.SemiAngle(),
+                           cone.RefRadius() * m,
+                           axes.Direct() ? u : mirrored(u), vMeters,
+                           direction(axes.XDirection()), alloc);
     break;
   }
   case GeomAbs_Sphere: {
-    gp_Sphere sph = surf.Sphere();
-    obj.AddMember("type", "sphere", alloc);
-    addVec3(obj, "center", sph.Location().X() * lengthUnit,
-            sph.Location().Y() * lengthUnit, sph.Location().Z() * lengthUnit,
-            alloc);
-    obj.AddMember("radius", sph.Radius() * lengthUnit, alloc);
-    // u is longitude (radians), v is latitude (radians)
-    addBounds(obj, "extent_longitude", uMin, uMax, alloc);
-    addBounds(obj, "extent_latitude", vMin, vMax, alloc);
+    const gp_Sphere sphere = surface.Sphere().Transformed(frame);
+    const gp_Ax3 &axes = sphere.Position();
+    described = brep::sphere(faceIndex, point(axes.Location()),
+                             sphere.Radius() * m,
+                             axes.Direct() ? u : mirrored(u), v,
+                             direction(axes.Direction()),
+                             direction(axes.XDirection()), alloc);
     break;
   }
   case GeomAbs_Torus: {
-    gp_Torus tor = surf.Torus();
-    gp_Ax3 pos = tor.Position();
-    obj.AddMember("type", "torus", alloc);
-    addVec3(obj, "center", pos.Location().X() * lengthUnit,
-            pos.Location().Y() * lengthUnit, pos.Location().Z() * lengthUnit,
-            alloc);
-    addVec3(obj, "axis", pos.Direction().X(), pos.Direction().Y(),
-            pos.Direction().Z(), alloc);
-    obj.AddMember("major_radius", tor.MajorRadius() * lengthUnit, alloc);
-    obj.AddMember("minor_radius", tor.MinorRadius() * lengthUnit, alloc);
-    // u is angle around main axis (radians), v is angle around tube (radians)
-    addBounds(obj, "extent_major_angle", uMin, uMax, alloc);
-    addBounds(obj, "extent_minor_angle", vMin, vMax, alloc);
+    const gp_Torus torus = surface.Torus().Transformed(frame);
+    const gp_Ax3 &axes = torus.Position();
+    described = brep::torus(faceIndex, point(axes.Location()),
+                            direction(axes.Direction()),
+                            torus.MajorRadius() * m, torus.MinorRadius() * m,
+                            axes.Direct() ? u : mirrored(u), v,
+                            direction(axes.XDirection()), alloc);
     break;
   }
   default:
-    // Non-analytical surface - push null to preserve index mapping
-    facesArray.PushBack(rapidjson::Value(), alloc);
-    return;
+    return described;
   }
 
-  facesArray.PushBack(obj, alloc);
-}
-
-/// Extract all BREP primitives from a shape into a JSON array
-/// lengthUnit is the scale factor to convert to meters (from
-/// XCAFDoc_DocumentTool::GetLengthUnit)
-static rapidjson::Value
-extractAllPrimitives(const TopoDS_Shape &shape,
-                     rapidjson::Document::AllocatorType &alloc,
-                     const std::set<std::string> &allowedTypes = {},
-                     double lengthUnit = 1.0) {
-  rapidjson::Value facesArray(rapidjson::kArrayType);
-  int faceIndex = 0;
-
-  for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More();
-       explorer.Next()) {
-    TopoDS_Face face = TopoDS::Face(explorer.Current());
-    extractFacePrimitive(face, faceIndex, facesArray, alloc, allowedTypes,
-                         lengthUnit);
-    faceIndex++;
+  if (!allowedTypes.empty() &&
+      allowedTypes.count(described["type"].GetString()) == 0) {
+    described.SetNull();
   }
-
-  return facesArray;
+  return described;
 }
