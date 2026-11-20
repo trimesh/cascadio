@@ -81,7 +81,7 @@ manylinux-aarch64-image = "manylinux_2_28"
 before-all = "make occt"
 
 test-extras = "tests"
-test-command = "pytest {project}/tests"
+test-command = "pytest --durations=10 {project}/tests"
 
 [tool.cibuildwheel.linux]
 # clang + lld: same compiler on every platform, and lld folds duplicate code
@@ -96,7 +96,7 @@ repair-wheel-command = [
 ]
 # Run normal tests, then test with read-only root filesystem via bubblewrap
 # Uses bwrap to create a read-only bind mount with /proc for memfd support
-test-command = "pytest {project}/tests && bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --uid 1000 --gid 1000 python {project}/scripts/test_readonly.py"
+test-command = "pytest --durations=10 {project}/tests && bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --uid 1000 --gid 1000 python {project}/scripts/test_readonly.py"
 
 [tool.cibuildwheel.windows]
 # The Windows CI image has no `make`, so these are the Makefile's

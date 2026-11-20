@@ -54,6 +54,12 @@ jobs:
             UV_CONSTRAINT=build-constraints.txt
             CASCADIO_STRICT=ON
 
+      # the same wheel on a recent distribution, under Docker's default
+      # seccomp profile (see `make modern-linux`)
+      - name: Test on a recent Linux
+        if: runner.os == 'Linux'
+        run: make modern-linux
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           path: ./wheelhouse/*.whl

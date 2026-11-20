@@ -10,6 +10,7 @@
 #
 # Release checks, in Docker so they do not depend on your machine:
 #   make manylinux     build and test a Linux wheel exactly like CI does
+#   make modern-linux  test that wheel on a recent distribution (CI too)
 #   make system-occt   build the sdist against a system OpenCASCADE and test
 #   make occt-master   build and test against the newest OpenCASCADE commit
 #
@@ -50,7 +51,7 @@ export CMAKE_BUILD_PARALLEL_LEVEL := $(CPUS)
 # compiler warnings in our own code are errors (see CMakeLists.txt)
 export CASCADIO_STRICT := ON
 
-.PHONY: help occt install test wheel audit bughunt manylinux system-occt occt-master sdist schema lock clean
+.PHONY: help occt install test wheel audit bughunt manylinux modern-linux system-occt occt-master sdist schema lock clean
 
 help:
 	@sed -n '/^#/!q;s/^# \{0,1\}//p' $(MAKEFILE_LIST)
@@ -123,6 +124,17 @@ manylinux: upstream/OCCT/CMakeLists.txt
 	CIBW_CONTAINER_ENGINE="docker; create_args: --privileged --cpus=$(CPUS)" \
 	CIBW_ENVIRONMENT_LINUX="CASCADIO_OCCT_PREFIX=/host$(CURDIR)/build/occt_manylinux CASCADIO_OCCT_BUILD=/tmp/occt_build UV_CONSTRAINT=build-constraints.txt CASCADIO_STRICT=ON CMAKE_BUILD_PARALLEL_LEVEL=$(CPUS)" \
 	  uvx cibuildwheel --platform linux
+
+# The worker uses the system's C library, which on a newer distribution
+# may make a system call the sandbox does not allow yet (src/sandbox.hpp).
+# Test the wheel from `make manylinux` (or CI) on a recent one, under
+# Docker's default seccomp profile, which most users' containers have.
+MODERN := python:3.13-slim-trixie
+modern-linux:
+	docker run --rm -v "$(CURDIR)":/src:ro $(MODERN) sh -c '\
+	  pip install -q --root-user-action=ignore \
+	    "$$(ls -t /src/wheelhouse/*-cp312-abi3-*$$(uname -m).whl | head -1)[tests]" && \
+	  cd /tmp && python -m pytest -q -p no:cacheprovider /src/tests'
 
 # What a Linux or BSD packager does: no vendored code, the OpenCASCADE,
 # RapidJSON and zstd come from the system (here from conda-forge, which
