@@ -390,6 +390,7 @@ by scripts/gen_schema.py. Do not edit: change the schema and run `make schema`.
 """
 
 from dataclasses import dataclass, fields
+from typing import Literal
 
 # a position [x, y, z] in meters
 Point = tuple[float, float, float]
@@ -397,6 +398,8 @@ Point = tuple[float, float, float]
 Direction = tuple[float, float, float]
 # [min, max] along one of a surface's two directions
 Range = tuple[float, float]
+# the surface types `brep_types` accepts
+BrepType = Literal[{literal}]
 {classes}
 
 
@@ -522,7 +525,14 @@ def generate_python(schema: dict, source: str) -> str:
         )
     # in the order the linter wants `__all__`: constants, classes, functions
     exports = sorted(
-        [*names, "BrepPrimitive", "PRIMITIVES", "parse_primitive", "parse_brep_faces"],
+        [
+            *names,
+            "BrepPrimitive",
+            "BrepType",
+            "PRIMITIVES",
+            "parse_primitive",
+            "parse_brep_faces",
+        ],
         key=lambda name: (not name.isupper(), not name[0].isupper(), name),
     )
     # the last paragraph of the schema's description is about units and
@@ -533,6 +543,7 @@ def generate_python(schema: dict, source: str) -> str:
         units=wrap(units, ""),
         classes="".join(classes).rstrip("\n"),
         names=" | ".join(names),
+        literal=", ".join(f'"{n.lower()}"' for n in names),
         mapping="\n".join(f'    "{n.lower()}": {n},' for n in names),
         exports="\n".join(f'    "{e}",' for e in exports),
     )

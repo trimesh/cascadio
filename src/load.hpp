@@ -6,6 +6,7 @@
 #include "zstd.hpp"
 
 #include <BRepBndLib.hxx>
+#include <BRep_Builder.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <Bnd_Box.hxx>
@@ -13,6 +14,7 @@
 #include <STEPCAFControl_Reader.hxx>
 #include <Standard_Version.hxx>
 #include <TDocStd_Document.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -28,14 +30,6 @@
 #include <string>
 #include <streambuf>
 #include <vector>
-
-/// Tessellation settings shared by every loader.
-struct MeshOptions {
-  double tol_linear;
-  double tol_angle;
-  bool tol_relative;
-  bool use_parallel;
-};
 
 /// A read-only std::istream over a block of memory, so readers can parse
 /// input bytes in place without copying them or touching the filesystem.
@@ -56,7 +50,7 @@ private:
 /// Refuse a shape that cannot be meshed in any reasonable time or memory,
 /// before trying. A corrupt file can hold coordinates like 1e300; meshing
 /// that to an absolute tolerance would run until it is killed.
-static void checkMeshable(const TopoDS_Shape &shape, const MeshOptions &mesh) {
+static void checkMeshable(const TopoDS_Shape &shape, const Request &request) {
   Bnd_Box box;
   BRepBndLib::Add(shape, box, false);
   if (box.IsVoid()) {
@@ -71,8 +65,8 @@ static void checkMeshable(const TopoDS_Shape &shape, const MeshOptions &mesh) {
   }
   // Curved surfaces need about sqrt(size / tolerance) segments per arc.
   // Past this ratio that is tens of thousands, squared, per surface.
-  if (!mesh.tol_relative && mesh.tol_linear > 0 &&
-      size / mesh.tol_linear > 1e9) {
+  if (!request.tol_relative && request.tol_linear > 0 &&
+      size / request.tol_linear > 1e9) {
     throw std::invalid_argument(
         "tol_linear is too fine for a model this large (the model is more "
         "than a billion times the tolerance across); use a larger "
@@ -88,7 +82,7 @@ struct Loaded {
   /// turns the document's densities into kg/m^3; nothing if the file's
   /// mass units disagree so it cannot be known (see substance.hpp).
   /// Only worked out for a STEP file when substances are asked for.
-  std::optional<double> densityScale = 1000.0;
+  std::optional<double> densityScale = PER_CUBIC_CENTIMETER;
 
   Loaded() {
     XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
@@ -103,22 +97,37 @@ struct Loaded {
   Loaded(const Loaded &) = delete;
   Loaded &operator=(const Loaded &) = delete;
 
-  /// Keep a shape and triangulate it in place.
-  void addMeshed(const TopoDS_Shape &shape, const MeshOptions &mesh) {
+  /// Keep a shape, to be triangulated by meshAll().
+  void add(const TopoDS_Shape &shape, const Request &request) {
     if (shape.IsNull()) {
       return;
     }
-    checkMeshable(shape, mesh);
+    checkMeshable(shape, request);
     shapes.push_back(shape);
+  }
+
+  /// Triangulate every shape in place, in one call, so that its threads
+  /// share out the faces of all the shapes. Meshing them one at a time
+  /// leaves most threads idle on files with many small parts. They cannot
+  /// be meshed in separate threads either: instances of a part share its
+  /// faces. The triangles are the same either way.
+  void meshAll(const Request &request) {
+    TopoDS_Compound all;
+    BRep_Builder builder;
+    builder.MakeCompound(all);
+    for (const TopoDS_Shape &shape : shapes) {
+      builder.Add(all, shape);
+    }
     Span span("mesh");
     // the constructor runs the meshing
-    BRepMesh_IncrementalMesh(shape, mesh.tol_linear, mesh.tol_relative,
-                             mesh.tol_angle, mesh.use_parallel);
+    BRepMesh_IncrementalMesh(all, request.tol_linear, request.tol_relative,
+                             request.tol_angular, request.use_parallel);
   }
 };
 
 /// A STEP file is text that starts with "ISO-10303-21". Anything else is
-/// refused here, so that OpenCASCADE's parser never sees binary junk.
+/// refused here, at once and with an error that says what is wrong, rather
+/// than somewhere inside OpenCASCADE's parser.
 /// Returns where the file really starts: a byte order mark and blank lines
 /// before the header are harmless, but OpenCASCADE refuses them.
 static size_t checkLooksLikeStep(const char *data, size_t size) {
@@ -150,7 +159,8 @@ static size_t checkLooksLikeStep(const char *data, size_t size) {
 }
 
 /// An IGES file is fixed-width text: every line carries a section letter
-/// in column 73. Anything else is refused before OpenCASCADE parses it.
+/// in column 73. Anything else is refused before OpenCASCADE parses it,
+/// with an error that says which line is wrong.
 static void checkLooksLikeIges(const char *data, size_t size) {
   size_t lines = 0;
   for (size_t begin = 0; begin < size;) {
@@ -183,9 +193,9 @@ static void checkLooksLikeIges(const char *data, size_t size) {
 }
 
 /// Read STEP bytes into `loaded`, keeping names, layers and colors.
-/// With `substances`, also work out the units of its densities.
+/// With `include_brep`, also work out the units of its densities.
 static void loadStep(Loaded &loaded, const char *data, size_t size,
-                     const MeshOptions &mesh, bool substances) {
+                     const Request &request) {
   const size_t start = checkLooksLikeStep(data, size);
   STEPCAFControl_Reader reader;
   imemstream stream(data + start, size - start);
@@ -205,24 +215,24 @@ static void loadStep(Loaded &loaded, const char *data, size_t size,
     }
   }
   const XSControl_Reader &shapes = reader.Reader();
-  if (substances) {
+  if (request.include_brep) {
     loaded.densityScale = densityScale(shapes.Model());
   }
   for (int i = 1; i <= shapes.NbShapes(); i++) {
-    loaded.addMeshed(shapes.Shape(i), mesh);
+    loaded.add(shapes.Shape(i), request);
   }
 }
 
 /// Read IGES bytes into `loaded`.
 /// IGES files are usually loose surfaces, so they are sewn into one shape.
 static void loadIges(Loaded &loaded, const char *data, size_t size,
-                     const MeshOptions &mesh) {
+                     const Request &request) {
   checkLooksLikeIges(data, size);
 #if OCC_VERSION_HEX < 0x080100
   // Older OpenCASCADE reads IGES only from a file, and the worker may not
   // touch the filesystem.
   (void)loaded;
-  (void)mesh;
+  (void)request;
   throw std::invalid_argument("reading IGES needs cascadio built with "
                               "OpenCASCADE 8.1 or newer, not " OCC_VERSION_COMPLETE);
 #else
@@ -260,7 +270,7 @@ static void loadIges(Loaded &loaded, const char *data, size_t size,
     throw std::runtime_error("could not join the IGES surfaces");
   }
 
-  loaded.addMeshed(shape, mesh);
+  loaded.add(shape, request);
   XCAFDoc_DocumentTool::ShapeTool(loaded.doc->Main())->AddShape(shape, false);
 #endif
 }
@@ -268,7 +278,7 @@ static void loadIges(Loaded &loaded, const char *data, size_t size,
 /// Read and mesh a STEP or IGES file held in memory.
 /// Zstandard-compressed input is recognized and unpacked first.
 static void load(Loaded &loaded, const char *data, size_t size,
-                 FileType file_type, const MeshOptions &mesh, bool substances) {
+                 const Request &request) {
   std::vector<char> unpacked;
   if (isZstd(data, size)) {
     Span span("decompress");
@@ -276,12 +286,15 @@ static void load(Loaded &loaded, const char *data, size_t size,
     data = unpacked.data();
     size = unpacked.size();
   }
-  switch (file_type) {
+  switch (request.file_type) {
   case FileType::STEP:
-    return loadStep(loaded, data, size, mesh, substances);
+    loadStep(loaded, data, size, request);
+    break;
   case FileType::IGES:
-    return loadIges(loaded, data, size, mesh);
+    loadIges(loaded, data, size, request);
+    break;
   default:
     throw std::invalid_argument("unsupported file type");
   }
+  loaded.meshAll(request);
 }

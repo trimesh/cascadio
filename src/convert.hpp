@@ -26,16 +26,18 @@
 #include <string>
 #include <vector>
 
-/// Everything that controls a GLB conversion.
-struct ConvertOptions {
-  MeshOptions mesh;
-  bool merge_primitives = true;
-  bool include_brep = false;
-  std::set<std::string> brep_types;
-  RWMesh_NameFormat node_name_format = RWMesh_NameFormat_InstanceOrProduct;
-  /// Rotate from CAD's Z-up into glTF's Y-up: (x, y, z) -> (x, z, -y)
-  bool y_up = false;
-};
+// the numbers in request.hpp are passed straight to OpenCASCADE
+static_assert(static_cast<int>(NodeNameFormat::PRODUCT) ==
+                  RWMesh_NameFormat_Product &&
+              static_cast<int>(NodeNameFormat::INSTANCE) ==
+                  RWMesh_NameFormat_Instance &&
+              static_cast<int>(NodeNameFormat::INSTANCE_OR_PRODUCT) ==
+                  RWMesh_NameFormat_InstanceOrProduct &&
+              static_cast<int>(NodeNameFormat::PRODUCT_OR_INSTANCE) ==
+                  RWMesh_NameFormat_ProductOrInstance &&
+              static_cast<int>(NodeNameFormat::PRODUCT_AND_INSTANCE) ==
+                  RWMesh_NameFormat_ProductAndInstance,
+              "NodeNameFormat must match RWMesh_NameFormat");
 
 /// Metadata the OCCT writers accept for the output file; we add none.
 using FileInfo =
@@ -151,13 +153,14 @@ static MemoryFiles &memoryFiles() {
 /// buffer, not as .glb: OCCT's GLB writer deletes its temporary buffer with
 /// a filesystem call. Glb packs the two into a GLB afterwards.
 static Glb writeGlb(const Handle(TDocStd_Document) & doc,
-                    const ConvertOptions &options, Recorded *recorded) {
+                    const Request &request, Recorded *recorded) {
   GltfWriter writer("cascadio.gltf", recorded);
-  writer.SetMergeFaces(options.merge_primitives);
-  writer.SetParallel(options.mesh.use_parallel);
+  writer.SetMergeFaces(request.merge_primitives);
+  writer.SetParallel(request.use_parallel);
   writer.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
-  writer.SetNodeNameFormat(options.node_name_format);
-  if (options.y_up) {
+  writer.SetNodeNameFormat(
+      static_cast<RWMesh_NameFormat>(request.node_name_format));
+  if (request.y_up) {
     // with both ends declared the writer rotates Z-up into glTF's Y-up;
     // by default the input frame is undefined and nothing is rotated
     writer.ChangeCoordinateSystemConverter().SetInputCoordinateSystem(
@@ -177,9 +180,9 @@ static Glb writeGlb(const Handle(TDocStd_Document) & doc,
 
 /// Convert STEP or IGES bytes to a GLB. The bytes are untrusted, so this
 /// needs the lock-down in force.
-static Glb toGlb(const Locked &, const char *data, size_t size,
-                 FileType file_type, ConvertOptions options) {
-  for (const std::string &type : options.brep_types) {
+static Glb toGlb(const Locked &, Request request, const char *data,
+                 size_t size) {
+  for (const std::string &type : request.brep_types) {
     if (std::find(std::begin(brep::TYPES), std::end(brep::TYPES), type) ==
         std::end(brep::TYPES)) {
       throw std::invalid_argument("unknown brep_types entry: " + type);
@@ -187,29 +190,29 @@ static Glb toGlb(const Locked &, const char *data, size_t size,
   }
   // face and substance data is attached per part,
   // which needs one merged primitive per part
-  if (options.include_brep) {
-    options.merge_primitives = true;
+  if (request.include_brep) {
+    request.merge_primitives = true;
   }
 
   Loaded loaded;
-  load(loaded, data, size, file_type, options.mesh, options.include_brep);
+  load(loaded, data, size, request);
   Recorded recorded;
   Glb glb =
-      writeGlb(loaded.doc, options, options.include_brep ? &recorded : nullptr);
-  if (options.include_brep) {
+      writeGlb(loaded.doc, request, request.include_brep ? &recorded : nullptr);
+  if (request.include_brep) {
     Span span("face data");
     // scale factor from the file's unit to meters, the unit of glTF
     const double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
     // the face metadata must turn with the mesh: -90 degrees about X
     gp_Trsf frame;
-    if (options.y_up) {
+    if (request.y_up) {
       frame.SetRotation(gp::OX(), -M_PI / 2);
     }
     if (!loaded.densityScale) {
       warn("the file gives densities in mass units with different prefixes, "
            "so no density is reported");
     }
-    injectIntoGlb(glb, recorded, options.brep_types, lengthUnit,
+    injectIntoGlb(glb, recorded, request.brep_types, lengthUnit,
                   loaded.densityScale, frame);
   }
   return glb;

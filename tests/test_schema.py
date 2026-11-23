@@ -5,11 +5,11 @@ Test that cascadio output validates against the TM_brep_faces JSON schema.
 import dataclasses
 import importlib.util
 import json
-import struct
 from pathlib import Path
 
 import jsonschema
 import pytest
+from conftest import MODELS_DIR, glb_json
 
 import cascadio
 
@@ -21,18 +21,10 @@ SCHEMA_PATH = (
     / "schema"
     / "mesh.primitive.TM_brep_faces.schema.json"
 )
-MODELS_DIR = Path(__file__).parent / "models"
 
 EXTENSION_SCHEMA = json.loads(SCHEMA_PATH.read_text())
 # a single face, with the shared definitions it refers to
 FACE_SCHEMA = {"$ref": "#/$defs/face", "$defs": EXTENSION_SCHEMA["$defs"]}
-
-
-def extract_glb_json(glb: bytes) -> dict:
-    """The JSON chunk of a GLB."""
-    assert glb[:4] == b"glTF"
-    length = struct.unpack("<I", glb[12:16])[0]
-    return json.loads(glb[20 : 20 + length])
 
 
 def get_validator(schema):
@@ -246,7 +238,7 @@ def test_cascadio_output_validates():
     validator = get_validator(FACE_SCHEMA)
     found = 0
     for model in sorted(MODELS_DIR.glob("*.st*p")):
-        tree = extract_glb_json(cascadio.load(model.read_bytes(), include_brep=True))
+        tree = glb_json(cascadio.load(model.read_bytes(), include_brep=True))
         for mesh in tree["meshes"]:
             for primitive in mesh["primitives"]:
                 extension = primitive.get("extensions", {}).get("TM_brep_faces")

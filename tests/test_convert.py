@@ -1,11 +1,9 @@
 import io
-import json
-import struct
-from pathlib import Path
 
 import numpy as np
 import pytest
 import trimesh
+from conftest import MODELS_DIR, glb_json
 
 # Require trimesh extension registry support
 from trimesh.exchange.gltf.extensions import register_handler  # noqa
@@ -13,8 +11,6 @@ from trimesh.exchange.gltf.extensions import register_handler  # noqa
 import cascadio
 import cascadio.extension  # Register extension handlers
 import cascadio.primitives
-
-MODELS_DIR = Path(__file__).parent / "models"
 
 
 def check_brep(
@@ -461,8 +457,7 @@ if __name__ == "__main__":
 
 def _node_names(glb: bytes) -> list:
     """Read node names straight from the GLB JSON chunk."""
-    json_length = struct.unpack("<I", glb[12:16])[0]
-    header = json.loads(glb[20 : 20 + json_length])
+    header = glb_json(glb)
     return [node.get("name") for node in header["nodes"]]
 
 
@@ -569,7 +564,7 @@ def test_appearance_is_a_gltf_material():
     the extension: the substance is what the part is made of.
     """
     glb = cascadio.load((MODELS_DIR / "colored.step").read_bytes(), include_brep=True)
-    header = json.loads(glb[20 : 20 + struct.unpack("<I", glb[12:16])[0]])
+    header = glb_json(glb)
     for mesh in header["meshes"]:
         for primitive in mesh["primitives"]:
             assert primitive["extensions"]["TM_brep_faces"]["substance"] is None
@@ -604,7 +599,7 @@ END-ISO-10303-21;"""
     data = (MODELS_DIR / "multibody.step").read_bytes()
     data = data[: data.rindex(b"ENDSEC;")] + gusset
     glb = cascadio.load(data, include_brep=True)
-    header = json.loads(glb[20 : 20 + struct.unpack("<I", glb[12:16])[0]])
+    header = glb_json(glb)
 
     found = {}
     for node in header["nodes"]:

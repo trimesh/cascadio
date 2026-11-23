@@ -18,6 +18,7 @@
 #include <iterator>
 #include <optional>
 #include <sstream>
+#include <tuple>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
@@ -28,6 +29,9 @@ using namespace nb::literals;
 /// Ordinary files convert in well under a second using about 100 MB,
 /// so these defaults only stop runaway inputs.
 constexpr double DEFAULT_TIMEOUT = 30.0;
+/// The longest a conversion may run, and what `timeout=None` means, so
+/// that no wait is ever unbounded.
+constexpr double MAX_TIMEOUT = 3600.0;
 constexpr uint64_t DEFAULT_MEMORY_LIMIT = 8ull << 30;
 
 using Timeout = std::optional<double>;
@@ -100,12 +104,14 @@ static std::string crashName(const ProcessResult &result) {
 
 /// Run one request through the worker and return what it produced,
 /// or raise the Python exception that matches how it ended.
-static std::vector<char> convert(Request request, const char *data, size_t size,
+static std::vector<char> convert(const Request &request, const char *data, size_t size,
                                  Timeout timeout, MemoryLimit memory_limit) {
-  if (timeout && !(*timeout > 0)) {
-    throw std::invalid_argument("timeout must be positive, or None");
+  if (timeout && !(*timeout > 0 && *timeout <= MAX_TIMEOUT)) {
+    throw std::invalid_argument(
+        "timeout must be positive and at most 3600 seconds (an hour), or "
+        "None for the most, an hour");
   }
-  request.memory_limit = memory_limit.value_or(0);
+  const double seconds = timeout.value_or(MAX_TIMEOUT);
   const std::string head = request.serialize();
   const std::string program = workerPath();
 
@@ -113,7 +119,8 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
   try {
     // other Python threads keep running while the worker does
     nb::gil_scoped_release release;
-    result = runProcess(program, head, data, size, timeout.value_or(-1.0), [] {
+    result = runProcess(program, head, data, size, seconds,
+                        memory_limit.value_or(0), [] {
       // Ctrl-C: Python's handler runs here, and raises KeyboardInterrupt
       nb::gil_scoped_acquire acquire;
       return PyErr_CheckSignals() != 0;
@@ -143,8 +150,21 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
   }
   if (result.timed_out) {
     raisePython(PyExc_TimeoutError,
-          "conversion did not finish within " + std::to_string(*timeout) +
-              " seconds; pass a larger `timeout`, or None for no limit");
+          "conversion did not finish within " + std::to_string(seconds) +
+              " seconds; pass a larger `timeout`, up to 3600 seconds");
+  }
+  // What the worker wrote is untrusted: no control characters, such as a
+  // terminal's escape sequences, reach Python or the terminal. A line may
+  // end with "\r\n" (Windows).
+  std::string &errors = result.errors;
+  for (size_t i = 0; i < errors.size(); i++) {
+    const auto byte = static_cast<unsigned char>(errors[i]);
+    const bool lineEnd = errors[i] == '\n' ||
+                         (errors[i] == '\r' && i + 1 < errors.size() &&
+                          errors[i + 1] == '\n');
+    if ((byte < 32 && errors[i] != '\t' && !lineEnd) || byte == 127) {
+      errors[i] = '?';
+    }
   }
   // What the worker said: warnings to pass on, and a last line that says
   // why it failed (anything before it is trace output).
@@ -163,6 +183,15 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
       said = line;
     }
   }
+  // The worker stops itself at its memory limit; if it did not and the
+  // limit was enforced from outside (process.hpp), it is the same error.
+  if (result.over_limit || result.exit_code == worker_exit::OUT_OF_MEMORY) {
+    raisePython(PyExc_MemoryError,
+                "conversion used more than " +
+                    std::to_string(memory_limit.value_or(0)) +
+                    " bytes of memory; pass a larger `memory_limit`, "
+                    "or None for no limit");
+  }
   switch (result.exit_code) {
   case worker_exit::OK:
     if (!environmentValue("CASCADIO_TRACE").empty()) {
@@ -172,12 +201,6 @@ static std::vector<char> convert(Request request, const char *data, size_t size,
     return std::move(result.output);
   case worker_exit::INVALID_INPUT:
     throw std::invalid_argument(said);
-  case worker_exit::OUT_OF_MEMORY:
-    raisePython(PyExc_MemoryError,
-          "conversion used more than " +
-              std::to_string(memory_limit.value_or(0)) +
-              " bytes of memory; pass a larger `memory_limit`, "
-              "or None for no limit");
   case worker_exit::FAILED:
     throw std::runtime_error(said.empty() ? "conversion failed" : said);
   case worker_exit::NO_SANDBOX:
@@ -220,6 +243,37 @@ static FileType parseFileType(std::string name) {
   }
   throw std::invalid_argument("Unsupported file_type: " + name +
                               ". Use 'step' or 'iges'.");
+}
+
+/// The file type as `load` takes it, a name, or as `to_glb_bytes` does.
+static FileType fileTypeOf(const std::string &name) {
+  return parseFileType(name);
+}
+static FileType fileTypeOf(FileType type) { return type; }
+
+/// What `load` and `to_glb_bytes` do. They differ only in how the file
+/// type is given, so one template is both.
+template <typename FileTypeArgument>
+static nb::bytes toGlb(const nb::bytes &data, const FileTypeArgument &file_type,
+                       double tol_linear, double tol_angular, bool tol_relative,
+                       bool merge_primitives, bool use_parallel,
+                       bool include_brep, BrepTypes brep_types,
+                       bool include_materials, NodeNameFormat node_name_format,
+                       bool y_up, Timeout timeout, MemoryLimit memory_limit) {
+  Request request;
+  request.file_type = fileTypeOf(file_type);
+  request.tol_linear = tol_linear;
+  request.tol_angular = tol_angular;
+  request.tol_relative = tol_relative;
+  request.merge_primitives = merge_primitives;
+  request.use_parallel = use_parallel;
+  request.include_brep = include_brep || include_materials;
+  request.brep_types = brep_types.value_or(std::set<std::string>());
+  request.node_name_format = node_name_format;
+  request.y_up = y_up;
+  const std::vector<char> glb =
+      convert(request, data.c_str(), data.size(), timeout, memory_limit);
+  return nb::bytes(glb.data(), glb.size());
 }
 
 // ============================================================================
@@ -266,7 +320,8 @@ static const std::string DOC_Y_UP = R"doc(y_up
 )doc";
 
 static const std::string DOC_LIMITS = R"doc(timeout
-    Seconds the conversion may take, or None for no limit.
+    Seconds the conversion may take, at most 3600 (an hour). None
+    means an hour.
 memory_limit
     Bytes of memory the conversion may use, or None for no limit.
 )doc";
@@ -329,47 +384,30 @@ NB_MODULE(_core, m) {
   // where the module finds the worker, for the tests to run it directly
   m.def("_worker_path", workerPath);
   m.attr("DEFAULT_TIMEOUT") = DEFAULT_TIMEOUT;
+  m.attr("MAX_TIMEOUT") = MAX_TIMEOUT;
   m.attr("DEFAULT_MEMORY_LIMIT") = DEFAULT_MEMORY_LIMIT;
 
   // `load` and `to_glb_bytes` differ only in how the file type is given
-  auto toGlb = [](const nb::bytes &data, FileType file_type, double tol_linear,
-                  double tol_angular, bool tol_relative, bool merge_primitives,
-                  bool use_parallel, bool include_brep, BrepTypes brep_types,
-                  bool include_materials, NodeNameFormat node_name_format,
-                  bool y_up, Timeout timeout, MemoryLimit memory_limit) {
-    Request request;
-    request.file_type = file_type;
-    request.tol_linear = tol_linear;
-    request.tol_angular = tol_angular;
-    request.tol_relative = tol_relative;
-    request.merge_primitives = merge_primitives;
-    request.use_parallel = use_parallel;
-    request.include_brep = include_brep || include_materials;
-    request.brep_types = brep_types.value_or(std::set<std::string>());
-    request.node_name_format = node_name_format;
-    request.y_up = y_up;
-    const std::vector<char> glb =
-        convert(request, data.c_str(), data.size(), timeout, memory_limit);
-    return nb::bytes(glb.data(), glb.size());
-  };
-
-  m.def(
-      "load",
-      [toGlb](const nb::bytes &data, const std::string &file_type,
-              double tol_linear, double tol_angular, bool tol_relative,
-              bool merge_primitives, bool use_parallel, bool include_brep,
-              BrepTypes brep_types, bool include_materials,
-              NodeNameFormat node_name_format, bool y_up, Timeout timeout,
-              MemoryLimit memory_limit) {
-        return toGlb(data, parseFileType(file_type), tol_linear, tol_angular,
-                     tol_relative, merge_primitives, use_parallel, include_brep,
-                     std::move(brep_types), include_materials, node_name_format,
-                     y_up, timeout, memory_limit);
-      },
-      (DOC_LOAD + R"doc(file_type
+  // the defaults are the request's own, so they are written once
+  const Request defaults;
+  const auto options = std::make_tuple(
+      "tol_linear"_a = defaults.tol_linear,
+      "tol_angular"_a = defaults.tol_angular,
+      "tol_relative"_a = defaults.tol_relative,
+      "merge_primitives"_a = defaults.merge_primitives,
+      "use_parallel"_a = defaults.use_parallel,
+      "include_brep"_a = defaults.include_brep, "brep_types"_a = nb::none(),
+      "include_materials"_a = false,
+      "node_name_format"_a = defaults.node_name_format,
+      "y_up"_a = defaults.y_up, "timeout"_a = DEFAULT_TIMEOUT,
+      "memory_limit"_a = DEFAULT_MEMORY_LIMIT);
+  std::apply(
+      [&m](const auto &...option) {
+        m.def("load", &toGlb<std::string>,
+              (DOC_LOAD + R"doc(file_type
     "step" or "iges" (also "stp" and "igs").
 )doc" + DOC_MESH + DOC_GLB + DOC_Y_UP + DOC_LIMITS + DOC_RETURNS_GLB +
-       DOC_RAISES + R"doc(
+               DOC_RAISES + R"doc(
 Examples
 --------
 >>> import cascadio
@@ -377,31 +415,18 @@ Examples
 ...     glb = cascadio.load(f.read())
 >>> glb = cascadio.load(iges_bytes, file_type="iges", timeout=120)
 )doc")
-          .c_str(),
-      "data"_a, "file_type"_a = "step", "tol_linear"_a = 0.01,
-      "tol_angular"_a = 0.5, "tol_relative"_a = false,
-      "merge_primitives"_a = true, "use_parallel"_a = true,
-      "include_brep"_a = false, "brep_types"_a = nb::none(),
-      "include_materials"_a = false,
-      "node_name_format"_a = NodeNameFormat::INSTANCE_OR_PRODUCT,
-      "y_up"_a = false, "timeout"_a = DEFAULT_TIMEOUT,
-      "memory_limit"_a = DEFAULT_MEMORY_LIMIT);
-
-  m.def("to_glb_bytes", toGlb,
-        (DOC_LOAD + R"doc(file_type
+                  .c_str(),
+              "data"_a, "file_type"_a = "step", option...);
+        m.def("to_glb_bytes", &toGlb<FileType>,
+              (DOC_LOAD + R"doc(file_type
     `FileType.STEP` or `FileType.IGES`. This is the only difference
     from `load`, which takes the name as a string.
 )doc" + DOC_MESH + DOC_GLB + DOC_Y_UP + DOC_LIMITS + DOC_RETURNS_GLB +
-         DOC_RAISES)
-            .c_str(),
-        "data"_a, "file_type"_a = FileType::STEP, "tol_linear"_a = 0.01,
-        "tol_angular"_a = 0.5, "tol_relative"_a = false,
-        "merge_primitives"_a = true, "use_parallel"_a = true,
-        "include_brep"_a = false, "brep_types"_a = nb::none(),
-        "include_materials"_a = false,
-        "node_name_format"_a = NodeNameFormat::INSTANCE_OR_PRODUCT,
-        "y_up"_a = false, "timeout"_a = DEFAULT_TIMEOUT,
-        "memory_limit"_a = DEFAULT_MEMORY_LIMIT);
+               DOC_RAISES)
+                  .c_str(),
+              "data"_a, "file_type"_a = FileType::STEP, option...);
+      },
+      options);
 
 #ifdef VERSION_INFO
   m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

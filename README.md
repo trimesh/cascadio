@@ -63,7 +63,9 @@ cascadio.load(data, timeout=30.0, memory_limit=8 * 2**30)  # the defaults
 | It used more than `memory_limit` bytes | `MemoryError` |
 | OpenCASCADE failed or crashed | `RuntimeError` |
 
-Either limit can be `None` to switch it off.
+`memory_limit=None` switches the memory limit off. A conversion may run for an hour at most (`cascadio.MAX_TIMEOUT`), and `timeout=None` means that hour.
+
+Both limits are enforced from outside the worker, so a worker that a hostile file has taken over cannot get around them. While the worker runs, the module checks its memory every 10 ms. It also stops a worker that sends back more than `memory_limit` bytes.
 
 #### The worker is locked down
 
@@ -88,7 +90,7 @@ cascadio: mesh             538.7 ms
 cascadio: write glb         92.7 ms
 ```
 
-`step_to_glb` and `step_to_obj`, which worked on file paths, were removed in 0.2: cascadio does not read or write files. Read the file yourself and pass the bytes to `load`.
+`step_to_glb` works on file paths. It is deprecated and will be removed after 2027-05-22. Calling it warns, and the warning shows the `load` code that replaces your call. `step_to_obj` was removed in 0.2 because the locked-down worker can't write files. Calling it raises an error that shows the replacement code. The compiled core does not read or write files: read the file yourself and pass the bytes to `load`.
 
 ### Motivation
 

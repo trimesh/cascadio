@@ -26,6 +26,10 @@
 // This is the CAD material (steel, ABS), not the glTF material, which is
 // how the part looks and which OpenCASCADE's glTF writer already writes.
 
+/// Grams per cubic centimeter, the unit OpenCASCADE stores densities in,
+/// to kilograms per cubic meter.
+constexpr double PER_CUBIC_CENTIMETER = 1000.0;
+
 /// The factor that turns the densities OpenCASCADE stores into kilograms
 /// per cubic meter, given the STEP model they were read from.
 ///
@@ -38,11 +42,9 @@
 /// different prefixes, since a stored density does not say which it had.
 static std::optional<double>
 densityScale(const Handle(Interface_InterfaceModel) & model) {
-  // grams per cubic centimeter to kilograms per cubic meter
-  constexpr double perCubicCentimeter = 1000.0;
   std::optional<double> prefix;
   if (model.IsNull()) {
-    return perCubicCentimeter;
+    return PER_CUBIC_CENTIMETER;
   }
   for (int i = 1; i <= model->NbEntities(); i++) {
     Handle(StepRepr_MeasureRepresentationItem) item =
@@ -87,7 +89,7 @@ densityScale(const Handle(Interface_InterfaceModel) & model) {
     }
     prefix = found;
   }
-  return perCubicCentimeter * prefix.value_or(1.0);
+  return PER_CUBIC_CENTIMETER * prefix.value_or(1.0);
 }
 
 /// The substance of the part at `label`, or a JSON null if the source file

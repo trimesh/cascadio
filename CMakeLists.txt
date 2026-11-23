@@ -61,7 +61,8 @@ endif()
 #                    OpenCASCADE is in here and Python is not
 #   _core            the Python module, which starts the worker for every
 #                    conversion and enforces the time and memory limits
-# They share src/request.hpp and nothing else.
+# They share src/request.hpp (the request and the exit codes) and, on
+# Windows, src/windows_text.hpp; neither of those has OpenCASCADE or Python.
 
 add_executable(cascadio-worker src/worker.cpp)
 target_include_directories(cascadio-worker SYSTEM PRIVATE "${OpenCASCADE_INCLUDE_DIR}")
@@ -127,9 +128,6 @@ else()
 endif()
 find_package(Threads REQUIRED)
 target_link_libraries(cascadio-worker PRIVATE Threads::Threads)
-if(WIN32)
-  target_link_libraries(cascadio-worker PRIVATE psapi) # GetProcessMemoryInfo
-endif()
 
 # STABLE_ABI: one wheel serves every regular CPython from 3.12 on.
 # FREE_THREADED: on free-threaded CPython (which has no stable ABI yet, so it
@@ -138,6 +136,10 @@ endif()
 nanobind_add_module(_core STABLE_ABI FREE_THREADED src/main.cpp)
 target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION_FULL})
 target_link_libraries(_core PRIVATE ${CMAKE_DL_LIBS})
+if(WIN32)
+  # GetProcessMemoryInfo, to check the worker's memory (process.hpp)
+  target_link_libraries(_core PRIVATE psapi)
+endif()
 
 # Our own code is compiled with every reasonable warning on. OpenCASCADE,
 # RapidJSON and zstd headers are included as SYSTEM, so they stay quiet.

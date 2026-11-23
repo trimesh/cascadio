@@ -5,6 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 /// What the Python module asks the worker program to do. This header is the
 /// whole contract between the two and uses nothing from OpenCASCADE or
@@ -58,27 +59,41 @@ struct Request {
   bool include_brep = false;
   std::set<std::string> brep_types;
   NodeNameFormat node_name_format = NodeNameFormat::INSTANCE_OR_PRODUCT;
+  /// Rotate from CAD's Z-up into glTF's Y-up: (x, y, z) -> (x, z, -y)
   bool y_up = false;
-  /// Bytes of memory the worker may use before it stops itself; 0 = no limit
-  uint64_t memory_limit = 0;
+
+  /// Every field with its key, the one list serialize() and parse() use.
+  /// `brep_types` is one `brep_type` line per type.
+  template <typename Self, typename Visit>
+  static void fields(Self &request, Visit &&visit) {
+    visit("file_type", request.file_type);
+    visit("tol_linear", request.tol_linear);
+    visit("tol_angular", request.tol_angular);
+    visit("tol_relative", request.tol_relative);
+    visit("merge_primitives", request.merge_primitives);
+    visit("use_parallel", request.use_parallel);
+    visit("include_brep", request.include_brep);
+    visit("brep_type", request.brep_types);
+    visit("node_name_format", request.node_name_format);
+    visit("y_up", request.y_up);
+  }
 
   std::string serialize() const {
     std::ostringstream text;
     text.precision(17); // enough digits to round-trip a double
-    text << "file_type=" << static_cast<int>(file_type) << '\n'
-         << "tol_linear=" << tol_linear << '\n'
-         << "tol_angular=" << tol_angular << '\n'
-         << "tol_relative=" << tol_relative << '\n'
-         << "merge_primitives=" << merge_primitives << '\n'
-         << "use_parallel=" << use_parallel << '\n'
-         << "include_brep=" << include_brep << '\n';
-    for (const std::string &type : brep_types) {
-      text << "brep_type=" << type << '\n';
-    }
-    text << "node_name_format=" << static_cast<int>(node_name_format) << '\n'
-         << "y_up=" << y_up << '\n'
-         << "memory_limit=" << memory_limit << '\n'
-         << '\n';
+    fields(*this, [&text](const char *key, const auto &value) {
+      using T = std::decay_t<decltype(value)>;
+      if constexpr (std::is_same_v<T, std::set<std::string>>) {
+        for (const std::string &item : value) {
+          text << key << '=' << item << '\n';
+        }
+      } else if constexpr (std::is_enum_v<T>) {
+        text << key << '=' << static_cast<int>(value) << '\n';
+      } else {
+        text << key << '=' << value << '\n'; // a bool is 0 or 1
+      }
+    });
+    text << '\n';
     return text.str();
   }
 
@@ -95,31 +110,25 @@ struct Request {
       }
       const std::string key = line.substr(0, split);
       const std::string value = line.substr(split + 1);
-      auto flag = [&value] { return value == "1"; };
-      if (key == "file_type") {
-        request.file_type = static_cast<FileType>(std::stoi(value));
-      } else if (key == "tol_linear") {
-        request.tol_linear = std::stod(value);
-      } else if (key == "tol_angular") {
-        request.tol_angular = std::stod(value);
-      } else if (key == "tol_relative") {
-        request.tol_relative = flag();
-      } else if (key == "merge_primitives") {
-        request.merge_primitives = flag();
-      } else if (key == "use_parallel") {
-        request.use_parallel = flag();
-      } else if (key == "include_brep") {
-        request.include_brep = flag();
-      } else if (key == "brep_type") {
-        request.brep_types.insert(value);
-      } else if (key == "node_name_format") {
-        request.node_name_format =
-            static_cast<NodeNameFormat>(std::stoi(value));
-      } else if (key == "y_up") {
-        request.y_up = flag();
-      } else if (key == "memory_limit") {
-        request.memory_limit = std::stoull(value);
-      } else {
+      bool known = false;
+      fields(request, [&](const char *name, auto &field) {
+        if (key != name) {
+          return;
+        }
+        known = true;
+        using T = std::decay_t<decltype(field)>;
+        if constexpr (std::is_same_v<T, std::set<std::string>>) {
+          field.insert(value);
+        } else if constexpr (std::is_same_v<T, bool>) {
+          field = value == "1";
+        } else if constexpr (std::is_enum_v<T>) {
+          field = static_cast<T>(std::stoi(value));
+        } else {
+          static_assert(std::is_same_v<T, double>, "no reader for this type");
+          field = std::stod(value);
+        }
+      });
+      if (!known) {
         throw RequestError("unknown request key: " + key);
       }
     }

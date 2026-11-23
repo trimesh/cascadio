@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -20,6 +22,7 @@
 struct ProcessResult {
   bool timed_out = false;   ///< it was killed for running past the limit
   bool interrupted = false; ///< it was killed because `interrupted` said so
+  bool over_limit = false;  ///< killed for its memory or its output size
   int exit_code = -1;       ///< valid unless timed out or killed by a signal
   int signal = 0;           ///< POSIX: the signal that killed it, if any
   std::vector<char> output; ///< everything it wrote to standard output
@@ -34,13 +37,33 @@ struct StartError : std::runtime_error {
 };
 
 /// Run `program`, writing `head` then `body` to its standard input.
-/// A negative `timeout_seconds` means wait forever. `interrupted` is asked
-/// at least every 100 ms; when it returns true the program is stopped.
+/// It is stopped after `timeout_seconds`, so every wait here ends.
+/// `interrupted` is asked about every 100 ms; when it returns true the
+/// program is stopped.
+///
+/// A `memory_limit` other than 0 is enforced from out here, where the
+/// program cannot switch it off: it is stopped, with `over_limit` set, if
+/// it uses more than `memory_limit` bytes of physical memory (checked at
+/// most every 10 ms, while it runs) or writes more than that as output.
+/// Standard error is kept to its last `ERRORS_KEPT` bytes.
+///
 /// Throws StartError if the program cannot be started.
 static ProcessResult runProcess(const std::string &program,
                                 const std::string &head, const char *body,
                                 size_t body_size, double timeout_seconds,
+                                uint64_t memory_limit,
                                 const std::function<bool()> &interrupted);
+
+/// How much of standard error is kept: enough for any message, and the
+/// reason for a failure is its last line.
+constexpr size_t ERRORS_KEPT = 64 * 1024;
+
+/// Drop all but the last ERRORS_KEPT bytes.
+static void keepLastErrors(std::string &errors) {
+  if (errors.size() > ERRORS_KEPT) {
+    errors.erase(0, errors.size() - ERRORS_KEPT);
+  }
+}
 
 /// The folder holding the shared library or executable this code is in.
 static std::string thisBinaryFolder();
@@ -84,6 +107,9 @@ static std::vector<std::string> childEnvironment() {
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <libproc.h>
+#endif
 
 static std::string thisBinaryFolder() {
   Dl_info info;
@@ -133,9 +159,38 @@ struct Pipe {
   }
 };
 
+/// The physical memory `child` is using, in bytes, or 0 if that cannot be
+/// read (it has already exited, for example).
+static uint64_t childMemory(pid_t child) {
+#ifdef __APPLE__
+  rusage_info_v4 info = {};
+  if (proc_pid_rusage(child, RUSAGE_INFO_V4,
+                      reinterpret_cast<rusage_info_t *>(&info)) != 0) {
+    return 0;
+  }
+  return info.ri_phys_footprint;
+#else
+  // the second number in statm is the resident size, in pages
+  const std::string path = "/proc/" + std::to_string(child) + "/statm";
+  const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return 0;
+  }
+  char text[128] = {};
+  const ssize_t got = read(fd, text, sizeof(text) - 1);
+  close(fd);
+  unsigned long long size = 0, resident = 0;
+  if (got <= 0 || std::sscanf(text, "%llu %llu", &size, &resident) != 2) {
+    return 0;
+  }
+  return resident * static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+#endif
+}
+
 static ProcessResult runProcess(const std::string &program,
                                 const std::string &head, const char *body,
                                 size_t body_size, double timeout_seconds,
+                                uint64_t memory_limit,
                                 const std::function<bool()> &interrupted) {
   Pipe input, output, errors;
 
@@ -177,15 +232,34 @@ static ProcessResult runProcess(const std::string &program,
   const auto deadline =
       Clock::now() + std::chrono::duration_cast<Clock::duration>(
                          std::chrono::duration<double>(timeout_seconds));
-  // never more than 100 ms, so `interrupted` is asked often enough
+  // never more than 100 ms, so `interrupted` is asked often enough, or
+  // 10 ms when there is a memory limit to check
+  const int step = memory_limit != 0 ? 10 : 100;
   auto millisecondsLeft = [&]() -> int {
-    if (timeout_seconds < 0) {
-      return 100;
-    }
     const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
                           deadline - Clock::now())
                           .count();
-    return left < 0 ? 0 : static_cast<int>(std::min<long long>(left, 100));
+    return left < 0 ? 0 : static_cast<int>(std::min<long long>(left, step));
+  };
+  // The child's memory is read at most every 10 ms, only while it runs,
+  // and never without a memory limit.
+  auto nextMemoryCheck = Clock::now();
+  auto overMemory = [&] {
+    if (memory_limit == 0 || Clock::now() < nextMemoryCheck) {
+      return false;
+    }
+    nextMemoryCheck = Clock::now() + std::chrono::milliseconds(10);
+    return childMemory(child) > memory_limit;
+  };
+  // `interrupted` takes Python's lock, so it is asked about every 100 ms,
+  // however often the loop wakes
+  auto nextInterruptCheck = Clock::now();
+  auto askInterrupted = [&] {
+    if (Clock::now() < nextInterruptCheck) {
+      return false;
+    }
+    nextInterruptCheck = Clock::now() + std::chrono::milliseconds(100);
+    return interrupted();
   };
 
   ProcessResult result;
@@ -212,12 +286,16 @@ static ProcessResult runProcess(const std::string &program,
     if (ready < 0 && errno == EINTR) {
       continue;
     }
-    if (ready == 0 && timeout_seconds >= 0 && millisecondsLeft() == 0) {
+    if (ready == 0 && millisecondsLeft() == 0) {
       result.timed_out = true;
       break;
     }
-    if (interrupted()) {
+    if (askInterrupted()) {
       result.interrupted = true;
+      break;
+    }
+    if (overMemory()) {
+      result.over_limit = true;
       break;
     }
 
@@ -244,28 +322,40 @@ static ProcessResult runProcess(const std::string &program,
     };
     if (watched[1].revents != 0 && output.read_end >= 0) {
       drain(output.read_end, result.output);
+      // an honest result fits in the memory the child may use
+      if (memory_limit != 0 && result.output.size() > memory_limit) {
+        result.over_limit = true;
+        break;
+      }
     }
     if (watched[2].revents != 0 && errors.read_end >= 0) {
       drain(errors.read_end, result.errors);
+      keepLastErrors(result.errors);
     }
   }
 
   // Both streams are closed, so the child is exiting, or the time is up.
   // Give it what is left of the limit, then kill it. Always reap it.
+  // The pause starts short, so a normal exit is reaped at once, and grows
+  // to the loop's step, so a child that lingers is not polled thousands
+  // of times a second.
   int status = 0;
-  while (!result.timed_out && !result.interrupted) {
+  useconds_t pause = 500;
+  while (!result.timed_out && !result.interrupted && !result.over_limit) {
     const pid_t done = waitpid(child, &status, WNOHANG);
     if (done == child || (done < 0 && errno != EINTR)) {
       break;
     }
-    if (timeout_seconds >= 0 && millisecondsLeft() == 0) {
+    if (millisecondsLeft() == 0) {
       result.timed_out = true;
       break;
     }
-    result.interrupted = interrupted();
-    usleep(500);
+    result.interrupted = askInterrupted();
+    result.over_limit = overMemory();
+    usleep(pause);
+    pause = std::min<useconds_t>(2 * pause, static_cast<useconds_t>(step) * 1000);
   }
-  if (result.timed_out || result.interrupted) {
+  if (result.timed_out || result.interrupted || result.over_limit) {
     kill(child, SIGKILL);
     while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
     }
@@ -282,8 +372,11 @@ static ProcessResult runProcess(const std::string &program,
 // Windows
 // ============================================================================
 
-#include <windows.h> // NOMINMAX and WIN32_LEAN_AND_MEAN come from CMake
+#include "windows_text.hpp"
 
+#include <psapi.h>
+
+#include <atomic>
 #include <thread>
 
 static std::string thisBinaryFolder() {
@@ -343,26 +436,20 @@ struct Pipe {
   }
 };
 
-/// The text Windows has for an error code. (sandbox.hpp has the same for
-/// the worker, which shares no code with this module but request.hpp.)
-static std::string systemText(DWORD error) {
-  char *text = nullptr;
-  const DWORD length = FormatMessageA(
-      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-          FORMAT_MESSAGE_IGNORE_INSERTS,
-      nullptr, error, 0, reinterpret_cast<LPSTR>(&text), 0, nullptr);
-  std::string result = length > 0 ? std::string(text, length)
-                                  : "error " + std::to_string(error);
-  LocalFree(text);
-  while (!result.empty() && std::strchr(" .\r\n", result.back()) != nullptr) {
-    result.pop_back();
+/// The physical memory `child` is using, in bytes, or 0 if that cannot be
+/// read.
+static uint64_t childMemory(HANDLE child) {
+  PROCESS_MEMORY_COUNTERS memory = {};
+  if (!GetProcessMemoryInfo(child, &memory, sizeof(memory))) {
+    return 0;
   }
-  return result;
+  return memory.WorkingSetSize;
 }
 
 static ProcessResult runProcess(const std::string &program,
                                 const std::string &head, const char *body,
                                 size_t body_size, double timeout_seconds,
+                                uint64_t memory_limit,
                                 const std::function<bool()> &interrupted) {
   Pipe input(true), output(false), errors(false);
 
@@ -475,38 +562,65 @@ static ProcessResult runProcess(const std::string &program,
     }
     Pipe::closeEnd(input.write_end); // tells the child the input is done
   });
-  auto drain = [](HANDLE end, auto &into) {
+  // set by the output thread when the worker writes more than an honest
+  // result could be; it stops the worker, and the wait below ends
+  std::atomic<bool> tooMuchOutput{false};
+  bool overMemory = false;
+  std::thread outputReader([&] {
     char buffer[65536];
     DWORD got = 0;
-    while (ReadFile(end, buffer, sizeof(buffer), &got, nullptr) && got > 0) {
-      into.insert(into.end(), buffer, buffer + got);
+    while (ReadFile(output.read_end, buffer, sizeof(buffer), &got, nullptr) &&
+           got > 0) {
+      result.output.insert(result.output.end(), buffer, buffer + got);
+      if (memory_limit != 0 && result.output.size() > memory_limit) {
+        tooMuchOutput = true;
+        TerminateJobObject(job.handle, 1);
+        return;
+      }
     }
-  };
-  std::thread outputReader([&] { drain(output.read_end, result.output); });
-  std::thread errorReader([&] { drain(errors.read_end, result.errors); });
+  });
+  std::thread errorReader([&] {
+    char buffer[65536];
+    DWORD got = 0;
+    while (ReadFile(errors.read_end, buffer, sizeof(buffer), &got, nullptr) &&
+           got > 0) {
+      result.errors.append(buffer, got);
+      keepLastErrors(result.errors);
+    }
+  });
 
   // wait in steps of at most 100 ms, so `interrupted` is asked often
   // enough, and never past the deadline
   using Clock = std::chrono::steady_clock;
   const auto deadline =
       Clock::now() + std::chrono::duration_cast<Clock::duration>(
-                         std::chrono::duration<double>(
-                             std::max(timeout_seconds, 0.0)));
-  while (true) {
-    DWORD step = 100;
-    if (timeout_seconds >= 0) {
-      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            deadline - Clock::now())
-                            .count();
-      step = static_cast<DWORD>(std::clamp<long long>(left, 0, 100));
+                         std::chrono::duration<double>(timeout_seconds));
+  // 10 ms when there is a memory limit to check
+  const long long longest = memory_limit != 0 ? 10 : 100;
+  // `interrupted` takes Python's lock, so it is asked about every 100 ms,
+  // however often the loop wakes
+  auto nextInterruptCheck = Clock::now();
+  auto askInterrupted = [&] {
+    if (Clock::now() < nextInterruptCheck) {
+      return false;
     }
+    nextInterruptCheck = Clock::now() + std::chrono::milliseconds(100);
+    return interrupted();
+  };
+  while (true) {
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          deadline - Clock::now())
+                          .count();
+    const DWORD step = static_cast<DWORD>(std::clamp<long long>(left, 0, longest));
     if (WaitForSingleObject(child.hProcess, step) != WAIT_TIMEOUT) {
       break; // it ended
     }
-    if (timeout_seconds >= 0 && Clock::now() >= deadline) {
+    if (Clock::now() >= deadline) {
       result.timed_out = true;
-    } else if (interrupted()) {
+    } else if (askInterrupted()) {
       result.interrupted = true;
+    } else if (memory_limit != 0 && childMemory(child.hProcess) > memory_limit) {
+      overMemory = true;
     } else {
       continue;
     }
@@ -522,7 +636,8 @@ static ProcessResult runProcess(const std::string &program,
   DWORD code = 0;
   GetExitCodeProcess(child.hProcess, &code);
   CloseHandle(child.hProcess);
-  if (!result.timed_out && !result.interrupted) {
+  result.over_limit = tooMuchOutput || overMemory;
+  if (!result.timed_out && !result.interrupted && !result.over_limit) {
     result.exit_code = static_cast<int>(code);
   }
   return result;

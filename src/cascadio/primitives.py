@@ -11,6 +11,7 @@ the tip of the axis they turn about (the right-hand rule).
 """
 
 from dataclasses import dataclass, fields
+from typing import Literal
 
 # a position [x, y, z] in meters
 Point = tuple[float, float, float]
@@ -18,6 +19,8 @@ Point = tuple[float, float, float]
 Direction = tuple[float, float, float]
 # [min, max] along one of a surface's two directions
 Range = tuple[float, float]
+# the surface types `brep_types` accepts
+BrepType = Literal["plane", "cylinder", "cone", "sphere", "torus"]
 
 
 @dataclass(frozen=True)
@@ -218,6 +221,7 @@ PRIMITIVES = {
 __all__ = [
     "PRIMITIVES",
     "BrepPrimitive",
+    "BrepType",
     "Cone",
     "Cylinder",
     "Plane",

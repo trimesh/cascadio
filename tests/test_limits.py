@@ -6,6 +6,7 @@ Every conversion is done by the `cascadio-worker` program, started by the
 compiled module. These tests are about that boundary.
 """
 
+import inspect
 import os
 import signal
 import socket
@@ -13,14 +14,12 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 import pytest
-from conftest import needs_iges
+from conftest import MODELS_DIR, needs_iges
 
 import cascadio
 
-MODELS_DIR = Path(__file__).parent / "models"
 STEP = (MODELS_DIR / "featuretype.STEP").read_bytes()
 NO_LIMITS = {"timeout": None, "memory_limit": None}
 
@@ -48,6 +47,8 @@ def test_bad_arguments():
         cascadio.load(STEP, file_type="stl")
     with pytest.raises(ValueError, match="timeout"):
         cascadio.load(STEP, timeout=0)
+    with pytest.raises(ValueError, match="timeout"):
+        cascadio.load(STEP, timeout=cascadio.MAX_TIMEOUT + 1)
     with pytest.raises(TypeError):
         cascadio.load("not bytes")
 
@@ -69,6 +70,57 @@ def test_memory_limit():
     with pytest.raises(MemoryError, match="memory_limit"):
         cascadio.load(STEP, memory_limit=2**20)
     assert len(cascadio.load(STEP)) > 1000
+
+
+def test_output_cap(fake_worker):
+    """A worker that sends more than `memory_limit` bytes is stopped."""
+    fake_worker("cat > /dev/null; head -c 3000000 /dev/zero")
+    with pytest.raises(MemoryError, match="memory_limit"):
+        cascadio.load(STEP, memory_limit=2**20)
+    # with no limit, all of it arrives
+    assert len(cascadio.load(STEP, memory_limit=None)) == 3000000
+
+
+def test_error_output_is_bounded(fake_worker):
+    """A worker that floods standard error still gives its last line as
+    the reason."""
+    fake_worker(
+        "cat > /dev/null\n"
+        "head -c 10000000 /dev/zero | tr '\\0' x >&2\n"
+        "echo >&2\n"
+        'echo "the reason" >&2\n'
+        "exit 65"
+    )
+    with pytest.raises(RuntimeError, match=r"^the reason$"):
+        cascadio.load(STEP)
+
+
+def test_memory_limit_from_outside(fake_worker):
+    """A worker that ignores `memory_limit`, as hijacked code would, is
+    stopped from outside."""
+    fake_worker(
+        f'exec "{sys.executable}" -c '
+        "\"import sys; b = b'x' * (2 << 30); print('escaped', file=sys.stderr)\""
+    )
+    with pytest.raises(MemoryError, match="memory_limit"):
+        cascadio.load(STEP, memory_limit=64 * 2**20)
+
+
+def test_lingering_worker_is_not_polled_hard(fake_worker):
+    """A worker that closes its output but keeps running is waited for
+    without spinning: the timeout ends it, at little cost to the caller."""
+    fake_worker("cat > /dev/null; exec >&- 2>&-; sleep 5")
+    started = time.process_time()
+    with pytest.raises(TimeoutError):
+        cascadio.load(STEP, timeout=1)
+    assert time.process_time() - started < 0.2
+
+
+def test_control_characters_are_replaced(fake_worker):
+    """What a worker writes reaches Python without terminal escapes."""
+    fake_worker("cat > /dev/null; printf '\\033[2Jthe reason\\n' >&2; exit 65")
+    with pytest.raises(RuntimeError, match=r"^\?\[2Jthe reason$"):
+        cascadio.load(STEP)
 
 
 def test_only_one_limit():
@@ -353,9 +405,16 @@ for name, kind in (("featuretype.STEP", "step"), ("microstrip.igs", "iges")):
 
 def test_docstrings():
     """Every public function has a numpy-style docstring and a signature."""
-    for name in ("load", "to_glb_bytes"):
-        doc = getattr(cascadio, name).__doc__
-        signature, body = doc.split("\n", 1)
+    for name in ("load", "to_glb_bytes", "step_to_glb", "step_to_obj"):
+        function = getattr(cascadio, name)
+        doc = function.__doc__
+        if doc.startswith(name + "("):
+            # nanobind puts the signature on the first line
+            signature, body = doc.split("\n", 1)
+        else:
+            # a Python function has one of its own
+            signature = name + str(inspect.signature(function))
+            body = inspect.cleandoc(doc)
         assert signature.startswith(name + "(") and "->" in signature
         for section in ("Parameters\n----------", "Returns\n-------", "Raises\n------"):
             assert section in body, (name, section)

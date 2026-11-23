@@ -37,19 +37,6 @@
 #include <type_traits>
 #include <vector>
 
-// the numbers in request.hpp are passed straight to OpenCASCADE
-static_assert(static_cast<int>(NodeNameFormat::PRODUCT) ==
-                  RWMesh_NameFormat_Product &&
-              static_cast<int>(NodeNameFormat::INSTANCE) ==
-                  RWMesh_NameFormat_Instance &&
-              static_cast<int>(NodeNameFormat::INSTANCE_OR_PRODUCT) ==
-                  RWMesh_NameFormat_InstanceOrProduct &&
-              static_cast<int>(NodeNameFormat::PRODUCT_OR_INSTANCE) ==
-                  RWMesh_NameFormat_ProductOrInstance &&
-              static_cast<int>(NodeNameFormat::PRODUCT_AND_INSTANCE) ==
-                  RWMesh_NameFormat_ProductAndInstance,
-              "NodeNameFormat must match RWMesh_NameFormat");
-
 /// The text of an OpenCASCADE error. It became a std::exception in OCCT 8;
 /// the template keeps the branch for the other version from being compiled.
 template <typename Failure> static std::string failureText(const Failure &f) {
@@ -73,20 +60,6 @@ static void setUpOpenCascade() {
   OSD_ThreadPool::DefaultPool();
 }
 
-static Glb run(const Locked &locked, const Request &request, const char *data,
-               size_t size) {
-  ConvertOptions options;
-  options.mesh = {request.tol_linear, request.tol_angular,
-                  request.tol_relative, request.use_parallel};
-  options.merge_primitives = request.merge_primitives;
-  options.include_brep = request.include_brep;
-  options.brep_types = request.brep_types;
-  options.node_name_format =
-      static_cast<RWMesh_NameFormat>(request.node_name_format);
-  options.y_up = request.y_up;
-  return toGlb(locked, data, size, request.file_type, options);
-}
-
 /// Read the request and the file, convert, write the result, exit.
 [[noreturn]] static void serve(const Locked &locked) {
   int code = worker_exit::FAILED;
@@ -108,10 +81,9 @@ static Glb run(const Locked &locked, const Request &request, const char *data,
     std::istringstream head(std::string(input.begin(), end + 1));
     const Request request = Request::parse(head);
     const size_t start = static_cast<size_t>(end - input.begin()) + 2;
-    locked.limitMemory(request.memory_limit);
 
     const Glb glb =
-        run(locked, request, input.data() + start, input.size() - start);
+        toGlb(locked, request, input.data() + start, input.size() - start);
     {
       Span span("send");
       if (!glb.writeTo([&locked](const char *data, size_t size) {

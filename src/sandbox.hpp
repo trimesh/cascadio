@@ -25,14 +25,12 @@
 //                              returns where the result goes
 //     void confine()           the lock-down itself
 //     long readSome(...), long writeSome(...)
-//     uint64_t peakMemory()
 //     bool attempt(name, argument)   for `--probe`; true if it worked
 // The code all platforms share is at the end.
 
 #include "request.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -63,8 +61,6 @@ public:
   std::vector<char> readInput() const;
   /// Write the result to the real standard output. False if it failed.
   bool writeResult(const char *data, size_t size) const;
-  /// Stop the process once it has used more than `bytes`; 0: no limit.
-  void limitMemory(uint64_t bytes) const;
 
 private:
   explicit Locked(int result) : result_(result) {}
@@ -161,17 +157,6 @@ inline long readSome(int fd, char *data, size_t size) {
 }
 inline long writeSome(int fd, const char *data, size_t size) {
   return write(fd, data, size);
-}
-
-/// The most physical memory this process has used so far, in bytes.
-inline uint64_t peakMemory() {
-  rusage usage = {};
-  getrusage(RUSAGE_SELF, &usage);
-#ifdef __APPLE__
-  return static_cast<uint64_t>(usage.ru_maxrss); // bytes
-#else
-  return static_cast<uint64_t>(usage.ru_maxrss) * 1024; // kilobytes
-#endif
 }
 
 /// What `--probe` tries (see probe() at the end); true if it worked.
@@ -288,8 +273,7 @@ static const int ALLOWED[] = {
     __NR_rseq,  __NR_rt_sigprocmask,        //
     __NR_exit,  __NR_exit_group,            // a thread, the process
     __NR_rt_sigreturn, __NR_restart_syscall, // signals, resumed sleeps
-    __NR_getrusage,                         // the memory watcher
-    __NR_nanosleep, __NR_clock_nanosleep,   //
+    __NR_nanosleep, __NR_clock_nanosleep,   // harmless; for any sleep
     __NR_clock_gettime, __NR_gettimeofday,  // when the vDSO falls back
     __NR_times,                             // OSD_Chronometer
     __NR_sched_yield,                       // OSD_ThreadPool
@@ -457,29 +441,12 @@ inline void confine() {
 // Windows
 // ============================================================================
 
-#include <windows.h> // NOMINMAX and WIN32_LEAN_AND_MEAN come from CMake
+#include "windows_text.hpp"
 
 #include <fcntl.h>
 #include <io.h>
-#include <psapi.h>
 
 namespace os {
-
-/// The text Windows has for an error code.
-inline std::string systemText(DWORD error) {
-  char *text = nullptr;
-  const DWORD length = FormatMessageA(
-      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-          FORMAT_MESSAGE_IGNORE_INSERTS,
-      nullptr, error, 0, reinterpret_cast<LPSTR>(&text), 0, nullptr);
-  std::string result = length > 0 ? std::string(text, length)
-                                  : "error " + std::to_string(error);
-  LocalFree(text);
-  while (!result.empty() && std::strchr(" .\r\n", result.back()) != nullptr) {
-    result.pop_back();
-  }
-  return result;
-}
 
 inline int prepare() {
   // a crash shows no dialog; the module reports it
@@ -501,12 +468,6 @@ inline long readSome(int fd, char *data, size_t size) {
 }
 inline long writeSome(int fd, const char *data, size_t size) {
   return _write(fd, data, static_cast<unsigned>(std::min<size_t>(size, 1 << 30)));
-}
-
-inline uint64_t peakMemory() {
-  PROCESS_MEMORY_COUNTERS counters = {};
-  GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters));
-  return counters.PeakWorkingSetSize;
 }
 
 /// Windows has no way for a process to take reading files or the network
@@ -587,48 +548,30 @@ inline bool attempt(const std::string &name, const std::string &argument) {
 // All platforms
 // ============================================================================
 
-/// The memory limit the watcher enforces: unknown until the request is
-/// read, then a number of bytes, or 0 for none.
-inline std::atomic<uint64_t> memoryLimit{UINT64_MAX};
-
-/// Stop the whole process as soon as it has used more than the memory
-/// limit. Memory has to be touched to count, which takes far longer than
-/// the interval, so checking every few milliseconds cannot be outrun.
-inline void startMemoryWatcher() {
 #ifdef __APPLE__
-  // macOS cannot have a process die with its parent: notice instead
+/// macOS cannot have a process die with its parent, as Linux does
+/// (PR_SET_PDEATHSIG) and Windows does (the module's job): notice instead.
+inline void watchParent() {
   const pid_t parent = getppid();
-#endif
   std::thread([=] {
-    while (true) {
-      const uint64_t limit = memoryLimit.load();
-      if (limit != UINT64_MAX && limit != 0 && os::peakMemory() > limit) {
-        std::_Exit(worker_exit::OUT_OF_MEMORY);
-      }
-#ifdef __APPLE__
-      if (getppid() != parent) {
-        std::_Exit(worker_exit::FAILED);
-      }
-#else
-      if (limit == 0) {
-        return; // nothing left to watch
-      }
-#endif
-      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    while (getppid() == parent) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    std::_Exit(worker_exit::FAILED);
   }).detach();
 }
+#endif
 
 /// Set up, then lock down. `setUp` is where the caller does whatever needs
 /// files while it still can.
 template <typename SetUp> Locked lockDown(SetUp &&setUp) {
   const int result = os::prepare();
   setUp();
-  // The watcher is the first thread, which the C library sets up for on
-  // the way (glibc installs signal handlers). Starting it before the
-  // lock-down puts that set-up before it too; the lock-down then holds
-  // the watcher like every other thread.
-  startMemoryWatcher();
+#ifdef __APPLE__
+  // started before the lock-down, so the C library's set-up for a first
+  // thread happens while it is still allowed to
+  watchParent();
+#endif
   os::confine();
   return Locked(result);
 }
@@ -657,10 +600,6 @@ inline bool Locked::writeResult(const char *data, size_t size) const {
     size -= static_cast<size_t>(wrote);
   }
   return true;
-}
-
-inline void Locked::limitMemory(uint64_t bytes) const {
-  memoryLimit.store(bytes);
 }
 
 /// `cascadio-worker --probe NAME [ARGUMENT]`: try one thing the lock-down
