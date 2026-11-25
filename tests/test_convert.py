@@ -1,27 +1,22 @@
 import io
-import os
-import tempfile
-import timeit
-from pathlib import Path
-from typing import List, Optional
 
-import cascadio
-import cascadio.extension  # Register extension handlers
-import cascadio.primitives
 import numpy as np
 import pytest
 import trimesh
+from conftest import MODELS_DIR, glb_json
 
 # Require trimesh extension registry support
 from trimesh.exchange.gltf.extensions import register_handler  # noqa
 
-MODELS_DIR = Path(__file__).parent / "models"
+import cascadio
+import cascadio.extension  # Register extension handlers
+import cascadio.primitives
 
 
 def check_brep(
     triangles: np.ndarray,
     brep_index: np.ndarray,
-    primitives: List[Optional[cascadio.primitives.BrepPrimitive]],
+    primitives: list[cascadio.primitives.BrepPrimitive | None],
     tolerance: float = 1e-8,
 ) -> None:
     """
@@ -148,92 +143,35 @@ def assert_brep_surfaces(mesh, tolerance: float = 1e-8) -> None:
     check_brep(triangles, brep_index, primitives, tolerance)
 
 
+def load_scene(name: str, **kwargs) -> trimesh.Scene:
+    """Convert a test model with cascadio and load the GLB with trimesh."""
+    glb = cascadio.load((MODELS_DIR / name).read_bytes(), **kwargs)
+    return trimesh.load(io.BytesIO(glb), file_type="glb", merge_primitives=True)
+
+
 def test_convert_step_to_glb():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        glb_path = Path(temp_dir) / "output.glb"
-        cascadio.step_to_glb(
-            str(MODELS_DIR / "featuretype.STEP"),
-            str(glb_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-        )
-        assert glb_path.stat().st_size > 1000, "GLB file suspiciously small"
-        scene = trimesh.load(glb_path, merge_primitives=True)
+    scene = load_scene("featuretype.STEP", tol_linear=0.1, tol_angular=0.5)
 
     assert len(scene.geometry) == 1
 
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
     assert len(mesh.vertices) > 100, "Mesh should have substantial vertices"
     assert len(mesh.faces) > 100, "Mesh should have substantial faces"
     assert mesh.is_winding_consistent, "Mesh should have consistent winding"
     assert np.allclose(scene.extents, np.array([0.127, 0.0635, 0.034925]))
 
 
-def test_convert_step_to_obj():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        obj_path = Path(temp_dir) / "output.obj"
-        cascadio.step_to_obj(
-            str(MODELS_DIR / "featuretype.STEP"),
-            str(obj_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-        )
-        mesh = trimesh.load(obj_path, merge_primitives=True)
-
-    assert mesh.mass > 0.0
-    assert mesh.volume > 0.0
-    assert np.allclose(mesh.extents, np.array([127.0, 63.5, 34.924999]))
-
-
-@pytest.mark.parametrize(
-    "use_colors,expected_color",
-    [
-        (True, np.array([202, 225, 255, 255])),  # With colors from STEP
-        (False, np.array([102, 102, 102, 255])),  # Default gray
-    ],
-)
-def test_convert_step_to_obj_colors(use_colors, expected_color):
-    """Test OBJ export with and without colors."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        obj_path = Path(temp_dir) / "output.obj"
-        mtl_path = obj_path.with_suffix(".mtl")
-        cascadio.step_to_obj(
-            str(MODELS_DIR / "colored.step"),
-            str(obj_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-            use_colors=use_colors,
-        )
-
-        # MTL file should exist only when colors are enabled
-        assert mtl_path.exists() == use_colors
-        mesh = trimesh.load(obj_path, merge_primitives=True)
-
-    assert mesh.mass > 0.0
-    assert mesh.volume > 0.0
-    assert np.allclose(mesh.visual.material.main_color, expected_color)
-
-
 def test_convert_step_to_glb_with_brep():
     """Test that include_brep=True embeds BREP primitive data in mesh extras."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        glb_path = Path(temp_dir) / "output.glb"
-        cascadio.step_to_glb(
-            str(MODELS_DIR / "featuretype.STEP"),
-            str(glb_path),
-            tol_linear=0.1,
-            tol_angular=0.5,
-            include_brep=True,
-        )
-
-        # Load with trimesh
-        scene = trimesh.load(glb_path, merge_primitives=True)
+    scene = load_scene(
+        "featuretype.STEP", tol_linear=0.1, tol_angular=0.5, include_brep=True
+    )
 
     # Should have one mesh
     assert len(scene.geometry) == 1
 
     # Get the mesh
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
 
     # Should have brep_faces in mesh.metadata.cascadio from TM_brep_faces extension
     assert "cascadio" in mesh.metadata
@@ -304,7 +242,7 @@ def test_convert_step_to_glb_brep_types_filter(
     )
 
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
     brep_faces = mesh.metadata["cascadio"]["brep_faces"]
     brep_index = mesh.face_attributes["brep_index"]
 
@@ -383,7 +321,7 @@ def test_brep_forces_merge_primitives():
         "Expected single mesh (merge_primitives auto-enabled)"
     )
 
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
 
     # BREP data should be present
     assert "cascadio" in mesh.metadata, "missing cascadio metadata"
@@ -400,136 +338,36 @@ def test_brep_forces_merge_primitives():
     assert_brep_surfaces(mesh)
 
 
-def test_step_to_glb_bytes_performance():
-    """Compare performance of file-based vs bytes-based conversion."""
-    step_data = (MODELS_DIR / "featuretype.STEP").read_bytes()
-    n_iterations = 5
-
-    # Time file-based method (no BREP)
-    def file_based():
-        f = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
-        try:
-            f.close()
-            cascadio.step_to_glb(
-                str(MODELS_DIR / "featuretype.STEP"),
-                f.name,
-                tol_linear=0.1,
-                tol_angular=0.5,
-            )
-            with open(f.name, "rb") as glb_file:
-                return glb_file.read()
-        finally:
-            if os.path.exists(f.name):
-                os.unlink(f.name)
-
-    # Time file-based method with BREP
-    def file_based_brep():
-        f = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
-        try:
-            f.close()
-            cascadio.step_to_glb(
-                str(MODELS_DIR / "featuretype.STEP"),
-                f.name,
-                tol_linear=0.1,
-                tol_angular=0.5,
-                include_brep=True,
-            )
-            with open(f.name, "rb") as glb_file:
-                return glb_file.read()
-        finally:
-            if os.path.exists(f.name):
-                os.unlink(f.name)
-
-    # Time bytes-based methods
-    def bytes_based():
-        return cascadio.load(
-            step_data, file_type="step", tol_linear=0.1, tol_angular=0.5
-        )
-
-    def bytes_with_brep():
-        return cascadio.load(
-            step_data,
-            file_type="step",
-            tol_linear=0.1,
-            tol_angular=0.5,
-            include_brep=True,
-        )
-
-    file_time = timeit.timeit(file_based, number=n_iterations)
-    file_brep_time = timeit.timeit(file_based_brep, number=n_iterations)
-    bytes_time = timeit.timeit(bytes_based, number=n_iterations)
-    brep_time = timeit.timeit(bytes_with_brep, number=n_iterations)
-
-    print(f"\nPerformance ({n_iterations} iterations):")
-    print(f"  File-based (no BREP):   {file_time / n_iterations * 1000:.1f}ms/call")
-    print(
-        f"  File-based (with BREP): {file_brep_time / n_iterations * 1000:.1f}ms/call  (+{(file_brep_time / file_time - 1) * 100:.1f}%)"
-    )
-    print(
-        f"  Bytes (no BREP):        {bytes_time / n_iterations * 1000:.1f}ms/call  ({file_time / bytes_time:.2f}x faster)"
-    )
-    print(
-        f"  Bytes (with BREP):      {brep_time / n_iterations * 1000:.1f}ms/call  (+{(brep_time / bytes_time - 1) * 100:.1f}%, {file_brep_time / brep_time:.2f}x faster)"
-    )
-
-    # Verify outputs are valid GLB with actual mesh content
-    file_output = file_based()
-    bytes_output = bytes_based()
-    assert len(file_output) > 1000, "File-based output too small"
-    assert len(bytes_output) > 1000, "Bytes-based output too small"
-
-    # Verify outputs load as valid meshes
-    scene_file = trimesh.load(io.BytesIO(file_output), file_type="glb")
-    scene_bytes = trimesh.load(io.BytesIO(bytes_output), file_type="glb")
-    assert len(scene_file.geometry) == 1
-    assert len(scene_bytes.geometry) == 1
-
-    mesh_file = list(scene_file.geometry.values())[0]
-    mesh_bytes = list(scene_bytes.geometry.values())[0]
-    assert len(mesh_file.vertices) > 100
-    assert len(mesh_bytes.vertices) > 100
-
-
-def test_convert_step_to_glb_with_materials():
-    """Test that include_materials=True extracts material data from STEP."""
+def test_convert_step_to_glb_with_substance():
+    """`include_brep` gives each part's substance, with its density in kg/m^3."""
     step_data = (MODELS_DIR / "material.stp").read_bytes()
 
-    # Convert with materials
     glb_data = cascadio.load(
         step_data,
         file_type="step",
         tol_linear=0.1,
         tol_angular=0.5,
-        include_materials=True,
+        include_brep=True,
     )
 
     assert len(glb_data) > 0
 
     # Load with trimesh and check mesh metadata
     scene = trimesh.load(io.BytesIO(glb_data), file_type="glb", merge_primitives=True)
-    mesh = list(scene.geometry.values())[0]
+    mesh = next(iter(scene.geometry.values()))
 
-    # Materials should be in mesh.metadata.cascadio.materials
-    assert "cascadio" in mesh.metadata
-    assert "materials" in mesh.metadata["cascadio"]
+    # the file says 7850 kg/m^3; OpenCASCADE alone reports 0.00785
+    substance = mesh.metadata["cascadio"]["substance"]
+    assert substance["name"] == "Steel"
+    assert substance["density"] == pytest.approx(7850)
+    assert set(substance) == {"name", "density"}
 
-    materials = mesh.metadata["cascadio"]["materials"]
-    assert len(materials) == 1
-
-    # Materials are arbitrary dicts - check the raw data
-    mat = materials[0]
-    assert mat["name"] == "Steel"
-    assert mat["description"] == "Steel"
-    assert "density" in mat
-    assert 0.007 < mat["density"] < 0.008  # ~0.00785 g/mm³ for steel
-
-    # Test with both materials and BREP data (plane filter)
+    # filtering the face types keeps the substance
     glb_data_with_brep = cascadio.load(
         step_data,
         file_type="step",
         tol_linear=0.1,
         tol_angular=0.5,
-        include_materials=True,
         include_brep=True,
         brep_types={"plane"},
     )
@@ -539,13 +377,10 @@ def test_convert_step_to_glb_with_materials():
     scene_brep = trimesh.load(
         io.BytesIO(glb_data_with_brep), file_type="glb", merge_primitives=True
     )
-    mesh_brep = list(scene_brep.geometry.values())[0]
+    mesh_brep = next(iter(scene_brep.geometry.values()))
 
-    # Materials should still be present
-    assert "cascadio" in mesh_brep.metadata
-    assert "materials" in mesh_brep.metadata["cascadio"]
-    assert len(mesh_brep.metadata["cascadio"]["materials"]) == 1
-    assert mesh_brep.metadata["cascadio"]["materials"][0]["name"] == "Steel"
+    # the substance should still be present
+    assert mesh_brep.metadata["cascadio"]["substance"]["name"] == "Steel"
 
     # BREP data should be present with only planes
     assert "brep_faces" in mesh_brep.metadata["cascadio"]
@@ -575,7 +410,7 @@ def brep_mesh():
     scene = trimesh.load_scene(
         io.BytesIO(glb_data), file_type="glb", merge_primitives=True
     )
-    return list(scene.geometry.values())[0]
+    return next(iter(scene.geometry.values()))
 
 
 def test_cylinder_parameters(brep_mesh):
@@ -618,3 +453,264 @@ def test_cylinder_vertices_on_surface(brep_mesh):
 
 if __name__ == "__main__":
     test_multibody()
+
+
+def _node_names(glb: bytes) -> list:
+    """Read node names straight from the GLB JSON chunk."""
+    header = glb_json(glb)
+    return [node.get("name") for node in header["nodes"]]
+
+
+@pytest.mark.parametrize(
+    "name_format,expected",
+    [
+        # instance labels from the STEP assembly structure
+        ("INSTANCE", ["box_sides", "NAUO1", "NAUO2", "NAUO3"]),
+        ("INSTANCE_OR_PRODUCT", ["box_sides", "NAUO1", "NAUO2", "NAUO3"]),
+        # human-readable product names
+        ("PRODUCT", ["box_sides", "box_base", "side_long", "side_long"]),
+        ("PRODUCT_OR_INSTANCE", ["box_sides", "box_base", "side_long", "side_long"]),
+        (
+            "PRODUCT_AND_INSTANCE",
+            ["box_sides", "box_base [NAUO1]", "side_long [NAUO2]", "side_long [NAUO3]"],
+        ),
+    ],
+)
+def test_node_name_format(name_format, expected):
+    """`node_name_format` picks between instance and product names for nodes."""
+    step_data = (MODELS_DIR / "multibody.step").read_bytes()
+    name_format = getattr(cascadio.NodeNameFormat, name_format)
+
+    names = _node_names(cascadio.load(step_data, node_name_format=name_format))
+    assert names[:4] == expected
+
+    # the low-level binding takes the same argument
+    assert (
+        _node_names(cascadio.to_glb_bytes(step_data, node_name_format=name_format))
+        == names
+    )
+
+
+def test_node_name_format_default():
+    """The default keeps the behavior from before the option existed."""
+    step_data = (MODELS_DIR / "multibody.step").read_bytes()
+    assert _node_names(cascadio.load(step_data)) == _node_names(
+        cascadio.load(
+            step_data, node_name_format=cascadio.NodeNameFormat.INSTANCE_OR_PRODUCT
+        )
+    )
+
+
+def test_y_up_cuboid():
+    """
+    `y_up` rotates CAD's Z-up into glTF's Y-up: (x, y, z) -> (x, z, -y).
+
+    The models are a 1 x 2 x 3 meter cuboid exported from Onshape twice,
+    once as-is and once with Onshape's own "Y-up" export option.
+    """
+    z_up = load_scene("cuboid_zup.step")
+    assert np.allclose(z_up.bounds, [[0, 0, 0], [1, 2, 3]])
+
+    rotated = load_scene("cuboid_zup.step", y_up=True)
+    assert np.allclose(rotated.bounds, [[0, 0, -2], [1, 3, 0]])
+
+    # the same thing Onshape produces when asked for Y-up
+    onshape = load_scene("cuboid_yup.step")
+    assert np.allclose(rotated.bounds, onshape.bounds)
+
+
+def test_y_up_brep():
+    """With `y_up` the BREP surfaces are rotated along with the mesh."""
+    for name in ("featuretype.STEP", "cuboid_zup.step"):
+        scene = load_scene(name, y_up=True, include_brep=True)
+        for mesh in scene.geometry.values():
+            assert_brep_surfaces(mesh)
+
+    # the top face of the cuboid points along +Z in CAD and +Y in glTF
+    for y_up, up in ((False, [0, 0, 1]), (True, [0, 1, 0])):
+        scene = load_scene("cuboid_zup.step", y_up=y_up, include_brep=True)
+        mesh = next(iter(scene.geometry.values()))
+        normals = [p.normal for p in mesh.metadata["cascadio"]["brep_primitives"]]
+        assert any(np.allclose(n, up) for n in normals)
+
+
+def test_brep_includes_substance():
+    """`include_brep` alone brings the substance: it is part of the extension."""
+    scene = load_scene("material.stp", include_brep=True)
+    mesh = next(iter(scene.geometry.values()))
+    assert mesh.metadata["cascadio"]["substance"]["name"] == "Steel"
+    assert len(mesh.metadata["cascadio"]["brep_primitives"]) > 0
+
+
+@pytest.mark.parametrize("option", ["include_brep", "include_materials"])
+def test_substance_per_part(option):
+    """Each mesh carries the substance of its own part, not the whole model's."""
+    # two parts made from material.stp: "Part 1" is Steel, "Part 2" is Aluminum
+    scene = load_scene("two_materials.step", **{option: True})
+    assert len(scene.geometry) == 2
+    found = {
+        name: mesh.metadata["cascadio"]["substance"]
+        for name, mesh in scene.geometry.items()
+    }
+    assert sorted(s["name"] for s in found.values()) == ["Aluminum", "Steel"]
+    assert found["Part 1"]["name"] == "Steel"
+    # the file gives both the same density, in kilograms per cubic meter
+    assert all(s["density"] == pytest.approx(7850) for s in found.values())
+
+
+def test_appearance_is_a_gltf_material():
+    """
+    How a part looks is in the GLB's own materials, and nothing of it is in
+    the extension: the substance is what the part is made of.
+    """
+    glb = cascadio.load((MODELS_DIR / "colored.step").read_bytes(), include_brep=True)
+    header = glb_json(glb)
+    for mesh in header["meshes"]:
+        for primitive in mesh["primitives"]:
+            assert primitive["extensions"]["TM_brep_faces"]["substance"] is None
+            material = header["materials"][primitive["material"]]
+            assert len(material["pbrMetallicRoughness"]["baseColorFactor"]) == 4
+
+
+def test_instances_share_a_substance():
+    """
+    A substance belongs to a part, so every node that shows the part
+    reaches the same one, through its mesh's primitive.
+    """
+    # multibody.step places the "gusset" part (#8805) four times. Give it a
+    # substance, with its density written as kg * m^-3 this time.
+    gusset = b"""
+#90001=PROPERTY_DEFINITION('material property','material name',#8805);
+#90002=DESCRIPTIVE_REPRESENTATION_ITEM('Brass','Brass');
+#90003=REPRESENTATION('material name',(#90002),#2455);
+#90004=PROPERTY_DEFINITION_REPRESENTATION(#90001,#90003);
+#90005=(MASS_UNIT() NAMED_UNIT(*) SI_UNIT(.KILO.,.GRAM.));
+#90006=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.));
+#90007=DERIVED_UNIT_ELEMENT(#90005,1.);
+#90008=DERIVED_UNIT_ELEMENT(#90006,-3.);
+#90009=DERIVED_UNIT((#90007,#90008));
+#90010=MEASURE_REPRESENTATION_ITEM('density measure',
+POSITIVE_RATIO_MEASURE(8500.),#90009);
+#90011=REPRESENTATION('density',(#90010),#2455);
+#90012=PROPERTY_DEFINITION('material property','density of part',#8805);
+#90013=PROPERTY_DEFINITION_REPRESENTATION(#90012,#90011);
+ENDSEC;
+END-ISO-10303-21;"""
+    data = (MODELS_DIR / "multibody.step").read_bytes()
+    data = data[: data.rindex(b"ENDSEC;")] + gusset
+    glb = cascadio.load(data, include_brep=True)
+    header = glb_json(glb)
+
+    found = {}
+    for node in header["nodes"]:
+        if "mesh" not in node:
+            continue
+        mesh = header["meshes"][node["mesh"]]
+        for primitive in mesh["primitives"]:
+            substance = primitive["extensions"]["TM_brep_faces"]["substance"]
+            found.setdefault(mesh["name"], []).append(substance)
+    brass = {"name": "Brass", "density": pytest.approx(8500)}
+    assert found["gusset"] == [brass] * 4
+    # the other parts are made of nothing the file names
+    others = [s for name, found_ in found.items() if name != "gusset" for s in found_]
+    assert others and all(s is None for s in others)
+
+
+def _within(values, bounds, tolerance, period=None):
+    """Are all values inside [min, max]? Angles may be off by whole turns."""
+    low, high = bounds[0] - tolerance, bounds[1] + tolerance
+    values = np.asarray(values)
+    if period is None:
+        return bool(((values >= low) & (values <= high)).all())
+    return bool(
+        np.any(
+            [
+                (values + k * period >= low) & (values + k * period <= high)
+                for k in (-2, -1, 0, 1, 2)
+            ],
+            axis=0,
+        ).all()
+    )
+
+
+def check_extents(prim, verts) -> None:
+    """
+    Recompute where each vertex sits on its surface, exactly the way the
+    schema describes each field, and check it is inside the stated extents.
+    """
+    P = cascadio.primitives
+    turn = 2 * np.pi
+    if isinstance(prim, P.Plane):
+        d = verts - prim.origin
+        y_dir = np.cross(prim.normal, prim.x_dir)
+        assert _within(d @ prim.x_dir, prim.extent_x, 1e-7)
+        assert _within(d @ y_dir, prim.extent_y, 1e-7)
+        return
+
+    axis, x_dir = np.array(prim.axis), np.array(prim.x_dir)
+    y_dir = np.cross(axis, x_dir)
+    assert abs(np.linalg.norm(axis) - 1) < 1e-9
+    assert abs(np.linalg.norm(x_dir) - 1) < 1e-9
+    assert abs(axis @ x_dir) < 1e-9
+    if isinstance(prim, P.Cylinder):
+        d = verts - prim.origin
+        assert _within(d @ axis, prim.extent_height, 1e-7)
+        assert _within(np.arctan2(d @ y_dir, d @ x_dir), prim.extent_angle, 1e-5, turn)
+    elif isinstance(prim, P.Cone):
+        # the reference circle sits on the axis, this far from the apex
+        reference = prim.apex + axis * prim.ref_radius / np.tan(prim.semi_angle)
+        d = verts - reference
+        # distance along the slanted side, from distance along the axis
+        assert _within((d @ axis) / np.cos(prim.semi_angle), prim.extent_distance, 1e-7)
+        off_axis = np.hypot(d @ x_dir, d @ y_dir) > 1e-9  # the apex has no angle
+        assert _within(
+            np.arctan2(d @ y_dir, d @ x_dir)[off_axis], prim.extent_angle, 1e-5, turn
+        )
+    elif isinstance(prim, P.Sphere):
+        d = verts - prim.center
+        latitude = np.arcsin(np.clip(d @ axis / prim.radius, -1, 1))
+        assert _within(latitude, prim.extent_latitude, 1e-5)
+        off_axis = np.hypot(d @ x_dir, d @ y_dir) > 1e-9  # poles have no longitude
+        assert _within(
+            np.arctan2(d @ y_dir, d @ x_dir)[off_axis],
+            prim.extent_longitude,
+            1e-5,
+            turn,
+        )
+    elif isinstance(prim, P.Torus):
+        d = verts - prim.center
+        assert _within(
+            np.arctan2(d @ y_dir, d @ x_dir), prim.extent_major_angle, 1e-5, turn
+        )
+        # around the tube: 0 at the outer edge, growing toward the axis direction
+        outward = np.hypot(d @ x_dir, d @ y_dir) - prim.major_radius
+        assert _within(
+            np.arctan2(d @ axis, outward), prim.extent_minor_angle, 1e-5, turn
+        )
+
+
+@pytest.mark.parametrize("y_up", [False, True])
+def test_extents_mean_what_the_schema_says(y_up):
+    """Every face's vertices fall inside its extents, measured as documented."""
+    checked = set()
+    for model in [*sorted(MODELS_DIR.glob("*.st*p")), MODELS_DIR / "featuretype.STEP"]:
+        scene = load_scene(model.name, include_brep=True, y_up=y_up)
+        for mesh in scene.geometry.values():
+            triangles = mesh.vertices[mesh.faces]
+            index = mesh.face_attributes["brep_index"]
+            for i, prim in enumerate(mesh.metadata["cascadio"]["brep_primitives"]):
+                verts = triangles[index == i].reshape(-1, 3)
+                if prim is not None and len(verts):
+                    check_extents(prim, verts)
+                    checked.add(type(prim).__name__)
+    # the test models cover these surface types
+    assert {"Plane", "Cylinder"} <= checked
+    print("checked:", sorted(checked))
+
+
+def test_include_materials_is_include_brep():
+    """The option from cascadio 0.1 is now the same as `include_brep`."""
+    data = (MODELS_DIR / "material.stp").read_bytes()
+    assert cascadio.load(data, include_materials=True) == cascadio.load(
+        data, include_brep=True
+    )

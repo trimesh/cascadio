@@ -1,239 +1,57 @@
 """
-extension.py
-------------
+The trimesh plugin for the `TM_brep_faces` glTF extension.
 
-Trimesh extension integration for cascadio.
+Importing cascadio registers it. When trimesh then loads a GLB made with
+`cascadio.load(..., include_brep=True)`, each mesh gets:
 
-This module registers handlers for the TM_brep_faces glTF extension,
-populating trimesh meshes with:
-- mesh.face_attributes['brep_index']: numpy array of per-triangle face indices
-- mesh.metadata['cascadio']['brep_primitives']: list of cascadio.primitives dataclasses
-
-Usage:
-    import cascadio  # registers the handler on import
-    import trimesh
-    scene = trimesh.load("model.glb")
+- `mesh.face_attributes["brep_index"]`: for every triangle, the index of
+  the CAD face it came from
+- `mesh.metadata["cascadio"]["brep_primitives"]`: that face's surface as a
+  `cascadio.primitives` dataclass, or None if it is not a plane, cylinder,
+  cone, sphere or torus
+- `mesh.metadata["cascadio"]["brep_faces"]`: the same as plain dicts
+- `mesh.metadata["cascadio"]["substance"]`: what the part the mesh was
+  made from is made of, as `{"name": ..., "density": ...}` with the
+  density in kg/m^3, or None if the file does not say. How the part looks
+  is the glTF material, which trimesh loads as `mesh.visual.material`.
 """
 
-from typing import Dict, List, Optional, Any
-
-import numpy as np
+from .primitives import parse_brep_faces
 
 try:
     from trimesh.exchange.gltf.extensions import register_handler
 except ImportError:
-    # Fallback no-op decorator if trimesh doesn't have extension registry yet
-    def register_handler(*args, **kwargs):
-        def decorator(fn):
-            return fn
-
-        return decorator
-
-
-from .primitives import (
-    BrepPrimitive,
-    Plane,
-    Cylinder,
-    Cone,
-    Sphere,
-    Torus,
-)
-
-
-def _parse_face_to_primitive(
-    face: Optional[Dict], face_index: int
-) -> Optional[BrepPrimitive]:
-    """
-    Convert a face definition from TM_brep_faces to a cascadio primitive.
-
-    Parameters
-    ----------
-    face : dict or None
-        Face definition from glTF extension, or None if filtered out
-    face_index : int
-        Index of this face in the faces array
-
-    Returns
-    -------
-    BrepPrimitive or None
-        The parsed primitive dataclass, or None if type not supported or face is None.
-    """
-    if face is None:
-        return None
-
-    face_type = face.get("type")
-    if face_type is None:
-        return None
-
-    # Use face_index from data if present, otherwise use parameter
-    idx = face.get("face_index", face_index)
-
-    if face_type == "plane":
-        return Plane(
-            face_index=idx,
-            extent_x=tuple(face["extent_x"]),
-            extent_y=tuple(face["extent_y"]),
-            origin=tuple(face["origin"]),
-            normal=tuple(face["normal"]),
-            x_dir=tuple(face["x_dir"]),
-        )
-    elif face_type == "cylinder":
-        return Cylinder(
-            face_index=idx,
-            extent_angle=tuple(face["extent_angle"]),
-            extent_height=tuple(face["extent_height"]),
-            origin=tuple(face["origin"]),
-            axis=tuple(face["axis"]),
-            radius=face["radius"],
-        )
-    elif face_type == "cone":
-        return Cone(
-            face_index=idx,
-            extent_angle=tuple(face["extent_angle"]),
-            extent_distance=tuple(face["extent_distance"]),
-            apex=tuple(face["apex"]),
-            axis=tuple(face["axis"]),
-            semi_angle=face["semi_angle"],
-            ref_radius=face["ref_radius"],
-        )
-    elif face_type == "sphere":
-        return Sphere(
-            face_index=idx,
-            extent_longitude=tuple(face["extent_longitude"]),
-            extent_latitude=tuple(face["extent_latitude"]),
-            center=tuple(face["center"]),
-            radius=face["radius"],
-        )
-    elif face_type == "torus":
-        return Torus(
-            face_index=idx,
-            extent_major_angle=tuple(face["extent_major_angle"]),
-            extent_minor_angle=tuple(face["extent_minor_angle"]),
-            center=tuple(face["center"]),
-            axis=tuple(face["axis"]),
-            major_radius=face["major_radius"],
-            minor_radius=face["minor_radius"],
-        )
-
-    # "bspline", "other", or unknown types
-    return None
-
-
-def process_brep_faces(
-    face_indices: np.ndarray,
-    faces: Optional[List[Dict]] = None,
-) -> Dict[str, Any]:
-    """
-    Process TM_brep_faces data into mesh-ready format.
-
-    Parameters
-    ----------
-    face_indices : np.ndarray
-        Per-triangle face indices from the extension
-    faces : list of dict, optional
-        Face definitions with surface parameters
-
-    Returns
-    -------
-    result : dict
-        - 'brep_index': numpy array for face_attributes
-        - 'brep_primitives': list of primitive dataclasses
-    """
-    result = {
-        "brep_index": np.asarray(face_indices).flatten(),
-        "brep_primitives": [],
-    }
-
-    if faces:
-        primitives = []
-        for i, face in enumerate(faces):
-            prim = _parse_face_to_primitive(face, face_index=i)
-            primitives.append(prim)
-        result["brep_primitives"] = primitives
-
-    return result
+    # trimesh is optional, and old versions have no extension registry
+    def register_handler(name: str, scope: str):
+        return lambda function: function
 
 
 @register_handler("TM_brep_faces", "primitive")
-def _import_brep_faces_cascadio(ctx: Dict) -> Optional[Dict]:
+def _import_brep_faces(ctx: dict) -> dict | None:
     """
-    Handle TM_brep_faces extension during import (cascadio version).
-
-    Returns data in standard format for gltf.py to apply:
-    - face_attributes: dict of per-face arrays (e.g., brep_index)
-    - metadata: dict of additional data (e.g., brep_primitives)
+    Turn one primitive's `TM_brep_faces` data into what trimesh attaches
+    to the mesh: `{"face_attributes": {...}, "metadata": {...}}`.
     """
     data = ctx.get("data")
     if data is None:
         return None
 
-    result = {
-        "face_attributes": {},
-        "metadata": {},
+    face_attributes = {}
+    metadata = {}
+    accessors = ctx.get("accessors")
+    index = data.get("faceIndices")
+    if index is not None and accessors is not None and index < len(accessors):
+        # trimesh hands accessors over as numpy arrays
+        face_attributes["brep_index"] = accessors[index].reshape(-1)
+    if data.get("faces") is not None:
+        metadata["brep_primitives"] = parse_brep_faces(data["faces"])
+        metadata["brep_faces"] = data["faces"]
+    if "faces" in data:
+        metadata["substance"] = data.get("substance")
+
+    if not face_attributes and not metadata:
+        return None
+    return {
+        "face_attributes": face_attributes,
+        "metadata": {"cascadio": metadata} if metadata else {},
     }
-
-    # Get face indices accessor
-    face_indices = None
-    if "faceIndices" in data:
-        accessor_idx = data["faceIndices"]
-        accessors = ctx.get("accessors")
-        if accessors is not None and accessor_idx < len(accessors):
-            face_indices = np.asarray(accessors[accessor_idx]).flatten()
-            result["face_attributes"]["brep_index"] = face_indices
-
-    # Get face definitions if present
-    faces = data.get("faces")
-
-    # Get materials if present (may be included alongside BREP data)
-    materials = data.get("materials")
-
-    # Process into cascadio primitives
-    if faces is not None:
-        primitives = []
-        for i, face in enumerate(faces):
-            prim = _parse_face_to_primitive(face, face_index=i)
-            primitives.append(prim)
-
-        # Put everything under cascadio namespace for consistency
-        cascadio_meta = result["metadata"].setdefault("cascadio", {})
-        cascadio_meta["brep_primitives"] = primitives
-        cascadio_meta["brep_faces"] = faces
-
-    # Add materials if present
-    if materials is not None:
-        cascadio_meta = result["metadata"].setdefault("cascadio", {})
-        cascadio_meta["materials"] = materials
-
-    # Only return if we have something
-    if result["face_attributes"] or result["metadata"]:
-        return result
-    return None
-
-
-def apply_brep_to_mesh(mesh: Any, brep_data: Dict) -> None:
-    """
-    Apply BREP extension data to a trimesh mesh object.
-
-    This should be called after loading to populate the mesh attributes.
-
-    Parameters
-    ----------
-    mesh : trimesh.Trimesh
-        The mesh to populate
-    brep_data : dict
-        Data from the TM_brep_faces handler result
-    """
-    if "brep_index" in brep_data:
-        # Ensure face_attributes exists
-        if not hasattr(mesh, "face_attributes") or mesh.face_attributes is None:
-            mesh.face_attributes = {}
-        mesh.face_attributes["brep_index"] = brep_data["brep_index"]
-
-    if "brep_primitives" in brep_data:
-        mesh.brep_primitives = brep_data["brep_primitives"]
-
-
-__all__ = [
-    "process_brep_faces",
-    "apply_brep_to_mesh",
-]

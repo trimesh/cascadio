@@ -13,41 +13,54 @@ jobs:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      # let every platform finish so one failure does not hide the others
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, macos-15-intel]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: true
-      
+
       - name: Get OCCT cache key
         id: occt-key
         shell: bash
-        run: |
-          # Cache key includes: OS, OCCT commit, patches, and build script
-          OCCT_COMMIT=$(git rev-parse HEAD:upstream/OCCT)
-          echo "hash=${{ runner.os }}-${OCCT_COMMIT}-${{ hashFiles('patches/*.patch', 'scripts/build_occt.py') }}" >> $GITHUB_OUTPUT
+        run: echo "commit=$(git rev-parse HEAD:upstream/OCCT)" >> $GITHUB_OUTPUT
 
+      # The static OpenCASCADE build takes most of the job, so keep it
+      # between runs. It only changes with the OCCT commit or how we build it.
       - name: Cache OCCT build
-        id: cache-occt
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: |
-            upstream/OCCT/lin64
-            upstream/OCCT/lin32
-            upstream/OCCT/win64
-            upstream/OCCT/mac64
-          key: occt-${{ steps.occt-key.outputs.hash }}
-          save-always: true
-      
-      - uses: ilammy/msvc-dev-cmd@v1.13.0
-      
+          path: occt_install
+          key: occt-${{ runner.os }}-${{ runner.arch }}-${{ steps.occt-key.outputs.commit }}-${{ hashFiles('scripts/build_occt.py', 'cmake/toolchain.cmake') }}
+
+      # uv installs every build tool, checked against the hashes in uv.lock
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.4.1
+        uses: pypa/cibuildwheel@8d2b08b68458a16aeb24b64e68a09ab1c8e82084 # v3.4.1
         with:
           output-dir: wheelhouse
-      
-      - uses: actions/upload-artifact@v4
+        env:
+          # Linux wheels build in a container that sees the runner's disk
+          # at /host. Installing OpenCASCADE there lets the cache step keep it.
+          CIBW_ENVIRONMENT_LINUX: >-
+            CASCADIO_OCCT_PREFIX=/host${{ github.workspace }}/occt_install
+            UV_CONSTRAINT=build-constraints.txt
+            CASCADIO_STRICT=ON
+
+      # the same wheel on a recent distribution, under Docker's default
+      # seccomp profile (see `make modern-linux`)
+      - name: Test on a recent Linux
+        if: runner.os == 'Linux'
+        run: make modern-linux
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           path: ./wheelhouse/*.whl
           name: wheels-${{ matrix.os }}
@@ -60,14 +73,21 @@ jobs:
     permissions:
       id-token: write
     steps:
-    - uses: actions/setup-python@v4
-    - uses: actions/download-artifact@v4
-      with:
-        pattern: wheels-*
-        merge-multiple: true
-        path: dist
-    - name: Publish
-      uses: pypa/gh-action-pypi-publish@v1.8.12
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      # The source distribution leaves out the vendored OpenCASCADE; it is
+      # what Linux and BSD packagers build against their system's copy.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+      - name: Build source distribution
+        run: uv build --sdist --out-dir dist
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@e53eb8b103ffcb59469888563dc324e3c8ba6f06 # v1.8.12
 
   release:
     permissions:
@@ -78,7 +98,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
       - name: Tag Version
         id: set_tag
         run: |
@@ -86,7 +106,7 @@ jobs:
           echo "::set-output name=tag_name::${VER}"
       - name: Create Release
         id: create_release
-        uses: actions/create-release@latest
+        uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

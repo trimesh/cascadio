@@ -1,117 +1,52 @@
 #pragma once
 
-#include "filehandle.hpp"
-#include "iges.hpp"
-#include "materials.hpp"
-#include "primitives.hpp"
-#include "step.hpp"
+#include "inject.hpp"
+#include "load.hpp"
+#include "sandbox.hpp"
 
-#include <Message_ProgressRange.hxx>
-#include <NCollection_IndexedDataMap.hxx>
-#include <TCollection_AsciiString.hxx>
-#include <TDocStd_Document.hxx>
-#include <XCAFApp_Application.hxx>
-#include <XCAFDoc_DocumentTool.hxx>
-#include <cstdint>
-#include <fstream>
-#include <map>
-#include <sstream>
-#include <string>
-#include <cstddef>
-
-// Meshing
-#include <BRepMesh_IncrementalMesh.hxx>
-#include <RWMesh_CoordinateSystem.hxx>
-// Bounding box for unit detection
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
-// GLTF Write methods
-#include <RWGltf_CafWriter.hxx>
-// OBJ Write methods
-#include <RWObj_CafWriter.hxx>
+#include <Message_ProgressRange.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <OSD_FileSystem.hxx>
+#include <RWMesh_CoordinateSystem.hxx>
+#include <RWMesh_NameFormat.hxx>
+#include <TCollection_AsciiString.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <gp.hxx>
+#include <gp_Trsf.hxx>
 
-// ============================================================================
-// File Type Enum
-// ============================================================================
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <memory>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-enum class FileType { UNSPECIFIED = 0, STEP = 1, IGES = 2 };
+// the numbers in request.hpp are passed straight to OpenCASCADE
+static_assert(static_cast<int>(NodeNameFormat::PRODUCT) ==
+                  RWMesh_NameFormat_Product &&
+              static_cast<int>(NodeNameFormat::INSTANCE) ==
+                  RWMesh_NameFormat_Instance &&
+              static_cast<int>(NodeNameFormat::INSTANCE_OR_PRODUCT) ==
+                  RWMesh_NameFormat_InstanceOrProduct &&
+              static_cast<int>(NodeNameFormat::PRODUCT_OR_INSTANCE) ==
+                  RWMesh_NameFormat_ProductOrInstance &&
+              static_cast<int>(NodeNameFormat::PRODUCT_AND_INSTANCE) ==
+                  RWMesh_NameFormat_ProductAndInstance,
+              "NodeNameFormat must match RWMesh_NameFormat");
 
-// ============================================================================
-// Generic Loading (dispatches to STEP or IGES)
-// ============================================================================
-
-/// Generic load result structure
-struct LoadResult {
-  Handle(TDocStd_Document) doc;
-  std::vector<TopoDS_Shape> shapes;
-  bool success;
-
-  LoadResult() : success(false) {}
-};
-
-/// Load a BREP file (STEP or IGES) from disk
-static LoadResult loadFile(const char *input_path, FileType file_type,
-                           double tol_linear, double tol_angle,
-                           bool tol_relative, bool use_parallel,
-                           bool use_colors = true) {
-  LoadResult result;
-
-  if (file_type == FileType::STEP) {
-    StepLoadResult stepResult =
-        loadStepFile(input_path, tol_linear, tol_angle, tol_relative,
-                     use_parallel, use_colors);
-    result.doc = stepResult.doc;
-    result.shapes = stepResult.shapes;
-    result.success = stepResult.success;
-  } else if (file_type == FileType::IGES) {
-    IgesLoadResult igesResult =
-        loadIgesFile(input_path, tol_linear, tol_angle, tol_relative,
-                     use_parallel, use_colors);
-    result.doc = igesResult.doc;
-    result.shapes = igesResult.shapes;
-    result.success = igesResult.success;
-  } else {
-    std::cerr << "Error: Unsupported file type" << std::endl;
-  }
-
-  return result;
-}
-
-/// Load a BREP file (STEP or IGES) from memory
-static LoadResult loadBytes(const char *data, size_t data_len,
-                            FileType file_type,
-                            double tol_linear, double tol_angle,
-                            bool tol_relative, bool use_parallel,
-                            bool use_colors = true) {
-  LoadResult result;
-
-  if (file_type == FileType::STEP) {
-    StepLoadResult stepResult = loadStepBytes(
-        data, data_len, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
-    result.doc = stepResult.doc;
-    result.shapes = stepResult.shapes;
-    result.success = stepResult.success;
-  } else if (file_type == FileType::IGES) {
-    IgesLoadResult igesResult = loadIgesBytes(
-        data, data_len, tol_linear, tol_angle, tol_relative, use_parallel, use_colors);
-    result.doc = igesResult.doc;
-    result.shapes = igesResult.shapes;
-    result.success = igesResult.success;
-  } else {
-    std::cerr << "Error: Unsupported file type" << std::endl;
-  }
-
-  return result;
-}
-
-// ============================================================================
-// GLB Export
-// ============================================================================
+/// Metadata the OCCT writers accept for the output file; we add none.
+using FileInfo =
+    NCollection_IndexedDataMap<TCollection_AsciiString, TCollection_AsciiString>;
 
 /// Detect length unit from document or shapes
 /// Returns scale factor to convert to meters (e.g., 0.001 for millimeters)
-static double detectLengthUnit(Handle(TDocStd_Document) doc,
-                                      const std::vector<TopoDS_Shape> &shapes) {
+static double detectLengthUnit(const Handle(TDocStd_Document) & doc,
+                               const std::vector<TopoDS_Shape> &shapes) {
   double lengthUnit = 1.0;
 
   // Try to get length unit from document first
@@ -147,321 +82,138 @@ static double detectLengthUnit(Handle(TDocStd_Document) doc,
   return lengthUnit;
 }
 
-/// Export document to GLB file with callbacks for face data, JSON, and binary
-/// appending
-static bool exportToGlbFile(
-    Handle(TDocStd_Document) doc, const char *output_path,
-    bool merge_primitives, bool use_parallel,
-    std::vector<FaceTriangleData> *faceData = nullptr,
-    RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
-    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
-  RWGltf_CafWriter cafWriter(output_path, true);
-  cafWriter.SetMergeFaces(merge_primitives);
-  cafWriter.SetParallel(use_parallel);
-  cafWriter.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
-
-  // Set callback to collect face data if requested
-  if (faceData != nullptr) {
-    faceData->clear();
-    cafWriter.SetFaceDataCallback(
-        [faceData](int meshIndex, int faceIndex, int triStart, int triCount,
-                   const TopoDS_Face &face) {
-          faceData->push_back({meshIndex, faceIndex, triStart, triCount, face});
-        });
+/// Where OpenCASCADE's readers and writers find files: in memory, never on
+/// the disk. Its writers only take file names, and the worker may not touch
+/// the filesystem, so this claims every name OCCT opens through
+/// OSD_FileSystem. A name nothing has written is not found.
+class MemoryFiles : public OSD_FileSystem {
+public:
+  bool IsSupportedPath(const TCollection_AsciiString &) const override {
+    return true;
+  }
+  bool IsOpenIStream(const std::shared_ptr<std::istream> &stream) const override {
+    return stream != nullptr;
+  }
+  bool IsOpenOStream(const std::shared_ptr<std::ostream> &stream) const override {
+    return stream != nullptr;
   }
 
-  // Set JSON post-process callback if provided
-  if (jsonCallback) {
-    cafWriter.SetJsonPostProcessCallback(jsonCallback);
+  std::shared_ptr<std::streambuf>
+  OpenStreamBuffer(const TCollection_AsciiString &url,
+                   const std::ios_base::openmode mode, const int64_t offset,
+                   int64_t *size) override {
+    const std::string name = url.ToCString();
+    if ((mode & std::ios_base::out) != 0) {
+      // writing always starts a new, empty file
+      return files_[name] = std::make_shared<std::stringbuf>(
+                 std::ios_base::in | std::ios_base::out |
+                 std::ios_base::binary);
+    }
+    const auto found = files_.find(name);
+    if (found == files_.end()) {
+      return nullptr;
+    }
+    std::stringbuf &file = *found->second;
+    if (size != nullptr) {
+      *size = file.pubseekoff(0, std::ios_base::end, std::ios_base::in);
+    }
+    file.pubseekpos(offset, std::ios_base::in);
+    return found->second;
   }
 
-  // Set binary append callback if provided
-  if (binaryCallback) {
-    cafWriter.SetBinaryAppendCallback(binaryCallback);
+  /// Everything written to `name`, which is then forgotten.
+  std::string take(const std::string &name) {
+    const auto found = files_.find(name);
+    if (found == files_.end()) {
+      return {};
+    }
+    std::string content = found->second->str();
+    files_.erase(found);
+    return content;
   }
 
-  Message_ProgressRange progress;
-  NCollection_IndexedDataMap<TCollection_AsciiString, TCollection_AsciiString>
-      fileInfo;
-  return cafWriter.Perform(doc, fileInfo, progress);
+private:
+  std::map<std::string, std::shared_ptr<std::stringbuf>> files_;
+};
+
+/// The one MemoryFiles, put in front of OpenCASCADE's own file system on
+/// first use. Call it once before any thread starts: OCCT's list of file
+/// systems is not safe to change while others read it.
+static MemoryFiles &memoryFiles() {
+  static const Handle(MemoryFiles) files = [] {
+    Handle(MemoryFiles) created = new MemoryFiles();
+    OSD_FileSystem::AddDefaultProtocol(created, true);
+    return created;
+  }();
+  return *files;
 }
 
-/// Export document to GLB in memory with callbacks
-static std::vector<char> exportToGlbBytes(
-    Handle(TDocStd_Document) doc, bool merge_primitives, bool use_parallel,
-    std::vector<FaceTriangleData> *faceData = nullptr,
-    RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr,
-    RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr) {
-  // OCCT's RWGltf_CafWriter requires a file path. With our memfd patch,
-  // both the output and internal .bin.tmp use memfd on Linux - zero filesystem
-  // writes. Falls back to temp files on other platforms.
-  FileHandle handle(".glb");
-  if (!handle.valid()) {
-    std::cerr << "Error: Failed to create file handle for GLB export"
-              << std::endl;
-    return {};
+/// Write a meshed document as glTF into memory, optionally recording which
+/// triangles came from which BREP face. It is written as .gltf and its
+/// buffer, not as .glb: OCCT's GLB writer deletes its temporary buffer with
+/// a filesystem call. Glb packs the two into a GLB afterwards.
+static Glb writeGlb(const Handle(TDocStd_Document) & doc,
+                    const Request &request, Recorded *recorded) {
+  GltfWriter writer("cascadio.gltf", recorded);
+  writer.SetMergeFaces(request.merge_primitives);
+  writer.SetParallel(request.use_parallel);
+  writer.SetTransformationFormat(RWGltf_WriterTrsfFormat_Mat4);
+  writer.SetNodeNameFormat(
+      static_cast<RWMesh_NameFormat>(request.node_name_format));
+  if (request.y_up) {
+    // with both ends declared the writer rotates Z-up into glTF's Y-up;
+    // by default the input frame is undefined and nothing is rotated
+    writer.ChangeCoordinateSystemConverter().SetInputCoordinateSystem(
+        RWMesh_CoordinateSystem_Zup);
   }
-
-  // Export to the handle's path
-  if (!exportToGlbFile(doc, handle.path(), merge_primitives, use_parallel,
-                       faceData, jsonCallback, binaryCallback)) {
-    return {};
+  Span span("write glb");
+  MemoryFiles &files = memoryFiles();
+  const bool written = writer.Perform(doc, FileInfo(), Message_ProgressRange());
+  Glb glb;
+  glb.json = files.take("cascadio.gltf");
+  glb.bin = files.take("cascadio.bin");
+  if (!written || glb.json.empty()) {
+    throw std::runtime_error("OpenCASCADE could not write the GLB");
   }
-
-  // Read result back
-  handle.prepare_for_read();
-  return handle.read_all();
+  return glb;
 }
 
-// ============================================================================
-// Public API
-// ============================================================================
-
-/// Transcode BREP bytes (STEP or IGES) to GLB bytes
-/// This is the main API - one-shot conversion with no disk round-trips
-std::vector<char> to_glb_bytes(const char *data, size_t data_len,
-                               FileType file_type,
-                               double tol_linear,
-                               double tol_angle, bool tol_relative,
-                               bool merge_primitives, bool use_parallel,
-                               bool include_brep = false,
-                               std::set<std::string> brep_types = {},
-                               bool include_materials = false) {
-
-  LoadResult loaded = loadBytes(data, data_len, file_type, tol_linear, tol_angle,
-                                tol_relative, use_parallel);
-  if (!loaded.success) {
-    return {};
-  }
-
-  // Get length unit (scale factor to meters for glTF output)
-  double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
-
-  // Extract materials only if needed
-  rapidjson::Document matDoc;
-  matDoc.SetArray();
-  rapidjson::Value *materialsPtr = nullptr;
-  if (include_materials) {
-    rapidjson::Value materials =
-        extractMaterials(loaded.doc, matDoc.GetAllocator());
-    matDoc.Swap(materials);
-    materialsPtr = &matDoc;
-  }
-
-  // Collect face data via callback if include_brep is requested
-  std::vector<FaceTriangleData> faceData;
-  std::vector<FaceTriangleData> *faceDataPtr =
-      include_brep ? &faceData : nullptr;
-
-  // Create faceIndices binary data if needed (shared between callbacks).
-  // Build per-shape faceIndices arrays lazily in callback.
-  // Layout: [shape0 indices...][shape1 indices...][...]
-  // Each index maps triangle N to the face that generated it.
-  std::vector<uint32_t> faceIndices;
-  auto buildFaceIndices = [&faceData, &faceIndices]() {
-    // Early exit if already built or no data
-    if (!faceIndices.empty() || faceData.empty()) {
-      return;
-    }
-
-    // Group face data by mesh index
-    std::map<int, std::vector<FaceTriangleData>> facesByMesh;
-    for (const auto &fd : faceData) {
-      facesByMesh[fd.meshIndex].push_back(fd);
-    }
-
-    // Calculate per-mesh triangle counts and build binary data
-    // Meshes are written in order of their indices
-    for (const auto &[meshIdx, faces] : facesByMesh) {
-      // Find max triangle index for this mesh
-      int maxTriangle = 0;
-      for (const auto &fd : faces) {
-        maxTriangle = std::max(maxTriangle, fd.triStart + fd.triCount);
-      }
-
-      if (maxTriangle <= 0) {
-        continue;
-      }
-
-      // Build this mesh's faceIndices
-      size_t baseOffset = faceIndices.size();
-      faceIndices.resize(baseOffset + maxTriangle, UINT32_MAX);
-
-      for (const auto &fd : faces) {
-        for (int t = 0; t < fd.triCount; ++t) {
-          int idx = fd.triStart + t;
-          if (idx >= 0 && idx < maxTriangle) {
-            faceIndices[baseOffset + idx] = static_cast<uint32_t>(fd.faceIndex);
-          }
-        }
-      }
-    }
-  };
-
-  // Setup callbacks for direct injection (avoids GLB roundtrip)
-  RWGltf_CafWriter::JsonPostProcessCallback jsonCallback = nullptr;
-  RWGltf_CafWriter::BinaryAppendCallback binaryCallback = nullptr;
-
-  if (include_brep || include_materials) {
-    if (include_brep && faceDataPtr) {
-      // BREP extension: inject face data and optional materials
-      jsonCallback = [&](const std::string &jsonStr) -> std::string {
-        // Early exit if no face data collected
-        if (faceData.empty()) {
-          // Still inject materials if requested
-          if (materialsPtr) {
-            return injectBrepExtensionIntoJson(jsonStr, {}, 0, 0, brep_types,
-                                               materialsPtr, lengthUnit);
-          }
-          return jsonStr;
-        }
-
-        buildFaceIndices(); // Build face->triangle mapping only if we have data
-
-        // Parse JSON to get existing binary chunk size
-        rapidjson::Document doc;
-        doc.Parse(jsonStr.c_str(), jsonStr.size());
-        if (doc.HasParseError()) {
-          std::cerr << "Warning: Failed to parse JSON in callback" << std::endl;
-          return jsonStr;
-        }
-
-        uint32_t existingBinLength = 0;
-        if (doc.HasMember("buffers") && doc["buffers"].IsArray() &&
-            doc["buffers"].Size() > 0 &&
-            doc["buffers"][0].HasMember("byteLength")) {
-          existingBinLength = doc["buffers"][0]["byteLength"].GetUint();
-        }
-
-        uint32_t faceIndicesBytes =
-            static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
-        return injectBrepExtensionIntoJson(jsonStr, faceData, existingBinLength,
-                                           faceIndicesBytes, brep_types,
-                                           materialsPtr, lengthUnit);
-      };
-
-      // Binary callback: append faceIndices array to GLB binary chunk
-      binaryCallback = [&](std::ostream &stream,
-                           uint32_t currentBinLength) -> uint32_t {
-        uint32_t bytesToWrite =
-            static_cast<uint32_t>(faceIndices.size() * sizeof(uint32_t));
-        stream.write(reinterpret_cast<const char *>(faceIndices.data()),
-                     bytesToWrite);
-
-        // Verify write succeeded
-        if (!stream.good()) {
-          std::cerr << "Error: Failed to write faceIndices to binary chunk"
-                    << std::endl;
-          return 0;
-        }
-
-        return bytesToWrite;
-      };
-    } else if (include_materials && materialsPtr) {
-      // Materials-only: inject into mesh.extras.cascadio without BREP extension
-      jsonCallback = [&](const std::string &jsonStr) -> std::string {
-        return injectBrepExtensionIntoJson(jsonStr, {}, 0, 0, {}, materialsPtr,
-                                           lengthUnit);
-      };
+/// Convert STEP or IGES bytes to a GLB. The bytes are untrusted, so this
+/// needs the lock-down in force.
+static Glb toGlb(const Locked &, Request request, const char *data,
+                 size_t size) {
+  for (const std::string &type : request.brep_types) {
+    if (std::find(std::begin(brep::TYPES), std::end(brep::TYPES), type) ==
+        std::end(brep::TYPES)) {
+      throw std::invalid_argument("unknown brep_types entry: " + type);
     }
   }
-
-  std::vector<char> glbData =
-      exportToGlbBytes(loaded.doc, merge_primitives, use_parallel, faceDataPtr,
-                       jsonCallback, binaryCallback);
-  closeDocument(loaded.doc);
-
-  if (glbData.empty()) {
-    std::cerr << "Error: Failed to export GLB" << std::endl;
-    return {};
+  // face and substance data is attached per part,
+  // which needs one merged primitive per part
+  if (request.include_brep) {
+    request.merge_primitives = true;
   }
 
-  return glbData;
-}
-
-// ============================================================================
-// Legacy File-based API (prefer to_glb_bytes for efficiency)
-// ============================================================================
-// NOTE: These file-based routes are LEGACY. All new code should use
-// to_glb_bytes(bytes) -> bytes for optimal performance (no disk I/O).
-// File-based routes exist only for backward compatibility.
-// ============================================================================
-
-/// Transcode BREP file (STEP or IGES) to GLB file
-/// LEGACY: Use to_glb_bytes() instead for better performance
-static int to_glb(const char *input_path, const char *output_path, FileType file_type,
-                  double tol_linear, double tol_angle,
-                  bool tol_relative, bool merge_primitives, bool use_parallel,
-                  bool include_brep = false, std::set<std::string> brep_types = {},
-                  bool include_materials = false) {
-
-  // Read input file
-  std::ifstream inFile(input_path, std::ios::binary | std::ios::ate);
-  if (!inFile) {
-    std::cerr << "Error: Cannot open input file\n";
-    return 1;
+  Loaded loaded;
+  load(loaded, data, size, request);
+  Recorded recorded;
+  Glb glb =
+      writeGlb(loaded.doc, request, request.include_brep ? &recorded : nullptr);
+  if (request.include_brep) {
+    Span span("face data");
+    // scale factor from the file's unit to meters, the unit of glTF
+    const double lengthUnit = detectLengthUnit(loaded.doc, loaded.shapes);
+    // the face metadata must turn with the mesh: -90 degrees about X
+    gp_Trsf frame;
+    if (request.y_up) {
+      frame.SetRotation(gp::OX(), -M_PI / 2);
+    }
+    if (!loaded.densityScale) {
+      warn("the file gives densities in mass units with different prefixes, "
+           "so no density is reported");
+    }
+    injectIntoGlb(glb, recorded, request.brep_types, lengthUnit,
+                  loaded.densityScale, frame);
   }
-
-  // Determine file size
-  std::streamsize fileSize = inFile.tellg();
-  inFile.seekg(0, std::ios::beg);
-
-  std::vector<char> inputData(fileSize);
-  if (!inFile.read(inputData.data(), fileSize)) {
-    std::cerr << "Error: Failed to read file\n";
-    return 1;
-  }
-  inFile.close();
-
-  // Use bytes-based API (no disk round-trips)
-  std::vector<char> glbData =
-      to_glb_bytes(inputData.data(), inputData.size(), file_type, tol_linear,
-                   tol_angle, tol_relative,
-                   merge_primitives, use_parallel, include_brep, brep_types,
-                   include_materials);
-
-  if (glbData.empty()) {
-    return 1;
-  }
-
-  // Write output file
-  std::ofstream outFile(output_path, std::ios::binary);
-  if (!outFile) {
-    std::cerr << "Error: Cannot open output file" << std::endl;
-    return 1;
-  }
-  outFile.write(glbData.data(), glbData.size());
-  outFile.close();
-
-  return 0;
-}
-
-/// Transcode STEP file to OBJ file
-/// LEGACY: File-based conversion for backward compatibility only
-static int step_to_obj(const std::string &input_path, const std::string &output_path,
-                       double tol_linear, double tol_angle,
-                       bool tol_relative, bool use_parallel, bool use_colors) {
-
-    StepLoadResult loaded = loadStepFile(input_path.c_str(),
-                                         tol_linear, tol_angle,
-                                         tol_relative, use_parallel, use_colors);
-  if (!loaded.success) {
-    return 1;
-  }
-
-  RWObj_CafWriter cafWriter(output_path.c_str());
-
-  Message_ProgressRange progress;
-  NCollection_IndexedDataMap<TCollection_AsciiString, TCollection_AsciiString>
-      fileInfo;
-  if (!cafWriter.Perform(loaded.doc, fileInfo, progress)) {
-    std::cerr << "Error: Failed to write OBJ to file" << std::endl;
-    loaded.shapes.clear();
-    closeDocument(loaded.doc);
-    return 1;
-  }
-
-  loaded.shapes.clear();
-  closeDocument(loaded.doc);
-  return 0;
+  return glb;
 }

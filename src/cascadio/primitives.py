@@ -1,212 +1,274 @@
 """
-Dataclasses for BREP analytical surface primitives.
+The surfaces of the TM_brep_faces extension as dataclasses.
 
-These represent the analytical surfaces extracted from STEP files
-when using `include_brep=True` in `step_to_glb()`.
+Generated from extensions/TM_brep_faces/schema/mesh.primitive.TM_brep_faces.schema.json
+by scripts/gen_schema.py. Do not edit: change the schema and run `make schema`.
+
+All positions and lengths are in meters and all directions are unit vectors, in
+the same coordinate frame as the primitive's POSITION accessor (before any node
+transform). All angles are in radians and turn counter-clockwise when seen from
+the tip of the axis they turn about (the right-hand rule).
 """
 
-from dataclasses import dataclass
-from typing import List, Tuple, Union, Optional
+from dataclasses import dataclass, fields
+from typing import Literal
+
+# a position [x, y, z] in meters
+Point = tuple[float, float, float]
+# a direction [x, y, z] of length 1
+Direction = tuple[float, float, float]
+# [min, max] along one of a surface's two directions
+Range = tuple[float, float]
+# the surface types `brep_types` accepts
+BrepType = Literal["plane", "cylinder", "cone", "sphere", "torus"]
 
 
 @dataclass(frozen=True)
 class Plane:
-    """A planar surface."""
+    """
+    A face on a plane.
 
-    # Index of this face in the BREP shape
+    Attributes
+    ----------
+    face_index
+        Position of this face in the `faces` array, which is the value
+        `faceIndices` holds for its triangles
+    extent_x
+        How far the face reaches along x_dir from origin, in meters
+    extent_y
+        How far the face reaches along the plane's Y axis from origin, in
+        meters
+    origin
+        A point on the plane, from which the extents are measured
+    normal
+        Unit direction perpendicular to the plane
+    x_dir
+        Unit direction in the plane: the plane's own X axis. Its Y axis is
+        normal cross x_dir.
+    """
+
     face_index: int
-    # Extent in local X direction (meters)
-    extent_x: Tuple[float, float]
-    # Extent in local Y direction (meters)
-    extent_y: Tuple[float, float]
-    # A point on the plane
-    origin: Tuple[float, float, float]
-    # Unit normal vector
-    normal: Tuple[float, float, float]
-    # Unit X direction in the plane
-    x_dir: Tuple[float, float, float]
+    extent_x: Range
+    extent_y: Range
+    origin: Point
+    normal: Direction
+    x_dir: Direction
 
 
 @dataclass(frozen=True)
 class Cylinder:
-    """A cylindrical surface."""
+    """
+    A face on a cylinder.
 
-    # Index of this face in the BREP shape
+    Attributes
+    ----------
+    face_index
+        Position of this face in the `faces` array, which is the value
+        `faceIndices` holds for its triangles
+    extent_angle
+        The angles the face covers around the axis, measured from x_dir, in
+        radians. A full cylinder covers 2 pi.
+    extent_height
+        How far the face reaches along the axis from origin, in meters
+    origin
+        A point on the axis, from which heights are measured
+    axis
+        Unit direction of the axis
+    radius
+        Distance from the axis to the surface, in meters
+    x_dir
+        Unit direction perpendicular to the axis from which angles are
+        measured.
+    """
+
     face_index: int
-    # Angular extent around axis (radians)
-    extent_angle: Tuple[float, float]
-    # Height extent along axis (meters)
-    extent_height: Tuple[float, float]
-    # Point on axis
-    origin: Tuple[float, float, float]
-    # Unit axis direction
-    axis: Tuple[float, float, float]
-    # Cylinder radius in meters
+    extent_angle: Range
+    extent_height: Range
+    origin: Point
+    axis: Direction
     radius: float
+    x_dir: Direction | None = None
 
 
 @dataclass(frozen=True)
 class Cone:
-    """A conical surface."""
+    """
+    A face on a cone.
 
-    # Index of this face in the BREP shape
+    Attributes
+    ----------
+    face_index
+        Position of this face in the `faces` array, which is the value
+        `faceIndices` holds for its triangles
+    extent_angle
+        The angles the face covers around the axis, measured from x_dir, in
+        radians
+    extent_distance
+        How far the face reaches along the cone's slanted side, measured from
+        the reference circle in the direction of the axis, in meters
+    apex
+        The point where the cone comes to a tip. The face itself usually does
+        not reach it.
+    axis
+        Unit direction of the axis
+    semi_angle
+        Angle between the axis and the cone's side, in radians. Positive if the
+        cone widens along the axis direction and negative if it narrows.
+    ref_radius
+        Radius of the cone's reference circle, in meters. Its center is on the
+        axis at apex + axis * ref_radius / tan(semi_angle).
+    x_dir
+        Unit direction perpendicular to the axis from which angles are
+        measured.
+    """
+
     face_index: int
-    # Angular extent around axis (radians)
-    extent_angle: Tuple[float, float]
-    # Distance extent from apex (meters)
-    extent_distance: Tuple[float, float]
-    # Apex point of the cone
-    apex: Tuple[float, float, float]
-    # Unit axis direction from apex
-    axis: Tuple[float, float, float]
-    # Semi-angle at apex in radians
+    extent_angle: Range
+    extent_distance: Range
+    apex: Point
+    axis: Direction
     semi_angle: float
-    # Reference radius at the origin plane in meters
     ref_radius: float
+    x_dir: Direction | None = None
 
 
 @dataclass(frozen=True)
 class Sphere:
-    """A spherical surface."""
+    """
+    A face on a sphere.
 
-    # Index of this face in the BREP shape
+    Attributes
+    ----------
+    face_index
+        Position of this face in the `faces` array, which is the value
+        `faceIndices` holds for its triangles
+    extent_longitude
+        The angles the face covers around the axis, measured from x_dir, in
+        radians
+    extent_latitude
+        The angles the face covers above the equator, toward the axis, in
+        radians: from -pi/2 at the south pole to pi/2 at the north pole
+    center
+        The center of the sphere
+    radius
+        Distance from the center to the surface, in meters
+    axis
+        Unit direction from the center to the sphere's north pole.
+    x_dir
+        Unit direction perpendicular to the axis from which longitude is
+        measured.
+    """
+
     face_index: int
-    # Longitude extent (radians)
-    extent_longitude: Tuple[float, float]
-    # Latitude extent (radians)
-    extent_latitude: Tuple[float, float]
-    # Center point
-    center: Tuple[float, float, float]
-    # Sphere radius in meters
+    extent_longitude: Range
+    extent_latitude: Range
+    center: Point
     radius: float
+    axis: Direction | None = None
+    x_dir: Direction | None = None
 
 
 @dataclass(frozen=True)
 class Torus:
-    """A toroidal surface."""
+    """
+    A face on a torus.
 
-    # Index of this face in the BREP shape
+    Attributes
+    ----------
+    face_index
+        Position of this face in the `faces` array, which is the value
+        `faceIndices` holds for its triangles
+    extent_major_angle
+        The angles the face covers around the axis, measured from x_dir, in
+        radians
+    extent_minor_angle
+        The angles the face covers around the tube, in radians: 0 is the outer
+        edge of the torus and the angle grows toward the axis direction
+    center
+        The center of the torus, on its axis
+    axis
+        Unit direction of the axis the tube circles around
+    major_radius
+        Distance from the axis to the middle of the tube, in meters
+    minor_radius
+        Radius of the tube, in meters
+    x_dir
+        Unit direction perpendicular to the axis from which angles are
+        measured.
+    """
+
     face_index: int
-    # Angle extent around main axis (radians)
-    extent_major_angle: Tuple[float, float]
-    # Angle extent around tube (radians)
-    extent_minor_angle: Tuple[float, float]
-    # Center point
-    center: Tuple[float, float, float]
-    # Unit axis direction (normal to torus plane)
-    axis: Tuple[float, float, float]
-    # Distance from center to tube center in meters
+    extent_major_angle: Range
+    extent_minor_angle: Range
+    center: Point
+    axis: Direction
     major_radius: float
-    # Tube radius in meters
     minor_radius: float
+    x_dir: Direction | None = None
 
 
-# Union type for any primitive
-BrepPrimitive = Union[Plane, Cylinder, Cone, Sphere, Torus]
+BrepPrimitive = Plane | Cylinder | Cone | Sphere | Torus
+
+# the `type` of a face in the extension -> its dataclass
+PRIMITIVES = {
+    "plane": Plane,
+    "cylinder": Cylinder,
+    "cone": Cone,
+    "sphere": Sphere,
+    "torus": Torus,
+}
 
 __all__ = [
-    "Plane",
-    "Cylinder",
+    "PRIMITIVES",
+    "BrepPrimitive",
+    "BrepType",
     "Cone",
+    "Cylinder",
+    "Plane",
     "Sphere",
     "Torus",
-    "BrepPrimitive",
-    "parse_primitive",
     "parse_brep_faces",
+    "parse_primitive",
 ]
 
 
-def parse_primitive(data: dict, face_index: int = 0) -> Optional[BrepPrimitive]:
+def parse_primitive(data: dict | None, face_index: int = 0) -> BrepPrimitive | None:
     """
-    Parse a primitive dict from GLTF extension into a typed dataclass.
+    Parse one face of the TM_brep_faces extension into its dataclass.
 
     Parameters
     ----------
-    data : dict or None
-        A single primitive dict from the TM_brep_faces extension,
-        or None if the face was filtered out
-    face_index : int
-        The index of this face in the faces array (used as fallback
-        if face_index is not in the data)
+    data
+      A face dict from the extension, or None for a face that is not an
+      analytic surface or was filtered out.
+    face_index
+      Used when the dict carries no `face_index` of its own.
 
     Returns
     -------
-    BrepPrimitive or None
-        The parsed primitive, or None if type is not recognized or data is None.
+    primitive
+      The parsed primitive, or None if `data` is None or of an unknown type.
     """
-    if data is None:
+    kind = PRIMITIVES.get((data or {}).get("type"))
+    if kind is None:
         return None
-
-    ptype = data.get("type")
-    if ptype is None:
-        return None
-
-    # Use face_index from data if present, otherwise use parameter
-    idx = data.get("face_index", face_index)
-
-    if ptype == "plane":
-        return Plane(
-            face_index=idx,
-            extent_x=tuple(data["extent_x"]),
-            extent_y=tuple(data["extent_y"]),
-            origin=tuple(data["origin"]),
-            normal=tuple(data["normal"]),
-            x_dir=tuple(data["x_dir"]),
-        )
-    elif ptype == "cylinder":
-        return Cylinder(
-            face_index=idx,
-            extent_angle=tuple(data["extent_angle"]),
-            extent_height=tuple(data["extent_height"]),
-            origin=tuple(data["origin"]),
-            axis=tuple(data["axis"]),
-            radius=data["radius"],
-        )
-    elif ptype == "cone":
-        return Cone(
-            face_index=idx,
-            extent_angle=tuple(data["extent_angle"]),
-            extent_distance=tuple(data["extent_distance"]),
-            apex=tuple(data["apex"]),
-            axis=tuple(data["axis"]),
-            semi_angle=data["semi_angle"],
-            ref_radius=data["ref_radius"],
-        )
-    elif ptype == "sphere":
-        return Sphere(
-            face_index=idx,
-            extent_longitude=tuple(data["extent_longitude"]),
-            extent_latitude=tuple(data["extent_latitude"]),
-            center=tuple(data["center"]),
-            radius=data["radius"],
-        )
-    elif ptype == "torus":
-        return Torus(
-            face_index=idx,
-            extent_major_angle=tuple(data["extent_major_angle"]),
-            extent_minor_angle=tuple(data["extent_minor_angle"]),
-            center=tuple(data["center"]),
-            axis=tuple(data["axis"]),
-            major_radius=data["major_radius"],
-            minor_radius=data["minor_radius"],
-        )
-
-    return None
+    values = {"face_index": face_index, **data}
+    return kind(
+        **{
+            # JSON arrays become tuples so the frozen dataclass is hashable
+            f.name: tuple(v) if isinstance(v := values[f.name], list) else v
+            for f in fields(kind)
+            # fields added in later versions are absent from older files
+            if f.name in values
+        }
+    )
 
 
-def parse_brep_faces(brep_faces: List[dict]) -> List[Optional[BrepPrimitive]]:
+def parse_brep_faces(brep_faces: list[dict | None]) -> list[BrepPrimitive | None]:
     """
-    Parse all brep_faces from mesh metadata into typed dataclasses.
+    Parse the `faces` list of the TM_brep_faces extension.
 
-    Parameters
-    ----------
-    brep_faces : list of dict
-        The faces list from the TM_brep_faces extension
-
-    Returns
-    -------
-    list of BrepPrimitive or None
-        List of parsed primitives, with None for non-analytical faces.
-        Maintains the same indexing as the input list.
+    Returns one entry per face, in the same order, with None for faces
+    that are not analytic surfaces.
     """
     return [parse_primitive(face, face_index=i) for i, face in enumerate(brep_faces)]
